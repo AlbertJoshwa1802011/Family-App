@@ -1,10 +1,32 @@
+import { UserPlus, Users } from "lucide-react";
+import { AppBar } from "../components/ui/AppBar";
+import { Page } from "../components/ui/Page";
+import { EmptyState } from "../components/ui/EmptyState";
+import { Button } from "../components/ui/Button";
+
 export function FamilyPage() {
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-white">Family</h1>
-      <div className="rounded-xl border border-dashed border-white/10 p-6 text-sm text-slate-400">
-        Manage your family, members, roles, and email invites here (Phase 1).
-      </div>
-    </div>
+    <>
+      <AppBar
+        title="Family"
+        trailing={
+          <Button size="md" leadingIcon={<UserPlus className="size-4" />}>
+            Invite
+          </Button>
+        }
+      />
+      <Page>
+        <EmptyState
+          icon={Users}
+          title="Build your family circle"
+          description="Invite family members so everyone can access shared documents and stay on top of renewals together."
+          action={
+            <Button leadingIcon={<UserPlus className="size-4" />}>
+              Invite a member
+            </Button>
+          }
+        />
+      </Page>
+    </>
   );
 }

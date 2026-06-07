@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 /** Listens for the PWA "new version available" event and offers a reload. */
 export function UpdateToast() {
@@ -16,11 +17,16 @@ export function UpdateToast() {
   if (!update) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-4 mx-auto flex w-fit items-center gap-3 rounded-xl border border-white/10 bg-ink-800 px-4 py-3 shadow-lg">
-      <span className="text-sm text-slate-200">A new version is available.</span>
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-x-0 bottom-24 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-sm items-center gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 shadow-pop"
+    >
+      <RefreshCw className="size-5 shrink-0 text-vault-300" aria-hidden="true" />
+      <span className="flex-1 text-sm text-fg">A new version is available.</span>
       <button
         onClick={() => update()}
-        className="rounded-lg bg-vault-600 px-3 py-1 text-sm font-medium text-white hover:bg-vault-500"
+        className="min-h-9 rounded-lg bg-vault-600 px-3 text-sm font-medium text-white transition-transform active:scale-95"
       >
         Reload
       </button>

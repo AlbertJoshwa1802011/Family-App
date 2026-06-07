@@ -1,12 +1,44 @@
 @import "tailwindcss";
 
 @theme {
+  /* Brand */
   --color-vault-50: #f0fdfa;
+  --color-vault-300: #5eead4;
+  --color-vault-400: #2dd4bf;
   --color-vault-500: #14b8a6;
   --color-vault-600: #0d9488;
   --color-vault-700: #0f766e;
+
+  /* Surfaces (dark) */
+  --color-ink-950: #070b14;
   --color-ink-900: #0b1220;
   --color-ink-800: #111a2e;
+  --color-ink-700: #1a2540;
+  --color-surface: #111a2e;
+  --color-surface-2: #16213c;
+
+  /* Text */
+  --color-fg: #e6edf6;
+  --color-fg-muted: #94a3b8;
+  --color-fg-subtle: #64748b;
+
+  /* Borders */
+  --color-line: #ffffff14;
+  --color-line-strong: #ffffff24;
+
+  /* States */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #60a5fa;
+
+  /* Radius & elevation */
+  --radius-card: 16px;
+  --shadow-card: 0 1px 2px #0006, 0 10px 30px -14px #000a;
+  --shadow-pop: 0 -8px 40px -8px #000a;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 html,
@@ -15,14 +47,74 @@ body,
   height: 100%;
 }
 
+html {
+  -webkit-tap-highlight-color: transparent;
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
-  background-color: var(--color-ink-900);
-  color: #e2e8f0;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  background-color: var(--color-ink-950);
+  color: var(--color-fg);
   font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle premium backdrop glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60% 50% at 50% -10%, #0f766e33, transparent 70%),
+    radial-gradient(40% 30% at 90% 10%, #14b8a61f, transparent 70%);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Safe-area helpers */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #ffffff14,
+    transparent
+  );
+  animation: shimmer 1.4s infinite;
 }
