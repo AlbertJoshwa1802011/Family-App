@@ -1,0 +1,16 @@
+# Copy to `.dev.vars` (gitignored) for local development, and set the real values.
+# In production, set these with `wrangler secret put <NAME>` (never commit them).
+
+# Google OAuth client (for "Sign in with Google")
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# Long-lived refresh token for the OWNER's Google Drive account (storage backend).
+# Obtained once via an offline-consent flow on the owner account (scope: drive.file).
+GOOGLE_OWNER_REFRESH_TOKEN=""
+
+# Resend API key for transactional / reminder emails.
+RESEND_API_KEY=""
+
+# Secret used to sign sessions and hash invite tokens (use a long random value).
+SESSION_SECRET=""

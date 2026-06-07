@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.wrangler/
+worker-configuration.d.ts
+*.tsbuildinfo
+
+# secrets / local env
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test / coverage
+coverage/

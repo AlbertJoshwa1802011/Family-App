@@ -1,0 +1,50 @@
+import type { ReactNode } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import { UpdateToast } from "./components/UpdateToast";
+import { useAuth } from "./context/AuthContext";
+import { Login } from "./pages/Login";
+import { Dashboard } from "./pages/Dashboard";
+import { Documents } from "./pages/Documents";
+import { DocumentDetail } from "./pages/DocumentDetail";
+import { FamilyPage } from "./pages/Family";
+import { Settings } from "./pages/Settings";
+import { NotFound } from "./pages/NotFound";
+
+function Protected({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+export default function App() {
+  return (
+    <>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <Protected>
+              <Layout />
+            </Protected>
+          }
+        >
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/documents" element={<Documents />} />
+          <Route path="/documents/:id" element={<DocumentDetail />} />
+          <Route path="/family" element={<FamilyPage />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+      <UpdateToast />
+    </>
+  );
+}
