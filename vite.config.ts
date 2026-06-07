@@ -23,19 +23,11 @@ export default defineConfig({
         // intercept API calls.
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            // Document list & metadata: show instantly from cache, refresh in background.
-            urlPattern: ({ url }: { url: URL }) =>
-              url.pathname.startsWith("/api/documents") ||
-              url.pathname.startsWith("/api/families"),
-            handler: "StaleWhileRevalidate",
-            options: {
-              cacheName: "api-metadata",
-              expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-        ],
+        // NOTE: deliberately NO runtime caching of /api/* responses. Those are
+        // auth-gated, per-family PII (document/family metadata) and persisting them
+        // in browser Cache Storage would survive logout and leak on shared devices.
+        // Privacy-safe offline metadata caching is revisited in Phase 4 with an
+        // auth-aware, on-logout-purged strategy.
       },
       manifest: {
         name: "Family Vault",

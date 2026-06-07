@@ -193,6 +193,12 @@ in the schema with explicit `ON DELETE` policy and **enabled in D1**:
 - `files.document_id`, `document_tags.*` → `ON DELETE CASCADE`.
 - `notifications.user_id`, `reminders_log.user_id`, `sessions.user_id` → `ON DELETE CASCADE`.
 
+> ⚠️ **D1 caveat:** D1 does not reliably honor a persistent `PRAGMA foreign_keys=ON` across
+> autonomously-issued statements, so the `ON DELETE` actions above are **advisory, not
+> guaranteed**. Deletes that must cascade (e.g. removing a family) will be implemented as
+> **explicit transactional multi-statement deletes in app code** (Phase 1), with a test asserting
+> the behavior — we do not rely on DB-level cascade for correctness.
+
 ## Environments
 
 - **Local:** `vite` dev + `@cloudflare/vite-plugin`, D1 `--local`, `.dev.vars` secrets.

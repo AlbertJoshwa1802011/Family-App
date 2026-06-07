@@ -11,7 +11,9 @@ import { runExpiryReminders } from "./cron";
 
 const app = new Hono<HonoEnv>();
 
-app.use("*", logger());
+// Scope middleware to /api/* — static-asset/SPA responses are served by the ASSETS
+// binding (with headers from public/_headers), not through this Worker pipeline.
+app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
 
 // --- API routes (everything else falls through to static assets) ---

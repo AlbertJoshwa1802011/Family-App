@@ -5,13 +5,18 @@ export interface ExpiryStatus {
   label: string;
 }
 
-/** Maps an ISO date (yyyy-mm-dd) to a human label + tone for expiry badges. */
+/** Maps an ISO date (yyyy-mm-dd) to a human label + tone for expiry badges.
+ * Compares date-only values at UTC midnight to avoid timezone/DST off-by-one. */
 export function expiryStatus(date?: string | null): ExpiryStatus | null {
   if (!date) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(date + "T00:00:00");
-  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  const parts = date.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  const [y, m, d] = parts;
+  const targetUtc = Date.UTC(y, m - 1, d);
+
+  const n = new Date();
+  const todayUtc = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+  const days = Math.round((targetUtc - todayUtc) / 86_400_000);
 
   if (days < 0) return { tone: "danger", label: "Expired" };
   if (days === 0) return { tone: "danger", label: "Expires today" };

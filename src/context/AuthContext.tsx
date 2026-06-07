@@ -37,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { data, isLoading } = useQuery({
     queryKey: ["me"],
     queryFn: () => api<MeResponse>("/auth/me"),
+    // Auth state isn't worth retrying — a 401 should resolve to "logged out" fast.
+    retry: false,
   });
 
   const value: AuthValue = {

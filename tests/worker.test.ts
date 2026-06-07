@@ -30,4 +30,11 @@ describe("worker API", () => {
     const res = await app.request("/api/documents", { method: "POST" });
     expect(res.status).toBe(501);
   });
+
+  it("applies baseline security headers on /api responses", async () => {
+    const res = await app.request("/api/health");
+    // hono secureHeaders defaults
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+  });
 });
