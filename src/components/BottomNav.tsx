@@ -1,11 +1,12 @@
-import { FileText, LayoutDashboard, Settings, Users } from "lucide-react";
+import { CalendarDays, FileText, LayoutDashboard, Settings, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "../lib/cn";
 
 const items: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/", label: "Home", icon: LayoutDashboard, end: true },
-  { to: "/documents", label: "Documents", icon: FileText },
+  { to: "/documents", label: "Docs", icon: FileText },
+  { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/family", label: "Family", icon: Users },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

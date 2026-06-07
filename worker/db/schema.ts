@@ -253,3 +253,190 @@ export const auditLog = sqliteTable("audit_log", {
   meta: text("meta"),
   createdAt: integer("created_at").notNull().default(now),
 });
+
+// ── Calendar / Events ────────────────────────────────────────────────────────
+
+export const events = sqliteTable(
+  "events",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    startAt: integer("start_at").notNull(), // unix timestamp (seconds)
+    endAt: integer("end_at"), // null = single-instant / all-day
+    allDay: integer("all_day", { mode: "boolean" }).notNull().default(false),
+    location: text("location"),
+    // type = what kind of event (gathering, appointment, milestone, other)
+    type: text("type", {
+      enum: ["gathering", "appointment", "milestone", "other"],
+    })
+      .notNull()
+      .default("other"),
+    // status = lifecycle (soft-delete and cancel are separate from type)
+    status: text("status", { enum: ["active", "cancelled", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_event_family_start").on(t.familyId, t.startAt),
+    index("idx_event_family_status_start").on(t.familyId, t.status, t.startAt),
+  ],
+);
+
+// Members tagged as attendees/participants for an event.
+export const eventAttendees = sqliteTable(
+  "event_attendees",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.memberId] })],
+);
+
+// Documents linked to an event (e.g. insurance card linked to a hospital visit).
+export const eventDocuments = sqliteTable(
+  "event_documents",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.documentId] })],
+);
+
+// Deduplicate event reminders (parallel to reminders_log for documents).
+export const eventRemindersLog = sqliteTable(
+  "event_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    windowDays: integer("window_days").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_event_reminder").on(
+      t.eventId,
+      t.userId,
+      t.windowDays,
+      t.channel,
+    ),
+  ],
+);
+
+// ── Tasks ────────────────────────────────────────────────────────────────────
+
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    assignedToMemberId: text("assigned_to_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    dueDate: text("due_date"), // ISO yyyy-mm-dd; null = no deadline
+    status: text("status", { enum: ["open", "done", "archived"] })
+      .notNull()
+      .default("open"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    relatedDocumentId: text("related_document_id").references(
+      () => documents.id,
+      { onDelete: "set null" },
+    ),
+    relatedEventId: text("related_event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_task_family_status").on(t.familyId, t.status),
+    index("idx_task_assignee").on(t.assignedToMemberId),
+  ],
+);
+
+// ── Emergency Contacts ───────────────────────────────────────────────────────
+
+export const contacts = sqliteTable(
+  "contacts",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    relationship: text("relationship"), // Doctor, School, Plumber, …
+    phone: text("phone"),
+    email: text("email"),
+    notes: text("notes"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_contact_family").on(t.familyId)],
+);
+
+// ── Member Health Notes ──────────────────────────────────────────────────────
+
+export const memberHealth = sqliteTable("member_health", {
+  memberId: text("member_id")
+    .primaryKey()
+    .references(() => familyMembers.id, { onDelete: "cascade" }),
+  bloodType: text("blood_type"),
+  allergies: text("allergies"), // free-text (or comma-separated list)
+  medications: text("medications"),
+  doctorName: text("doctor_name"),
+  doctorPhone: text("doctor_phone"),
+  notes: text("notes"),
+  updatedAt: integer("updated_at").notNull().default(now),
+});
+
+// ── Document Comments ────────────────────────────────────────────────────────
+
+export const documentComments = sqliteTable(
+  "document_comments",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+    deletedAt: integer("deleted_at"),
+  },
+  (t) => [index("idx_comment_doc").on(t.documentId, t.createdAt)],
+);

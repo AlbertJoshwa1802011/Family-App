@@ -1,10 +1,17 @@
-import { CalendarClock, Clock, FileText, HardDrive, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { CalendarClock, CalendarDays, Clock, FileText, HardDrive, Plus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ListItem } from "../components/ui/ListItem";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
+import type { EventSummary } from "./Calendar";
+import { eventTypeColor, formatEventTime } from "../lib/eventTime";
 
 function StatCard({
   icon: Icon,
@@ -29,6 +36,65 @@ function StatCard({
       </div>
       <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
     </Card>
+  );
+}
+
+function UpcomingEventsWidget() {
+  const [now] = useState(() => Math.floor(Date.now() / 1000));
+  const thirtyDays = now + 30 * 24 * 3600;
+
+  const { data } = useQuery({
+    queryKey: ["events", "upcoming"],
+    queryFn: () =>
+      api<{ events: EventSummary[] }>(`/events?from=${now}&to=${thirtyDays}`),
+  });
+
+  const upcoming = (data?.events ?? [])
+    .filter((e) => e.status === "active")
+    .slice(0, 3);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-fg-muted">Upcoming events</h3>
+        <Link
+          to="/calendar/events/new"
+          className="flex items-center gap-1 text-xs text-vault-400 hover:text-vault-300"
+        >
+          <Plus className="size-3.5" />
+          Add
+        </Link>
+      </div>
+      {upcoming.length === 0 ? (
+        <div className="rounded-2xl border border-line px-4 py-3 text-sm text-fg-subtle">
+          No events in the next 30 days.{" "}
+          <Link to="/calendar" className="text-vault-400 underline">
+            View calendar
+          </Link>
+        </div>
+      ) : (
+        <Card className="divide-y divide-line overflow-hidden">
+          {upcoming.map((ev) => {
+            const colors = eventTypeColor(ev.type);
+            return (
+              <ListItem
+                key={ev.id}
+                to={`/calendar/events/${ev.id}`}
+                leading={
+                  <span
+                    className={`flex size-9 items-center justify-center rounded-xl ${colors.bg} ${colors.text}`}
+                  >
+                    <CalendarDays className="size-5" />
+                  </span>
+                }
+                title={ev.title}
+                subtitle={formatEventTime(ev.startAt, ev.endAt, ev.allDay)}
+              />
+            );
+          })}
+        </Card>
+      )}
+    </section>
   );
 }
 
@@ -82,6 +148,8 @@ export function Dashboard() {
             description="Documents nearing their expiry date will show up here so you can renew in time."
           />
         </section>
+
+        <UpcomingEventsWidget />
       </Page>
     </>
   );
