@@ -27,7 +27,13 @@ describe("worker API", () => {
   });
 
   it("unimplemented Phase 1/2 endpoints return 501", async () => {
-    const res = await app.request("/api/documents", { method: "POST" });
+    // POST /api/documents now has Zod validation; send a valid body so
+    // validation passes and the stub handler returns 501.
+    const res = await app.request("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ familyId: "fam-1", title: "Passport" }),
+    });
     expect(res.status).toBe(501);
   });
 
