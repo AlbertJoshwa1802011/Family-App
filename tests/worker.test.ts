@@ -26,15 +26,14 @@ describe("worker API", () => {
     expect(body.error).toBe("not_found");
   });
 
-  it("unimplemented Phase 1/2 endpoints return 501", async () => {
-    // POST /api/documents now has Zod validation; send a valid body so
-    // validation passes and the stub handler returns 501.
+  it("protected Phase 2 endpoints return 401 without session", async () => {
+    // POST /api/documents now requires auth (requireSession fires before Zod).
     const res = await app.request("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ familyId: "fam-1", title: "Passport" }),
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(401);
   });
 
   it("applies baseline security headers on /api responses", async () => {

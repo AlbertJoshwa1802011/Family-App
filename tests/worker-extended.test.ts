@@ -163,22 +163,20 @@ describe("2. Unknown routes return JSON 404", () => {
 // 3. Correct HTTP methods on stub routes
 // ---------------------------------------------------------------------------
 describe("3. Correct HTTP methods on stub routes", () => {
-  it("GET /api/documents → 200 (stub returns empty array)", async () => {
+  it("GET /api/documents → 401 without session (auth required)", async () => {
     const res = await app.request("/api/documents");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { documents: unknown[] };
-    expect(Array.isArray(body.documents)).toBe(true);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
   });
 
-  it("POST /api/documents → 501 (not implemented)", async () => {
-    // POST /api/documents has Zod validation; send a valid body so the stub
-    // handler is reached and returns 501 rather than a 400 validation error.
+  it("POST /api/documents → 401 without session (auth required)", async () => {
     const res = await app.request("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ familyId: "fam-1", title: "Passport" }),
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(401);
   });
 
   it("GET /api/families → 401 without session (auth required)", async () => {
@@ -284,8 +282,9 @@ describe("6. Error response shape consistency", () => {
     expect(typeof body.error).toBe("string");
   });
 
-  it("501 responses have `error` field", async () => {
+  it("error responses have `error` field (documents POST → 401 without auth)", async () => {
     const res = await app.request("/api/documents", { method: "POST" });
+    expect(res.status).toBe(401);
     const body = (await res.json()) as Record<string, unknown>;
     expect(typeof body.error).toBe("string");
   });
