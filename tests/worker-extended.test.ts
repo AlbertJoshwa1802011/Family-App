@@ -202,25 +202,19 @@ describe("3. Correct HTTP methods on stub routes", () => {
     expect(Array.isArray(body.notifications)).toBe(true);
   });
 
-  it("GET /api/events → 200 (stub returns empty array)", async () => {
+  it("GET /api/events → 401 (requires session)", async () => {
     const res = await app.request("/api/events");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { events: unknown[] };
-    expect(Array.isArray(body.events)).toBe(true);
+    expect(res.status).toBe(401);
   });
 
-  it("GET /api/tasks → 200 (stub returns empty array)", async () => {
+  it("GET /api/tasks → 401 (requires session)", async () => {
     const res = await app.request("/api/tasks");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { tasks: unknown[] };
-    expect(Array.isArray(body.tasks)).toBe(true);
+    expect(res.status).toBe(401);
   });
 
-  it("GET /api/contacts → 200 (stub returns empty array)", async () => {
+  it("GET /api/contacts → 401 (requires session)", async () => {
     const res = await app.request("/api/contacts");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { contacts: unknown[] };
-    expect(Array.isArray(body.contacts)).toBe(true);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -289,19 +283,18 @@ describe("6. Error response shape consistency", () => {
     expect(typeof body.error).toBe("string");
   });
 
-  it("400 responses from Zod have error:'validation_error'", async () => {
-    const res = await postJSON("/api/events", { startAt: 1750000000 }); // missing title
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string; issues: unknown[] };
-    expect(body.error).toBe("validation_error");
+  it("401 responses have error:'unauthorized'", async () => {
+    const res = await postJSON("/api/events", { startAt: 1750000000 });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
   });
 
-  it("400 responses from Zod have `issues` array", async () => {
-    const res = await postJSON("/api/events", { startAt: 1750000000 }); // missing title
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string; issues: unknown[] };
-    expect(Array.isArray(body.issues)).toBe(true);
-    expect(body.issues.length).toBeGreaterThan(0);
+  it("401 responses have an `error` string field (not `issues`)", async () => {
+    const res = await postJSON("/api/events", { startAt: 1750000000 });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(typeof body.error).toBe("string");
   });
 
   it("404 error JSON is served with content-type application/json", async () => {
@@ -323,214 +316,41 @@ describe("6. Error response shape consistency", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Zod validation boundary tests — POST /api/events
+// 7. Auth enforcement on event / task / contact routes
 // ---------------------------------------------------------------------------
-describe("7a. Zod validation — POST /api/events", () => {
-  const VALID_START = 1750000000;
+// requireSession fires before Zod validation on all three routers.
+// Every request without a valid session cookie returns 401 — regardless of
+// whether the body is valid or invalid.
+describe("7. Auth enforcement on event/task/contact routes", () => {
+  const cases: Array<{ method: string; path: string; body: object }> = [
+    // events
+    { method: "POST",  path: "/api/events",          body: { familyId: "f-1", title: "Event", startAt: 1750000000 } },
+    { method: "POST",  path: "/api/events",          body: { title: "" } },           // would fail Zod
+    { method: "PATCH", path: "/api/events/some-id",  body: {} },
+    { method: "PATCH", path: "/api/events/some-id",  body: { startAt: "bad" } },      // would fail Zod
+    { method: "POST",  path: "/api/events/some-id/cancel",    body: {} },
+    { method: "POST",  path: "/api/events/some-id/attendees", body: { memberIds: ["m-1"] } },
+    // tasks
+    { method: "POST",  path: "/api/tasks",           body: { familyId: "f-1", title: "Task" } },
+    { method: "POST",  path: "/api/tasks",           body: { title: "a".repeat(301) } }, // would fail Zod
+    { method: "PATCH", path: "/api/tasks/some-id",   body: { status: "done" } },
+    { method: "PATCH", path: "/api/tasks/some-id",   body: { status: "pending" } },    // would fail Zod
+    // contacts
+    { method: "POST",  path: "/api/contacts",        body: { familyId: "f-1", name: "Alice" } },
+    { method: "POST",  path: "/api/contacts",        body: { name: "" } },             // would fail Zod
+    { method: "PATCH", path: "/api/contacts/some-id", body: { email: "bad" } },        // would fail Zod
+  ];
 
-  it("title = null → 400", async () => {
-    const res = await postJSON("/api/events", { title: null, startAt: VALID_START });
-    expect(res.status).toBe(400);
-  });
-
-  it("title = number → 400", async () => {
-    const res = await postJSON("/api/events", { title: 42, startAt: VALID_START });
-    expect(res.status).toBe(400);
-  });
-
-  it("startAt = 0 → 400 (positive() fails)", async () => {
-    const res = await postJSON("/api/events", { title: "Event", startAt: 0 });
-    expect(res.status).toBe(400);
-  });
-
-  it("startAt = -1 → 400 (positive() fails)", async () => {
-    const res = await postJSON("/api/events", { title: "Event", startAt: -1 });
-    expect(res.status).toBe(400);
-  });
-
-  it("startAt = 1.5 → 400 (int() fails)", async () => {
-    const res = await postJSON("/api/events", { title: "Event", startAt: 1.5 });
-    expect(res.status).toBe(400);
-  });
-
-  it("attendeeMemberIds = 'string' instead of array → 400", async () => {
-    const res = await postJSON("/api/events", {
-      title: "Event",
-      startAt: VALID_START,
-      attendeeMemberIds: "member-1",
+  for (const { method, path, body } of cases) {
+    it(`${method} ${path} → 401 (auth fires before validation)`, async () => {
+      const res = await app.request(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(401);
+      const responseBody = (await res.json()) as { error: string };
+      expect(responseBody.error).toBe("unauthorized");
     });
-    expect(res.status).toBe(400);
-  });
-
-  it("documentIds = 42 (not array) → 400", async () => {
-    const res = await postJSON("/api/events", {
-      title: "Event",
-      startAt: VALID_START,
-      documentIds: 42,
-    });
-    expect(res.status).toBe(400);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7b. Zod validation boundary tests — PATCH /api/events/:id
-// ---------------------------------------------------------------------------
-describe("7b. Zod validation — PATCH /api/events/:id", () => {
-  it("empty object {} → 501 (all fields optional in update schema)", async () => {
-    const res = await patchJSON("/api/events/some-id", {});
-    expect(res.status).toBe(501);
-  });
-
-  it("startAt = 'not-a-number' → 400", async () => {
-    const res = await patchJSON("/api/events/some-id", {
-      startAt: "not-a-number",
-    });
-    expect(res.status).toBe(400);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7c. Zod validation boundary tests — POST /api/tasks
-// ---------------------------------------------------------------------------
-describe("7c. Zod validation — POST /api/tasks", () => {
-  it("title = 301 chars → 400 (max 300)", async () => {
-    const res = await postJSON("/api/tasks", { title: "a".repeat(301) });
-    expect(res.status).toBe(400);
-  });
-
-  it("title = exactly 300 chars → 501 (at max limit)", async () => {
-    const res = await postJSON("/api/tasks", { title: "a".repeat(300) });
-    expect(res.status).toBe(501);
-  });
-
-  it("dueDate = '2026-13-01' → 400 (invalid date — regex check)", async () => {
-    const res = await postJSON("/api/tasks", {
-      title: "Task",
-      dueDate: "2026-13-01",
-    });
-    // The regex ^\d{4}-\d{2}-\d{2}$ passes for this format, but semantically it's invalid.
-    // The isoDate schema uses a regex that matches the format, so this may pass regex but
-    // the important thing is it should not cause a 500 server error.
-    expect(res.status).not.toBe(500);
-  });
-
-  it("dueDate = '2026-6-1' → 400 (not zero-padded, fails regex)", async () => {
-    const res = await postJSON("/api/tasks", {
-      title: "Task",
-      dueDate: "2026-6-1",
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it("dueDate = '2026-06-01' → 501 (valid zero-padded date)", async () => {
-    const res = await postJSON("/api/tasks", {
-      title: "Task",
-      dueDate: "2026-06-01",
-    });
-    expect(res.status).toBe(501);
-  });
-
-  it("status set on create is not in createTaskSchema — should still succeed (status ignored) → 501", async () => {
-    const res = await postJSON("/api/tasks", {
-      title: "Task",
-      status: "done",
-    });
-    // createTaskSchema does not have status, so it is stripped/ignored by Zod.
-    // The handler should return 501 (passed validation).
-    expect(res.status).toBe(501);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7d. Zod validation boundary tests — PATCH /api/tasks/:id
-// ---------------------------------------------------------------------------
-describe("7d. Zod validation — PATCH /api/tasks/:id", () => {
-  it("status = 'pending' → 400 (not in enum: open/done/archived)", async () => {
-    const res = await patchJSON("/api/tasks/some-id", { status: "pending" });
-    expect(res.status).toBe(400);
-  });
-
-  it("status = 'done' → 501 (valid enum value)", async () => {
-    const res = await patchJSON("/api/tasks/some-id", { status: "done" });
-    expect(res.status).toBe(501);
-  });
-
-  it("status = 'open' → 501 (valid enum value)", async () => {
-    const res = await patchJSON("/api/tasks/some-id", { status: "open" });
-    expect(res.status).toBe(501);
-  });
-
-  it("status = 'archived' → 501 (valid enum value)", async () => {
-    const res = await patchJSON("/api/tasks/some-id", { status: "archived" });
-    expect(res.status).toBe(501);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7e. Zod validation boundary tests — POST /api/contacts
-// ---------------------------------------------------------------------------
-describe("7e. Zod validation — POST /api/contacts", () => {
-  it("name = '' → 400 (min 1)", async () => {
-    const res = await postJSON("/api/contacts", { name: "" });
-    expect(res.status).toBe(400);
-  });
-
-  it("name = 201 chars → 400 (max 200)", async () => {
-    const res = await postJSON("/api/contacts", { name: "a".repeat(201) });
-    expect(res.status).toBe(400);
-  });
-
-  it("name = exactly 200 chars → 501 (at max limit)", async () => {
-    const res = await postJSON("/api/contacts", { name: "a".repeat(200) });
-    expect(res.status).toBe(501);
-  });
-
-  it("phone = 31 chars → 400 (max 30)", async () => {
-    const res = await postJSON("/api/contacts", {
-      name: "Alice",
-      phone: "1".repeat(31),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it("email = 'alice@example.com' → 501 (valid email format)", async () => {
-    const res = await postJSON("/api/contacts", {
-      name: "Alice",
-      email: "alice@example.com",
-    });
-    expect(res.status).toBe(501);
-  });
-
-  it("relationship = 101 chars → 400 (max 100)", async () => {
-    const res = await postJSON("/api/contacts", {
-      name: "Alice",
-      relationship: "a".repeat(101),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it("relationship = exactly 100 chars → 501 (at max limit)", async () => {
-    const res = await postJSON("/api/contacts", {
-      name: "Alice",
-      relationship: "a".repeat(100),
-    });
-    expect(res.status).toBe(501);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7f. Zod validation boundary tests — PATCH /api/contacts/:id
-// ---------------------------------------------------------------------------
-describe("7f. Zod validation — PATCH /api/contacts/:id", () => {
-  it("empty object {} → 501 (all fields optional in partial update)", async () => {
-    const res = await patchJSON("/api/contacts/some-id", {});
-    expect(res.status).toBe(501);
-  });
-
-  it("email = 'not-an-email' → 400", async () => {
-    const res = await patchJSON("/api/contacts/some-id", {
-      email: "not-an-email",
-    });
-    expect(res.status).toBe(400);
-  });
+  }
 });

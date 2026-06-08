@@ -96,19 +96,19 @@ describe("stress: mixed read/write/unknown traffic", () => {
         case 0:
           return app.request("/api/health");
         case 1:
-          return app.request("/api/events"); // stub-200
+          return app.request("/api/events"); // 401 (requires session)
         case 2:
           return app.request("/api/events", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: validEvent,
-          }); // 501
+          }); // 401 (requires session)
         case 3:
           return app.request("/api/events", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: invalidEvent,
-          }); // 400
+          }); // 401 (auth fires before Zod)
         default:
           return app.request("/api/unknown-" + i); // 404
       }
@@ -117,7 +117,7 @@ describe("stress: mixed read/write/unknown traffic", () => {
     expect(errors).toBe(0);
     expect(statuses.length).toBe(3000);
     // Every request must resolve to a known, intended status — never 500.
-    const allowed = new Set([200, 400, 404, 501]);
+    const allowed = new Set([200, 400, 401, 404, 501]);
     expect(statuses.every((s) => allowed.has(s))).toBe(true);
     expect(statuses.includes(500)).toBe(false);
     expect(throughput).toBeGreaterThan(500); // req/sec
@@ -156,13 +156,15 @@ describe("stress: oversized payload rejection (memory safety)", () => {
   });
 });
 
-describe("stress: validation under load stays correct", () => {
-  it("400s every malformed request and 501s every valid one — no cross-contamination", async () => {
+describe("stress: auth enforcement under load stays correct", () => {
+  it("returns 401 for every unauthenticated request — no cross-contamination", async () => {
+    // All /api/tasks POST requests require a session; auth fires before Zod, so
+    // both valid and invalid bodies return 401 (not 400 or 501).
     const results = await Promise.all(
       Array.from({ length: 500 }, (_, i) => {
         const valid = i % 2 === 0;
         const body = valid
-          ? JSON.stringify({ title: "Task " + i })
+          ? JSON.stringify({ familyId: "f-1", title: "Task " + i })
           : JSON.stringify({ title: "" });
         return app
           .request("/api/tasks", {
@@ -174,8 +176,8 @@ describe("stress: validation under load stays correct", () => {
       }),
     );
 
-    for (const { valid, status } of results) {
-      expect(status).toBe(valid ? 501 : 400);
+    for (const { status } of results) {
+      expect(status).toBe(401);
     }
   });
 });
