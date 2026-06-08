@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
+import { bodyLimit } from "hono/body-limit";
+import { requestId } from "hono/request-id";
 import { HTTPException } from "hono/http-exception";
 import type { HonoEnv } from "./types";
 import { authRoutes } from "./routes/auth";
@@ -12,12 +14,26 @@ import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { runExpiryReminders } from "./cron";
 
+// 1 MiB cap on JSON request bodies. File uploads go to a dedicated multipart
+// route with its own (larger) streaming limit; this protects every metadata
+// endpoint from a memory-exhaustion DoS via a giant JSON payload.
+const JSON_BODY_LIMIT = 1024 * 1024;
+
 const app = new Hono<HonoEnv>();
 
 // Scope middleware to /api/* — static-asset/SPA responses are served by the ASSETS
 // binding (with headers from public/_headers), not through this Worker pipeline.
+app.use("/api/*", requestId());
 app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
+// Reject oversized JSON bodies before any handler runs (memory-safety).
+app.use(
+  "/api/*",
+  bodyLimit({
+    maxSize: JSON_BODY_LIMIT,
+    onError: (c) => c.json({ error: "payload_too_large" }, 413),
+  }),
+);
 
 // --- API routes (everything else falls through to static assets) ---
 const api = new Hono<HonoEnv>();
@@ -39,13 +55,16 @@ api.all("*", (c) => c.json({ error: "not_found" }, 404));
 
 app.route("/api", api);
 
-// Consistent JSON error shape for API; rethrow otherwise.
+// Consistent JSON error shape for API; never leak internals to the client.
 app.onError((err, c) => {
+  // requestId is set by the requestId() middleware on /api/*; correlate logs ↔ clients.
+  const reqId = c.get("requestId");
   if (err instanceof HTTPException) {
-    return c.json({ error: err.message || "error" }, err.status);
+    return c.json({ error: err.message || "error", requestId: reqId }, err.status);
   }
-  console.error("Unhandled error:", err);
-  return c.json({ error: "internal_error" }, 500);
+  // Log the full error server-side (with the request id) but return a generic message.
+  console.error(`[${reqId ?? "no-id"}] Unhandled error:`, err);
+  return c.json({ error: "internal_error", requestId: reqId }, 500);
 });
 
 // Exported for unit tests.
