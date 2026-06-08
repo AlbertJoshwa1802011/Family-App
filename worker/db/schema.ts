@@ -43,9 +43,16 @@ export const familyMembers = sqliteTable(
     familyId: text("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    userId: text("user_id")
+    // NULLABLE: dependents (children, elderly relatives) have no Google account.
+    // For memberType='dependent', userId is null and displayName is used instead.
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    // memberType distinguishes a real authenticated user from a managed dependent.
+    memberType: text("member_type", { enum: ["user", "dependent"] })
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .default("user"),
+    // Used when userId is null (dependent). For 'user' members the name comes from users.name.
+    displayName: text("display_name"),
+    dateOfBirth: text("date_of_birth"), // ISO yyyy-mm-dd, optional (useful for children)
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
@@ -55,6 +62,8 @@ export const familyMembers = sqliteTable(
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [
+    // NULLs are distinct in SQLite unique indexes, so multiple dependents
+    // (userId=null) can coexist in one family while real users stay unique.
     unique("uq_family_user").on(t.familyId, t.userId),
     index("idx_member_user").on(t.userId),
   ],

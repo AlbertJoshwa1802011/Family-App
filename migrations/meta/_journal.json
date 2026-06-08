@@ -22,6 +22,13 @@
       "when": 1780859572231,
       "tag": "0002_narrow_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1780880777703,
+      "tag": "0003_perfect_joystick",
+      "breakpoints": true
     }
   ]
 }

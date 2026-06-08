@@ -11,6 +11,8 @@ import { FamilyPage } from "./pages/Family";
 import { CalendarPage } from "./pages/Calendar";
 import { EventDetailPage } from "./pages/EventDetail";
 import { EventForm } from "./pages/EventForm";
+import { Tasks } from "./pages/Tasks";
+import { Contacts } from "./pages/Contacts";
 import { Settings } from "./pages/Settings";
 import { NotFound } from "./pages/NotFound";
 
@@ -46,6 +48,8 @@ export default function App() {
           <Route path="/calendar/events/new" element={<EventForm />} />
           <Route path="/calendar/events/:id" element={<EventDetailPage />} />
           <Route path="/calendar/events/:id/edit" element={<EventForm />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/contacts" element={<Contacts />} />
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

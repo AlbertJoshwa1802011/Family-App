@@ -20,10 +20,12 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 
 ---
 
-## 2. Database Schema (20 tables, 3 migrations)
+## 2. Database Schema (21 tables, 4 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
-Migrations: `migrations/0000_*.sql` (13 tables), `0001_*.sql` (events cluster), `0002_*.sql` (utility tables).
+Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
+`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents).
+Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
 
@@ -144,13 +146,15 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 | `/calendar/events/new` | `EventForm` | Yes |
 | `/calendar/events/:id` | `EventDetailPage` | Yes |
 | `/calendar/events/:id/edit` | `EventForm` | Yes |
+| `/tasks` | `Tasks` | Yes |
+| `/contacts` | `Contacts` | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
 
 ### Bottom Navigation
 
-5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`.
+5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`. Tasks (`/tasks`) and Contacts (`/contacts`) are reached from the Dashboard "Quick access" row (keeps the nav at 5 items).
 
 ### Key Libraries
 
@@ -202,19 +206,15 @@ WHERE (visibility = 'family' OR owner_user_id = :current_user OR role IN ('owner
 **Must-do in Phase 2:** Add `insertAuditEvent(db, { familyId, actorUserId, action, targetType, targetId })` helper and call it from: document create/upload/download/delete, family invite, member remove.  
 **Read path:** Phase 5.
 
-### 5.5 Child / Non-User Family Members
+### 5.5 Child / Non-User Family Members ✅ SCHEMA DONE
 
-**Schema gap:** Every `family_members` row requires a `user_id` → `users` (Google account). Children and dependents cannot be represented.  
-**Impact:** `documents.subject_member_id`, `event_attendees.member_id`, `tasks.assigned_to_member_id` all become meaningless for families with children.  
-**Schema change needed:**
-```sql
--- Make user_id nullable, add display_name + member_type
-ALTER TABLE family_members ADD COLUMN display_name TEXT;
-ALTER TABLE family_members ADD COLUMN member_type TEXT DEFAULT 'user';
--- Change user_id to nullable (requires migration, not ALTER in SQLite)
-```
-This requires a new migration and is cheapest to do before Phase 1 data is written.  
-**Phase:** Phase 1 (must precede any family management UI).
+**Resolved (migration 0003):** `family_members.user_id` is now **nullable**, plus new columns
+`member_type` (`user|dependent`), `display_name`, and `date_of_birth`. Dependents (children,
+elderly relatives without a Google account) can be represented; NULL user_ids are distinct in the
+unique index so multiple dependents coexist in one family.  
+**Still TODO (Phase 1 API/UI):** `POST /families/:id/members` to create a dependent (name only,
+no invite); member-list UI to add/manage dependents. The EventForm attendee picker already renders
+`name ?? email ?? "Member"`, so it works structurally once data flows.
 
 ---
 

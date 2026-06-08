@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, CalendarDays, Clock, FileText, HardDrive, Plus, Users } from "lucide-react";
+import { CalendarClock, CalendarDays, Clock, Contact, FileText, HardDrive, ListTodo, Plus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -150,6 +150,30 @@ export function Dashboard() {
         </section>
 
         <UpcomingEventsWidget />
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <Link
+              to="/tasks"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-info/15 text-info">
+                <ListTodo className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Tasks</span>
+            </Link>
+            <Link
+              to="/contacts"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-danger/15 text-danger">
+                <Contact className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Contacts</span>
+            </Link>
+          </div>
+        </section>
       </Page>
     </>
   );
