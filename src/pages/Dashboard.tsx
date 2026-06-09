@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
+import { NotificationBell } from "../components/NotificationBell";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -104,7 +105,7 @@ export function Dashboard() {
 
   return (
     <>
-      <AppBar title="Family Vault" />
+      <AppBar title="Family Vault" trailing={<NotificationBell />} />
       <Page className="space-y-6">
         <div>
           <p className="text-sm text-fg-muted">Welcome back,</p>

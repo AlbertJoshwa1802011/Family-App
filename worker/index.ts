@@ -13,6 +13,8 @@ import { eventRoutes } from "./routes/events";
 import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { runExpiryReminders } from "./cron";
+import { getDb } from "./db/client";
+import { purgeExpiredSessions } from "./lib/session";
 
 // 1 MiB cap on JSON request bodies. File uploads go to a dedicated multipart
 // route with its own (larger) streaming limit; this protects every metadata
@@ -73,12 +75,14 @@ export { app };
 export default {
   fetch: app.fetch,
 
-  // Daily expiry-reminder cron (see wrangler.jsonc triggers.crons).
+  // Daily maintenance cron (see wrangler.jsonc triggers.crons):
+  // expiry/event reminders + expired-session purge.
   async scheduled(
     _event: ScheduledController,
     env: HonoEnv["Bindings"],
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(runExpiryReminders(env));
+    ctx.waitUntil(purgeExpiredSessions(getDb(env)));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;

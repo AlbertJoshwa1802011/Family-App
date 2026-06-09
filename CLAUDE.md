@@ -174,7 +174,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **136 tests across 5 files**, all green.
+same depth. Current baseline: **182 tests across 10 files**, all green.
 
 Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
 timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
@@ -213,8 +213,9 @@ tests.
 worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
-  cron.ts               runExpiryReminders() — Phase 3 stub (range-based + dedupe planned)
+  cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
   db/schema.ts          ★ single source of truth for all 21 tables
+  lib/                   crypto, session, audit, drive, reminders (pure windowing), email (Resend), notify
   routes/               auth, families, documents, notifications, events, tasks, contacts
 src/
   App.tsx               routes + Protected wrapper
@@ -236,10 +237,15 @@ vite.config.ts          plugin chain + PWA config
 
 ## 11. Current state & next priorities
 
-Everything is scaffolded with **stub routes returning empty data / 501**. No real auth or D1
-queries run yet — the app always redirects to `/login` because `/auth/me` returns `user:null`.
-The frontend is complete for the features built. See `docs/FEATURES.md §5` for the 5 highest-value
-gaps. The intended build order is Phase 1 (auth + families + D1 client) → Phase 2 (documents +
-Drive, with private-visibility enforcement) → Phase 2.5 (wire events/tasks/contacts to D1) →
-Phase 3 (reminders/cron) → Phase 4 (offline/biometric/search) → Phase 5 (hardening + E2E) →
-Phase 6 (WhatsApp/push/OCR/shared-drive).
+**Phases 1 → 3 are implemented** against real D1 + auth:
+- **Phase 1**: Google OAuth (PKCE), session lifecycle in D1, family CRUD with authz.
+- **Phase 2**: documents CRUD + Drive proxy with private-visibility enforcement.
+- **Phase 2.5**: events / tasks / contacts wired to D1 (all `/api/*` mutations require a session).
+- **Phase 3**: daily cron does a range-based expiry/event scan with per-window dedupe
+  (`reminders_log` / `event_reminders_log`), writes in-app notifications, and sends Resend email
+  (no-op without `RESEND_API_KEY`); session purge runs in the same cron. In-app notification
+  center + per-user reminder prefs (channels + lead-time windows) are live on the frontend.
+
+The intended remaining build order is Phase 4 (offline/biometric/search) → Phase 5 (hardening +
+E2E: CSRF Origin/Referer checks, rate limiting, the private-doc authz-matrix test) → Phase 6
+(WhatsApp/push/OCR/shared-drive). See `docs/FEATURES.md §5` for the highest-value gaps.

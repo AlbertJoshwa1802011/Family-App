@@ -195,11 +195,9 @@ describe("3. Correct HTTP methods on stub routes", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /api/notifications → 200 (stub returns empty array)", async () => {
+  it("GET /api/notifications → 401 (requires session)", async () => {
     const res = await app.request("/api/notifications");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { notifications: unknown[] };
-    expect(Array.isArray(body.notifications)).toBe(true);
+    expect(res.status).toBe(401);
   });
 
   it("GET /api/events → 401 (requires session)", async () => {

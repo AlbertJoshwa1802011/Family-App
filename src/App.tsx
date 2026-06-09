@@ -14,6 +14,7 @@ import { EventForm } from "./pages/EventForm";
 import { Tasks } from "./pages/Tasks";
 import { Contacts } from "./pages/Contacts";
 import { Settings } from "./pages/Settings";
+import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/family" element={<FamilyPage />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<NotFound />} />

@@ -1,14 +1,116 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Info, LogOut } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { ListItem } from "../components/ui/ListItem";
-import { Badge } from "../components/ui/Badge";
+import { Skeleton } from "../components/ui/Skeleton";
 import { useAuth } from "../context/AuthContext";
+import { cn } from "../lib/cn";
 import { api } from "../lib/api";
+
+interface ReminderPrefs {
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+  windows: number[];
+}
+
+// Lead-time options offered in the UI (days before expiry/event).
+const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+
+function ReminderPrefsCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["reminder-prefs"],
+    queryFn: () => api<{ prefs: ReminderPrefs }>("/notifications/prefs"),
+  });
+
+  const save = useMutation({
+    mutationFn: (patch: Partial<ReminderPrefs>) =>
+      api<{ prefs: ReminderPrefs }>("/notifications/prefs", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    // Optimistically reflect the change, then reconcile with the server.
+    onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
+  });
+
+  if (isLoading || !data) {
+    return (
+      <Card className="space-y-3 p-4">
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
+      </Card>
+    );
+  }
+
+  const prefs = data.prefs;
+
+  const toggleWindow = (w: number) => {
+    const next = prefs.windows.includes(w)
+      ? prefs.windows.filter((x) => x !== w)
+      : [...prefs.windows, w];
+    save.mutate({ windows: next.sort((a, b) => b - a) });
+  };
+
+  return (
+    <Card className="divide-y divide-line overflow-hidden">
+      <ListItem
+        leading={<Mail className="size-5 text-fg-muted" />}
+        title="Email reminders"
+        subtitle="Receive expiry & event reminders by email"
+        trailing={
+          <button
+            role="switch"
+            aria-checked={prefs.emailEnabled}
+            aria-label="Toggle email reminders"
+            disabled={save.isPending}
+            onClick={() => save.mutate({ emailEnabled: !prefs.emailEnabled })}
+            className={cn(
+              "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
+              prefs.emailEnabled ? "bg-vault-600" : "bg-white/10",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 size-5 rounded-full bg-white transition-transform",
+                prefs.emailEnabled ? "translate-x-5" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        }
+      />
+      <div className="px-4 py-3">
+        <div className="text-sm font-medium text-fg">Lead time</div>
+        <div className="mt-0.5 text-xs text-fg-muted">
+          How far ahead to remind you. Pick one or more.
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {WINDOW_OPTIONS.map((w) => {
+            const on = prefs.windows.includes(w);
+            return (
+              <button
+                key={w}
+                disabled={save.isPending}
+                onClick={() => toggleWindow(w)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+                  on
+                    ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                    : "border-line text-fg-muted hover:bg-white/5",
+                )}
+              >
+                {w}d
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 export function Settings() {
   const { user } = useAuth();
@@ -37,14 +139,21 @@ export function Settings() {
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            Reminders
+          </h3>
+          <ReminderPrefsCard />
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Notifications
           </h3>
           <Card className="divide-y divide-line overflow-hidden">
             <ListItem
+              to="/notifications"
               leading={<Bell className="size-5 text-fg-muted" />}
-              title="Reminder preferences"
-              subtitle="Channels & lead times"
-              trailing={<Badge tone="vault">Phase 3</Badge>}
+              title="Notification center"
+              subtitle="View reminders & updates"
             />
           </Card>
         </section>
@@ -57,7 +166,7 @@ export function Settings() {
             <ListItem
               leading={<Info className="size-5 text-fg-muted" />}
               title="Version"
-              trailing={<span className="text-sm text-fg-muted">0.0.0 · Phase 0</span>}
+              trailing={<span className="text-sm text-fg-muted">0.0.0 · Phase 3</span>}
             />
           </Card>
         </section>
