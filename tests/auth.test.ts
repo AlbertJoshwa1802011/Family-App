@@ -40,17 +40,17 @@ describe("1. GET /api/auth/me — no session", () => {
 // ---------------------------------------------------------------------------
 // 2. /auth/google/start — shape test without env
 // ---------------------------------------------------------------------------
-describe("2. POST /api/auth/google/start", () => {
+describe("2. GET /api/auth/google/start", () => {
   it("returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
     // No env bindings → GOOGLE_CLIENT_ID is undefined
-    const res = await app.request("/api/auth/google/start", { method: "POST" });
+    const res = await app.request("/api/auth/google/start", { method: "GET" });
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("oauth_not_configured");
   });
 
   it("returns JSON with content-type header", async () => {
-    const res = await app.request("/api/auth/google/start", { method: "POST" });
+    const res = await app.request("/api/auth/google/start", { method: "GET" });
     expect(res.headers.get("content-type")).toContain("application/json");
   });
 });
