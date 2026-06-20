@@ -27,7 +27,7 @@
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "PLACEHOLDER_RUN_wrangler_kv_namespace_create"
+      "id": "bcb22812f2ec49bab095196ff2267e59"
     }
   ],
   "triggers": {
