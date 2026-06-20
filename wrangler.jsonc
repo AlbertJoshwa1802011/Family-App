@@ -20,7 +20,7 @@
     {
       "binding": "DB",
       "database_name": "family-vault-db",
-      "database_id": "PLACEHOLDER_RUN_wrangler_d1_create",
+      "database_id": "518a69d5-a539-4009-86a7-b9380627b1b4",
       "migrations_dir": "migrations"
     }
   ],
