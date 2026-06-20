@@ -74,9 +74,9 @@ authRoutes.get("/me", async (c) => {
   });
 });
 
-// POST /auth/google/start — build the Google OAuth redirect URL (PKCE).
+// GET /auth/google/start — build the Google OAuth redirect URL (PKCE).
 // Returns { url } so the SPA can redirect (avoids CORS issues with 302s).
-authRoutes.post("/google/start", async (c) => {
+authRoutes.get("/google/start", async (c) => {
   const clientId = c.env?.GOOGLE_CLIENT_ID;
   const appUrl = c.env?.APP_URL ?? "";
 
