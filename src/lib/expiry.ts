@@ -15,7 +15,7 @@ export function expiryStatus(date?: string | null): ExpiryStatus | null {
   const targetUtc = Date.UTC(y, m - 1, d);
 
   const n = new Date();
-  const todayUtc = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+  const todayUtc = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate());
   const days = Math.round((targetUtc - todayUtc) / 86_400_000);
 
   if (days < 0) return { tone: "danger", label: "Expired" };
