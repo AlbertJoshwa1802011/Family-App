@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "family-vault",
+  "name": "fam",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -34,6 +34,6 @@
     "crons": ["0 8 * * *"]
   },
   "vars": {
-    "APP_URL": "https://family-vault.albertjoshrock101.workers.dev"
+    "APP_URL": "https://fam.connect-cloud.workers.dev"
   }
 }
