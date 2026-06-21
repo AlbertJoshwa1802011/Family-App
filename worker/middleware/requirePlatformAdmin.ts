@@ -5,17 +5,32 @@ import { getDb, schema } from "../db/client";
 
 type Db = ReturnType<typeof getDb>;
 
+// SHA-256 of the bootstrap superadmin email (lowercase). Add more hashes to grant access.
+// Compute: echo -n "you@example.com" | sha256sum
+const ADMIN_EMAIL_HASHES = new Set([
+  "d4046f3d98913413efd050a2751ca7127fc03d6c7989f8a5114c39bae6ad3892", // albertjoshwa.a@zohocorp.com
+]);
+
+async function emailHash(email: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(email.toLowerCase().trim()),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /**
  * Returns true if the given user is a platform admin.
  *
- * Source of truth is the `platform_admins` table. The FIRST admin is bootstrapped
- * lazily: if the table has no row for this user but the user's email is listed in
- * `env.PLATFORM_ADMIN_EMAILS` (comma-separated), a `superadmin` row is inserted on
- * the fly. There is intentionally NO self-promotion endpoint.
+ * Source of truth is the `platform_admins` table. The first admin is bootstrapped
+ * lazily by matching the user's email SHA-256 against ADMIN_EMAIL_HASHES above.
+ * There is intentionally NO self-promotion endpoint.
  */
 export async function isPlatformAdmin(
   db: Db,
-  env: Env,
+  _env: Env,
   userId: string,
 ): Promise<boolean> {
   const existing = await db
@@ -25,20 +40,17 @@ export async function isPlatformAdmin(
     .get();
   if (existing) return true;
 
-  const allowlist = (env.PLATFORM_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (allowlist.length === 0) return false;
-
   const user = await db
     .select({ email: schema.users.email })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .get();
-  if (!user || !allowlist.includes(user.email.toLowerCase())) return false;
+  if (!user) return false;
 
-  // Bootstrap the first admin from the env allowlist.
+  const hash = await emailHash(user.email);
+  if (!ADMIN_EMAIL_HASHES.has(hash)) return false;
+
+  // Bootstrap: write to platform_admins so subsequent checks skip the hash lookup.
   await db
     .insert(schema.platformAdmins)
     .values({ userId, level: "superadmin", grantedBy: userId })
