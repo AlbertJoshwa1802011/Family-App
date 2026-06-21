@@ -69,4 +69,11 @@ describe("admin storage routes — route shape", () => {
     const res = await app.request("/api/admin/storage/connect/start");
     expect(res.status).toBe(401);
   });
+
+  it("GET /api/admin/metrics without session → 401 unauthorized", async () => {
+    const res = await app.request("/api/admin/metrics");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe("unauthorized");
+  });
 });
+

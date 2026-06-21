@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { eq } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -264,3 +264,71 @@ adminRoutes.post("/storage/disconnect", async (c) => {
 
   return c.json({ ok: true });
 });
+
+// GET /admin/metrics — details on DB size, active sessions, and recent background job runs.
+adminRoutes.get("/metrics", async (c) => {
+  const db = getDb(c.env);
+
+  let pageCount = 0;
+  let pageSize = 4096;
+  try {
+    const pageCountRow = await db.get<{ page_count: number }>(sql`PRAGMA page_count`);
+    const pageSizeRow = await db.get<{ page_size: number }>(sql`PRAGMA page_size`);
+    if (pageCountRow) pageCount = pageCountRow.page_count;
+    if (pageSizeRow) pageSize = pageSizeRow.page_size;
+  } catch (e) {
+    console.error("Failed to query DB pragma size:", e);
+  }
+
+  const dbSizeBytes = pageCount * pageSize;
+
+  // Active sessions count
+  let activeSessions = 0;
+  try {
+    const sessionRes = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.sessions)
+      .get();
+    if (sessionRes) activeSessions = sessionRes.count;
+  } catch (e) {
+    console.error("Failed to query active sessions:", e);
+  }
+
+  // Recent job runs
+  let jobs: (typeof schema.jobRuns.$inferSelect)[] = [];
+  try {
+    jobs = await db
+      .select()
+      .from(schema.jobRuns)
+      .orderBy(desc(schema.jobRuns.startedAt))
+      .limit(10)
+      .all();
+  } catch (e) {
+    console.error("Failed to query job runs:", e);
+  }
+
+  // Active KV keys count (lists up to 1000 keys)
+  let kvKeysCount = 0;
+  try {
+    const kvList = await c.env.KV.list();
+    kvKeysCount = kvList.keys.length;
+  } catch (e) {
+    console.error("Failed to list KV keys:", e);
+  }
+
+  return c.json({
+    database: {
+      pageSize,
+      pageCount,
+      sizeBytes: dbSizeBytes,
+    },
+    kv: {
+      keysCount: kvKeysCount,
+    },
+    sessions: {
+      activeCount: activeSessions,
+    },
+    jobRuns: jobs,
+  });
+});
+
