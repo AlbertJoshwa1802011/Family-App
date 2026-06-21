@@ -119,7 +119,7 @@ export function Settings() {
   return (
     <>
       <AppBar title="Settings" />
-      <Page className="space-y-6">
+      <Page width="wide" className="space-y-6">
         <Card className="flex items-center gap-3 p-4">
           <Avatar
             name={user?.name}
@@ -190,6 +190,7 @@ export function Settings() {
           fullWidth
           leadingIcon={<LogOut className="size-4" />}
           onClick={async () => {
+            if (!window.confirm("Are you sure you want to sign out?")) return;
             await api("/auth/logout", { method: "POST" });
             await qc.invalidateQueries({ queryKey: ["me"] });
           }}

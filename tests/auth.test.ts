@@ -89,6 +89,7 @@ describe("4. Protected family routes return 401 without session", () => {
     { method: "POST",  path: "/api/families/fam-1/invites" },
     { method: "POST",  path: "/api/families/invites/some-token/accept" },
     { method: "GET",   path: "/api/families/fam-1/activity" },
+    { method: "GET",   path: "/api/families/me/activity" },
   ];
 
   for (const { method, path } of protectedRoutes) {

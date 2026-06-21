@@ -95,7 +95,11 @@ export function FamilyPage() {
       <AppBar
         title="Family"
         trailing={
-          <Button size="md" leadingIcon={<UserPlus className="size-4" />}>
+          <Button
+            size="md"
+            leadingIcon={<UserPlus className="size-4" />}
+            onClick={() => alert("Family member invite flows and dependent creation are under construction for Phase 1. Complete details: docs/PLAN.md.")}
+          >
             Invite
           </Button>
         }
@@ -118,7 +122,10 @@ export function FamilyPage() {
               title="Build your family circle"
               description="Invite family members so everyone can access shared documents and stay on top of renewals together."
               action={
-                <Button leadingIcon={<UserPlus className="size-4" />}>
+                <Button
+                  leadingIcon={<UserPlus className="size-4" />}
+                  onClick={() => alert("Family member invite flows and dependent creation are under construction for Phase 1. Complete details: docs/PLAN.md.")}
+                >
                   Invite a member
                 </Button>
               }

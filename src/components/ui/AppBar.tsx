@@ -14,7 +14,7 @@ export function AppBar({
   const navigate = useNavigate();
   return (
     <header className="pt-safe sticky top-0 z-20 border-b border-line bg-ink-950/80 backdrop-blur-lg">
-      <div className="mx-auto flex h-14 max-w-md items-center gap-2 px-2">
+      <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-4">
         {back && (
           <button
             onClick={() => navigate(-1)}

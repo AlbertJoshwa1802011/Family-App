@@ -23,7 +23,11 @@ function Inner({ leading, title, subtitle, trailing, showChevron }: ListItemProp
           <div className="mt-0.5 truncate text-xs text-fg-muted">{subtitle}</div>
         )}
       </div>
-      {trailing}
+      {trailing && (
+        <div className="flex items-center shrink-0">
+          {trailing}
+        </div>
+      )}
       {showChevron && (
         <ChevronRight className="size-5 shrink-0 text-fg-subtle" aria-hidden="true" />
       )}

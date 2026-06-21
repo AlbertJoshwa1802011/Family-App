@@ -77,14 +77,21 @@ export function Documents() {
             title="No documents yet"
             description="Add your family's passports, insurance, licenses and more — and we'll remind you before they expire."
             action={
-              <Button leadingIcon={<Plus className="size-4" />}>
+              <Button
+                leadingIcon={<Plus className="size-4" />}
+                onClick={() => alert("Document creation, Google Drive upload, and comments are under construction for Phase 2. Complete details: docs/PLAN.md.")}
+              >
                 Add document
               </Button>
             }
           />
         )}
       </Page>
-      <Fab icon={Plus} label="Add document" />
+      <Fab
+        icon={Plus}
+        label="Add document"
+        onClick={() => alert("Document creation, Google Drive upload, and comments are under construction for Phase 2. Complete details: docs/PLAN.md.")}
+      />
     </>
   );
 }

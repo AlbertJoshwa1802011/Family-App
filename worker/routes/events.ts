@@ -53,13 +53,29 @@ function zv<T extends z.ZodType>(s: T) {
 
 // GET /events?familyId=:id&from=:unix&to=:unix
 eventRoutes.get("/", requireSession, async (c) => {
-  const familyId = c.req.query("familyId");
-  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  let familyId = c.req.query("familyId");
+  if (!familyId) {
+    // Resolve user's first active family
+    const membership = await db
+      .select({ familyId: schema.familyMembers.familyId })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.userId, userId),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      )
+      .get();
+    if (!membership) return c.json({ events: [] });
+    familyId = membership.familyId;
+  }
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
-  const db = getDb(c.env);
   const fromParam = c.req.query("from");
   const toParam = c.req.query("to");
 

@@ -115,6 +115,11 @@ describe("1. Worker baseline", () => {
     const res = await app.request("/api/notifications");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
+
+  it("x-content-type-options: nosniff on GET /api/families/me/activity", async () => {
+    const res = await app.request("/api/families/me/activity");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
 });
 
 // ---------------------------------------------------------------------------

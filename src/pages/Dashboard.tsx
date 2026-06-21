@@ -106,75 +106,91 @@ export function Dashboard() {
   return (
     <>
       <AppBar title="Family Vault" trailing={<NotificationBell />} />
-      <Page className="space-y-6">
-        <div>
-          <p className="text-sm text-fg-muted">Welcome back,</p>
-          <h2 className="text-xl font-semibold text-white">{firstName} 👋</h2>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            icon={FileText}
-            label="Documents"
-            value="—"
-            accent="bg-vault-500/15 text-vault-300"
-          />
-          <StatCard
-            icon={Clock}
-            label="Expiring soon"
-            value="—"
-            accent="bg-warning/15 text-warning"
-          />
-          <StatCard
-            icon={Users}
-            label="Family members"
-            value="—"
-            accent="bg-info/15 text-info"
-          />
-          <StatCard
-            icon={HardDrive}
-            label="Storage used"
-            value="—"
-            accent="bg-success/15 text-success"
-          />
-        </div>
-
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-fg-muted">
-            Upcoming expiries
-          </h3>
-          <EmptyState
-            icon={CalendarClock}
-            title="Nothing expiring soon"
-            description="Documents nearing their expiry date will show up here so you can renew in time."
-          />
-        </section>
-
-        <UpcomingEventsWidget />
-
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Link
-              to="/tasks"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-info/15 text-info">
-                <ListTodo className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Tasks</span>
-            </Link>
-            <Link
-              to="/contacts"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-danger/15 text-danger">
-                <Contact className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Contacts</span>
-            </Link>
+      <Page width="wide" className="space-y-8">
+        {/* Welcome header banner */}
+        <div className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-r from-vault-950 via-ink-900 to-ink-950 p-6 md:p-8">
+          <div className="absolute -right-16 -top-16 size-48 rounded-full bg-vault-500/10 blur-3xl" />
+          <div className="relative z-10 space-y-1">
+            <p className="text-xs font-semibold tracking-wider text-vault-400 uppercase">Family Command Center</p>
+            <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-white">Welcome back, {firstName} 👋</h2>
+            <p className="text-sm text-fg-muted max-w-md">Manage your family secrets, calendars, documents, and coordinates securely in one unified hub.</p>
           </div>
-        </section>
+        </div>
+
+        {/* Responsive Grid layout for desktop vs mobile */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Main left column: stats & expiries */}
+          <div className="space-y-6 lg:col-span-2">
+            {/* Stats section */}
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <StatCard
+                icon={FileText}
+                label="Documents"
+                value="—"
+                accent="bg-vault-500/15 text-vault-300"
+              />
+              <StatCard
+                icon={Clock}
+                label="Expiring soon"
+                value="—"
+                accent="bg-warning/15 text-warning"
+              />
+              <StatCard
+                icon={Users}
+                label="Family members"
+                value="—"
+                accent="bg-info/15 text-info"
+              />
+              <StatCard
+                icon={HardDrive}
+                label="Storage used"
+                value="—"
+                accent="bg-success/15 text-success"
+              />
+            </div>
+
+            {/* Expiries section */}
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold tracking-wide text-fg-muted uppercase">
+                Upcoming expiries
+              </h3>
+              <EmptyState
+                icon={CalendarClock}
+                title="Nothing expiring soon"
+                description="Documents nearing their expiry date will show up here so you can renew in time."
+              />
+            </section>
+          </div>
+
+          {/* Right column: events & quick access */}
+          <div className="space-y-6">
+            <UpcomingEventsWidget />
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold tracking-wide text-fg-muted uppercase">Quick access</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <Link
+                  to="/tasks"
+                  className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-4 transition-all hover:bg-white/5 active:scale-95"
+                >
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
+                    <ListTodo className="size-5" />
+                  </span>
+                  <span className="text-sm font-semibold text-fg">Tasks</span>
+                </Link>
+                <Link
+                  to="/contacts"
+                  className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-4 transition-all hover:bg-white/5 active:scale-95"
+                >
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-danger/15 text-danger">
+                    <Contact className="size-5" />
+                  </span>
+                  <span className="text-sm font-semibold text-fg">Contacts</span>
+                </Link>
+              </div>
+            </section>
+          </div>
+        </div>
       </Page>
     </>
   );

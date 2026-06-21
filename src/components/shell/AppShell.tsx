@@ -82,8 +82,12 @@ function MobileTopBar() {
 // Tablet nav rail (icon-only, 64 px wide)
 // ---------------------------------------------------------------------------
 
+import { useAuth } from "../../context/AuthContext";
+import { HardDrive } from "lucide-react";
+
 function NavRail() {
   const { pathname } = useLocation();
+  const { user } = useAuth();
 
   return (
     <nav
@@ -127,8 +131,24 @@ function NavRail() {
         })}
       </ul>
 
-      {/* Settings at bottom */}
-      <div className="flex flex-col items-center pb-6">
+      {/* Settings & Admin at bottom */}
+      <div className="flex flex-col items-center pb-6 gap-2">
+        {user?.isPlatformAdmin && (
+          <Link
+            to="/admin/storage"
+            title="Storage Admin"
+            aria-label="Storage Admin"
+            className={cn(
+              "no-select flex items-center justify-center rounded-xl transition-colors",
+              pathname === "/admin/storage"
+                ? "bg-vault-500/15 text-vault-400"
+                : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
+            )}
+            style={{ minWidth: "var(--tap-min)", minHeight: "var(--tap-min)" }}
+          >
+            <HardDrive className="size-5" aria-hidden="true" />
+          </Link>
+        )}
         <Link
           to="/settings"
           title="Settings"
@@ -154,6 +174,7 @@ function NavRail() {
 
 function NavSidebar() {
   const { pathname } = useLocation();
+  const { user } = useAuth();
 
   return (
     <nav
@@ -200,8 +221,23 @@ function NavSidebar() {
         })}
       </ul>
 
-      {/* Settings at bottom */}
-      <div className="px-2 pb-6">
+      {/* Settings & Admin at bottom */}
+      <div className="px-2 pb-6 flex flex-col gap-1">
+        {user?.isPlatformAdmin && (
+          <Link
+            to="/admin/storage"
+            className={cn(
+              "no-select flex w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
+              pathname === "/admin/storage"
+                ? "bg-vault-500/15 text-vault-400"
+                : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
+            )}
+            style={{ minHeight: "var(--tap-min)" }}
+          >
+            <HardDrive className="size-5 shrink-0" aria-hidden="true" />
+            <span>Platform Admin</span>
+          </Link>
+        )}
         <Link
           to="/settings"
           className={cn(

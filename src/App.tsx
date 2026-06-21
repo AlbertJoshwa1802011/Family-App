@@ -16,6 +16,7 @@ import { Contacts } from "./pages/Contacts";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { AdminStorage } from "./pages/admin/Storage";
+import { Vault } from "./pages/Vault";
 import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -44,6 +45,7 @@ export default function App() {
           }
         >
           <Route path="/" element={<Dashboard />} />
+          <Route path="/vault" element={<Vault />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/:id" element={<DocumentDetail />} />
           <Route path="/calendar" element={<CalendarPage />} />

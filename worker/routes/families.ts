@@ -380,6 +380,74 @@ familyRoutes.post(
   },
 );
 
+// GET /families/me/activity — dynamic redirect/resolution of user's active family activity feed.
+// Added to satisfy frontend queries to /families/me/activity.
+familyRoutes.get("/me/activity", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  // Find user's first active family
+  const membership = await db
+    .select({ familyId: schema.familyMembers.familyId, role: schema.familyMembers.role })
+    .from(schema.familyMembers)
+    .where(
+      and(
+        eq(schema.familyMembers.userId, userId),
+        eq(schema.familyMembers.status, "active"),
+      ),
+    )
+    .get();
+
+  if (!membership) {
+    return c.json({ activities: [], nextCursor: null });
+  }
+
+  const { familyId, role } = membership;
+  const cursor = c.req.query("cursor");
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "50") || 50, 100);
+  const privileged = role === "owner" || role === "admin";
+
+  const conds = [eq(schema.auditLog.familyId, familyId)];
+  if (!privileged) {
+    conds.push(
+      or(
+        eq(schema.auditLog.visibility, "family"),
+        eq(schema.auditLog.actorUserId, userId),
+      )!,
+    );
+  }
+  if (cursor) {
+    const cur = parseInt(cursor);
+    if (!Number.isNaN(cur)) conds.push(lt(schema.auditLog.createdAt, cur));
+  }
+
+  const activities = await db
+    .select({
+      id: schema.auditLog.id,
+      action: schema.auditLog.action,
+      targetType: schema.auditLog.targetType,
+      targetId: schema.auditLog.targetId,
+      meta: schema.auditLog.meta,
+      severity: schema.auditLog.severity,
+      createdAt: schema.auditLog.createdAt,
+      actorUserId: schema.auditLog.actorUserId,
+      actorName: schema.users.name,
+      actorPicture: schema.users.picture,
+    })
+    .from(schema.auditLog)
+    .leftJoin(schema.users, eq(schema.auditLog.actorUserId, schema.users.id))
+    .where(and(...(conds as [(typeof conds)[0], ...typeof conds])))
+    .orderBy(desc(schema.auditLog.createdAt))
+    .limit(limit);
+
+  const nextCursor =
+    activities.length === limit
+      ? activities[activities.length - 1].createdAt
+      : null;
+
+  return c.json({ activities, nextCursor });
+});
+
 // GET /families/:id/activity — the family activity feed (keyset-paginated).
 // PRIVACY: members see family-visible activity + their own actions; owners/admins
 // see everything. The audit row's snapshotted `visibility` drives this without a

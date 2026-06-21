@@ -8,6 +8,8 @@ import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { api } from "../lib/api";
 
+import { useAuth } from "../context/AuthContext";
+
 type EventType = "gathering" | "appointment" | "milestone" | "other";
 
 const EVENT_TYPES: { value: EventType; label: string }[] = [
@@ -46,6 +48,8 @@ export function EventForm() {
   const isEdit = Boolean(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { families } = useAuth();
+  const activeFamilyId = families[0]?.id;
 
   const [form, setForm] = useState<FormState>({
     title: "",
@@ -102,6 +106,7 @@ export function EventForm() {
       : toUnixSeconds(form.date, form.endTime);
 
     mutation.mutate({
+      familyId: activeFamilyId || "",
       title: form.title.trim(),
       type: form.type,
       startAt,
