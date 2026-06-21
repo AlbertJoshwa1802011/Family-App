@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Info, LogOut, Mail } from "lucide-react";
+import { Bell, HardDrive, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -157,6 +157,20 @@ export function Settings() {
             />
           </Card>
         </section>
+
+        {user?.isPlatformAdmin && (
+          <section className="space-y-2">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">Admin</h3>
+            <Card className="divide-y divide-line overflow-hidden">
+              <ListItem
+                to="/admin/storage"
+                leading={<HardDrive className="size-5 text-fg-muted" />}
+                title="Storage account"
+                subtitle="Configure the shared Google Drive backend"
+              />
+            </Card>
+          </section>
+        )}
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">

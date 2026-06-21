@@ -8,11 +8,12 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, audit, ACTIONS } from "../lib/audit";
 import {
-  getDriveAccessToken,
+  getStorageAccessToken,
+  isStorageConfigured,
   createDriveFolder,
   createResumableUploadUrl,
   downloadDriveFile,
-  isDriveConfigured,
+  STORAGE_ACCOUNT_ID,
   DriveError,
 } from "../lib/drive";
 
@@ -107,10 +108,21 @@ async function ensureDriveFolder(
 ): Promise<string> {
   if (family.driveFolderId) return family.driveFolderId;
 
-  const accessToken = await getDriveAccessToken(env, family.ownerUserId);
-  const folderId = await createDriveFolder(accessToken, `Family Vault — ${family.name}`);
-
   const db = getDb(env);
+  // Per-family subfolder lives under the shared storage account's root folder.
+  const storage = await db
+    .select({ rootFolderId: schema.storageAccounts.rootFolderId })
+    .from(schema.storageAccounts)
+    .where(eq(schema.storageAccounts.id, STORAGE_ACCOUNT_ID))
+    .get();
+
+  const accessToken = await getStorageAccessToken(env);
+  const folderId = await createDriveFolder(
+    accessToken,
+    `Family Vault — ${family.name}`,
+    storage?.rootFolderId ?? undefined,
+  );
+
   await db
     .update(schema.families)
     .set({ driveFolderId: folderId })
@@ -340,8 +352,8 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  if (!isDriveConfigured(c.env)) {
-    return c.json({ error: "drive_not_configured" }, 503);
+  if (!(await isStorageConfigured(c.env))) {
+    return c.json({ error: "storage_not_configured" }, 503);
   }
 
   try {
@@ -354,7 +366,7 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
     if (!family) return c.json({ error: "not_found" }, 404);
 
     const folderId = await ensureDriveFolder(c.env, family);
-    const accessToken = await getDriveAccessToken(c.env, family.ownerUserId);
+    const accessToken = await getStorageAccessToken(c.env);
     const uploadUrl = await createResumableUploadUrl(accessToken, folderId, fileName, mimeType);
 
     return c.json({ uploadUrl });
@@ -473,8 +485,8 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
 
   if (!file || file.status === "deleted") return c.json({ error: "not_found" }, 404);
 
-  if (!isDriveConfigured(c.env)) {
-    return c.json({ error: "drive_not_configured" }, 503);
+  if (!(await isStorageConfigured(c.env))) {
+    return c.json({ error: "storage_not_configured" }, 503);
   }
 
   try {
@@ -486,7 +498,7 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
 
     if (!family) return c.json({ error: "not_found" }, 404);
 
-    const accessToken = await getDriveAccessToken(c.env, family.ownerUserId);
+    const accessToken = await getStorageAccessToken(c.env);
     const driveRes = await downloadDriveFile(accessToken, file.driveFileId);
 
     await insertAuditEvent(db, {

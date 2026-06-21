@@ -15,6 +15,7 @@ import { Tasks } from "./pages/Tasks";
 import { Contacts } from "./pages/Contacts";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
+import { AdminStorage } from "./pages/admin/Storage";
 import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/admin/storage" element={<AdminStorage />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

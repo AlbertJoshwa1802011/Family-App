@@ -11,6 +11,7 @@ export interface User {
   email: string;
   name?: string | null;
   picture?: string | null;
+  isPlatformAdmin?: boolean;
 }
 
 export interface Family {

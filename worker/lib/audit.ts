@@ -55,6 +55,8 @@ export const ACTIONS = {
   ADMIN_ADMIN_GRANTED: "admin.admin_granted",
   ADMIN_ADMIN_REVOKED: "admin.admin_revoked",
   ADMIN_METRICS_VIEWED: "admin.metrics_viewed",
+  STORAGE_CONNECTED: "storage.connected",
+  STORAGE_DISCONNECTED: "storage.disconnected",
 } as const;
 
 export type AuditAction = (typeof ACTIONS)[keyof typeof ACTIONS];
@@ -75,6 +77,8 @@ const SECURITY_ACTIONS = new Set<string>([
   ACTIONS.ADMIN_ADMIN_GRANTED,
   ACTIONS.ADMIN_ADMIN_REVOKED,
   ACTIONS.ADMIN_METRICS_VIEWED,
+  ACTIONS.STORAGE_CONNECTED,
+  ACTIONS.STORAGE_DISCONNECTED,
 ]);
 
 export interface AuditEvent {

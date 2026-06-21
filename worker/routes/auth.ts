@@ -7,6 +7,7 @@ import { getDb, schema } from "../db/client";
 import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { audit, ACTIONS } from "../lib/audit";
+import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -64,12 +65,15 @@ authRoutes.get("/me", async (c) => {
     createdAt: m.familyCreatedAt,
   }));
 
+  const platformAdmin = await isPlatformAdmin(db, c.env, user.id);
+
   return c.json({
     user: {
       id: user.id,
       email: user.email,
       name: user.name,
       picture: user.picture,
+      isPlatformAdmin: platformAdmin,
     },
     families,
   });
