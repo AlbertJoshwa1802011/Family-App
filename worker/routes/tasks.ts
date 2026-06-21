@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { audit, ACTIONS } from "../lib/audit";
 
 export const taskRoutes = new Hono<HonoEnv>();
 
@@ -100,6 +101,14 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     updatedAt: now,
   });
 
+  await audit(c, {
+    familyId: data.familyId,
+    action: ACTIONS.TASK_CREATED,
+    targetType: "task",
+    targetId: taskId,
+    meta: { title: data.title },
+  });
+
   const task = await db
     .select()
     .from(schema.tasks)
@@ -168,6 +177,14 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, taskId));
 
+  await audit(c, {
+    familyId: task.familyId,
+    action:
+      updates.status === "done" ? ACTIONS.TASK_COMPLETED : ACTIONS.TASK_UPDATED,
+    targetType: "task",
+    targetId: taskId,
+  });
+
   const updatedTask = await db
     .select()
     .from(schema.tasks)
@@ -199,6 +216,14 @@ taskRoutes.delete("/:id", requireSession, async (c) => {
   }
 
   await db.delete(schema.tasks).where(eq(schema.tasks.id, taskId));
+
+  await audit(c, {
+    familyId: task.familyId,
+    action: ACTIONS.TASK_DELETED,
+    targetType: "task",
+    targetId: taskId,
+    meta: { title: task.title },
+  });
 
   return c.json({ ok: true });
 });

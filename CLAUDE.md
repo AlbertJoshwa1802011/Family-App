@@ -199,7 +199,7 @@ tests.
 
 ## 9. Git workflow in this repo
 
-- Develop on the designated feature branch (currently `claude/family-vault-pwa-plan-TrvxG`).
+- Develop on the designated feature branch (currently `claude/production-deploy-test-k6z4gf`).
 - Conventional-style commit subjects (`feat:`, `security:`, `docs:`, `test:`). Body explains the
   why + lists notable changes. Push with `git push -u origin <branch>`.
 - **Do not open a PR unless explicitly asked.**
@@ -214,9 +214,9 @@ worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
   cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
-  db/schema.ts          ★ single source of truth for all 21 tables
-  lib/                   crypto, session, audit, drive, reminders (pure windowing), email (Resend), notify
-  routes/               auth, families, documents, notifications, events, tasks, contacts
+  db/schema.ts          ★ single source of truth for all 34 tables (21 original + 13 v2: vault×8, items×2, ops×3)
+  lib/                   crypto, session, audit (ACTIONS map + audit() helper), drive, reminders, email (Resend), notify
+  routes/               auth, families, documents, notifications, events, tasks, contacts, activity
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
@@ -225,9 +225,10 @@ src/
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
                          Tasks, Contacts, Family, Settings, Login, NotFound
-migrations/             generated SQL (0000–0003) + meta/ snapshots
+migrations/             generated SQL (0000–0004) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
-docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
+docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT, SHIPPING
+public/theme-init.js    pre-paint data-theme/data-density init (CSP-safe, no FOUC)
 public/_headers         CSP + security headers for static assets
 wrangler.jsonc          Worker config (no assets.directory!)
 vite.config.ts          plugin chain + PWA config
@@ -249,3 +250,21 @@ vite.config.ts          plugin chain + PWA config
 The intended remaining build order is Phase 4 (offline/biometric/search) → Phase 5 (hardening +
 E2E: CSRF Origin/Referer checks, rate limiting, the private-doc authz-matrix test) → Phase 6
 (WhatsApp/push/OCR/shared-drive). See `docs/FEATURES.md §5` for the highest-value gaps.
+
+### v2 expansion (locked decisions D1–D12 in `docs/ARCHITECTURE.md`)
+
+The app is expanding into an **encrypted secrets vault**, **fast search over encrypted data**,
+**voice mode**, **responsive UI + Simple/Elder mode**, **comprehensive audit/activity**, and a
+**platform-maintainer role**. The foundational one-way-door decisions are **locked** in
+`ARCHITECTURE.md` (D1–D12) to avoid future migrations.
+
+- **Phase 0 (shared foundation) — DONE & deployed.** 13 new tables + `audit_log`/`users` alters
+  (migration 0004, additive); themeable `data-theme`/`data-density` tokens (dark default = zero
+  visual change) + pre-paint `public/theme-init.js`; audit `ACTIONS` map + `audit()` helper +
+  full mutation/auth coverage; `/api/activity/me` + privacy-fixed family feed.
+- **Next, each its own PR/deploy (see `docs/SHIPPING.md`):** Phase 1 Secrets Vault (client-side
+  crypto, WebAuthn, opaque-blob routes, blind-index search) → Phase 2 responsive shell +
+  Simple/Elder mode → Phase 3 voice → Phase 4 platform/ops → Phase 5 generic module system.
+
+> ⚠️ **Vault invariant (D6):** the Worker stores only opaque ciphertext + wrapped blobs + blind
+> tags. There is **no server decrypt path, ever.** All crypto is client-side (`src/lib/vaultCrypto.ts`).

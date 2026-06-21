@@ -6,7 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { insertAuditEvent } from "../lib/audit";
+import { insertAuditEvent, audit, ACTIONS } from "../lib/audit";
 import {
   getDriveAccessToken,
   createDriveFolder,
@@ -171,9 +171,10 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
   await insertAuditEvent(db, {
     familyId: data.familyId,
     actorUserId: userId,
-    action: "document_created",
+    action: ACTIONS.DOCUMENT_CREATED,
     targetType: "document",
     targetId: docId,
+    visibility: data.visibility,
     meta: { title: data.title, visibility: data.visibility },
   });
 
@@ -210,6 +211,21 @@ documentRoutes.get("/:id", requireSession, async (c) => {
     membership.role === "member"
   ) {
     return c.json({ error: "not_found" }, 404); // 404 not 403 (don't reveal existence)
+  }
+
+  // Audit a view, deduped via a short-TTL KV key so repeat opens don't spam the log.
+  if (c.env.KV) {
+    const viewKey = `seen:view:${userId}:${docId}`;
+    if (!(await c.env.KV.get(viewKey))) {
+      await c.env.KV.put(viewKey, "1", { expirationTtl: 300 });
+      await audit(c, {
+        familyId: doc.familyId,
+        action: ACTIONS.DOCUMENT_VIEWED,
+        targetType: "document",
+        targetId: docId,
+        visibility: doc.visibility,
+      });
+    }
   }
 
   return c.json({ document: doc });
@@ -295,9 +311,10 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
   await insertAuditEvent(db, {
     familyId: doc.familyId,
     actorUserId: userId,
-    action: "document_deleted",
+    action: ACTIONS.DOCUMENT_TRASHED,
     targetType: "document",
     targetId: docId,
+    visibility: doc.visibility,
     meta: { title: doc.title },
   });
 
@@ -405,9 +422,10 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
   await insertAuditEvent(db, {
     familyId: doc.familyId,
     actorUserId: userId,
-    action: "document_uploaded",
+    action: ACTIONS.DOCUMENT_UPLOADED,
     targetType: "document",
     targetId: docId,
+    visibility: doc.visibility,
     meta: { fileName, mimeType, sizeBytes, version },
   });
 
@@ -474,9 +492,10 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
     await insertAuditEvent(db, {
       familyId: doc.familyId,
       actorUserId: userId,
-      action: "document_downloaded",
+      action: ACTIONS.DOCUMENT_DOWNLOADED,
       targetType: "document",
       targetId: docId,
+      visibility: doc.visibility,
       meta: { fileId, fileName: file.fileName },
     });
 

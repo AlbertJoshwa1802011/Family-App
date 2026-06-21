@@ -22,6 +22,12 @@ export const users = sqliteTable("users", {
   email: text("email").notNull(),
   name: text("name"),
   picture: text("picture"),
+  // UI preference: large-text / high-contrast "Simple mode" (esp. for elderly
+  // members). A per-USER pref synced across that user's devices — NOT inferred
+  // from family `dependent` records (the logged-in session is always a 'user').
+  prefersSimpleMode: integer("prefers_simple_mode", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at").notNull().default(now),
   lastLoginAt: integer("last_login_at"),
 });
@@ -248,20 +254,41 @@ export const reminderPrefs = sqliteTable("reminder_prefs", {
   windowsJson: text("windows_json").notNull().default("[30,7,1]"),
 });
 
-export const auditLog = sqliteTable("audit_log", {
-  id: text("id").primaryKey(),
-  familyId: text("family_id").references(() => families.id, {
-    onDelete: "cascade",
-  }),
-  actorUserId: text("actor_user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  action: text("action").notNull(),
-  targetType: text("target_type"),
-  targetId: text("target_id"),
-  meta: text("meta"),
-  createdAt: integer("created_at").notNull().default(now),
-});
+export const auditLog = sqliteTable(
+  "audit_log",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id").references(() => families.id, {
+      onDelete: "cascade",
+    }),
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // Dot-namespaced taxonomy: `<domain>.<verb_pasttense>` (e.g. document.downloaded,
+    // member.role_changed, secret.revealed, auth.login). See worker/lib/audit.ts ACTIONS.
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    // Small, NON-sensitive context only (titles, old→new role). Never secret values.
+    meta: text("meta"),
+    // 'security' tags auth/role/reveal/admin events so the admin view can filter them.
+    severity: text("severity", { enum: ["info", "security"] })
+      .notNull()
+      .default("info"),
+    // Snapshot of the TARGET's visibility at write time, so the family activity feed
+    // can hide other members' private-item actions without re-joining the (possibly
+    // deleted) target. Mirrors documents.visibility semantics.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("family"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_audit_family_time").on(t.familyId, t.createdAt),
+    index("idx_audit_actor_time").on(t.actorUserId, t.createdAt),
+    index("idx_audit_family_sev_time").on(t.familyId, t.severity, t.createdAt),
+  ],
+);
 
 // ── Calendar / Events ────────────────────────────────────────────────────────
 
@@ -449,3 +476,350 @@ export const documentComments = sqliteTable(
   },
   (t) => [index("idx_comment_doc").on(t.documentId, t.createdAt)],
 );
+
+// ── Secrets Vault (client-side encrypted; the Worker never sees plaintext) ─────
+//
+// Encryption model: HYBRID. A per-family Vault Data Key (VDK) encrypts every
+// item client-side; the VDK is wrapped per member (KEK from passkey-PRF or
+// passphrase) plus an owner escrow copy for recovery. Every `*_cipher` /
+// `wrapped_*` column holds base64url ciphertext the server stores opaquely.
+
+// One logical vault per family. Holds the crypto scheme version + KDF defaults.
+export const vaults = sqliteTable("vaults", {
+  id: text("id").primaryKey(),
+  familyId: text("family_id")
+    .notNull()
+    .references(() => families.id, { onDelete: "cascade" })
+    .unique(),
+  // Bump when algorithms change → enables re-wrap/forward-compat without a schema change.
+  schemeVersion: integer("scheme_version").notNull().default(1),
+  // KDF defaults for the passphrase path (Web Crypto has PBKDF2, not Argon2).
+  kdfParams: text("kdf_params")
+    .notNull()
+    .default('{"alg":"PBKDF2-SHA256","iter":600000}'),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// Wrapped copies of the family VDK — one per member, plus escrow rows
+// (memberId NULL + isEscrow=1 → owner-recovery wrap).
+export const vaultKeys = sqliteTable(
+  "vault_keys",
+  {
+    id: text("id").primaryKey(),
+    vaultId: text("vault_id")
+      .notNull()
+      .references(() => vaults.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => familyMembers.id, {
+      onDelete: "cascade",
+    }),
+    isEscrow: integer("is_escrow", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    wrapMethod: text("wrap_method", {
+      enum: ["passkey", "passphrase", "recovery_code", "ecdh_grant"],
+    }).notNull(),
+    wrappedDek: text("wrapped_dek").notNull(), // base64url(wrap(VDK))
+    wrapIv: text("wrap_iv"), // base64url IV when GCM-wrapped
+    kdfSalt: text("kdf_salt"), // base64url salt (passphrase/recovery paths)
+    kdfParams: text("kdf_params"), // JSON override of vaults.kdfParams
+    // For ecdh_grant: ephemeral pubkey the grantee uses to derive the unwrap key.
+    grantEphemeralPubkey: text("grant_ephemeral_pubkey"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_vaultkey_vault").on(t.vaultId),
+    index("idx_vaultkey_member").on(t.memberId),
+    unique("uq_vaultkey_member_method").on(
+      t.vaultId,
+      t.memberId,
+      t.wrapMethod,
+    ),
+  ],
+);
+
+// Per-member long-lived ECDH public key for receiving VDK grants/re-wraps.
+export const vaultMemberKeys = sqliteTable("vault_member_keys", {
+  memberId: text("member_id")
+    .primaryKey()
+    .references(() => familyMembers.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull(), // base64url SPKI P-256 pubkey (cleartext OK)
+  wrappedPrivkey: text("wrapped_privkey").notNull(), // privkey wrapped by member KEK
+  privkeyIv: text("privkey_iv").notNull(),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// Registered WebAuthn credentials (passkey PRF unlock + step-up assertions).
+export const vaultPasskeys = sqliteTable(
+  "vault_passkeys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull().unique(), // base64url
+    publicKey: text("public_key").notNull(), // COSE pubkey for assertion verify
+    signCount: integer("sign_count").notNull().default(0),
+    transports: text("transports"), // JSON ["internal","hybrid"]
+    label: text("label"), // "Mom's iPhone"
+    prfSalt: text("prf_salt").notNull(), // fixed per-credential PRF input salt
+    createdAt: integer("created_at").notNull().default(now),
+    lastUsedAt: integer("last_used_at"),
+  },
+  (t) => [index("idx_passkey_user").on(t.userId)],
+);
+
+// A secret. Sensitive fields are ciphertext; only blind tags + metadata are queryable.
+// `cipher` holds the metadata blob (title/username/url/notes); `secret_cipher` holds the
+// high-sensitivity value separately so list views decrypt metadata without the secret.
+export const vaultItems = sqliteTable(
+  "vault_items",
+  {
+    id: text("id").primaryKey(),
+    vaultId: text("vault_id")
+      .notNull()
+      .references(() => vaults.id, { onDelete: "cascade" }),
+    // Denormalized for fast family scoping (matches the app's family_id-heavy queries).
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerMemberId: text("owner_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    type: text("type", {
+      enum: ["login", "wifi", "bank", "card", "pin", "note", "totp_seed", "other"],
+    })
+      .notNull()
+      .default("other"),
+    // Same semantics as documents.visibility. 'private' = only owner can see/decrypt.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("family"),
+    // private + escrowExcluded → sealed under a per-item subkey (vault_item_keys), no escrow.
+    escrowExcluded: integer("escrow_excluded", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    voiceReadable: integer("voice_readable", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    cipher: text("cipher").notNull(), // base64url ciphertext (metadata blob)
+    iv: text("iv").notNull(), // base64url 12-byte IV
+    secretCipher: text("secret_cipher"), // separate blob for the high-sensitivity value
+    secretIv: text("secret_iv"),
+    // Blind indexes (HMAC-SHA256 under a separate blind-index key) for server-side filtering.
+    blindTitle: text("blind_title"),
+    blindAccount: text("blind_account"),
+    blindIssuer: text("blind_issuer"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_vitem_family_status").on(t.familyId, t.status),
+    index("idx_vitem_blind_title").on(t.blindTitle),
+    index("idx_vitem_blind_account").on(t.blindAccount),
+  ],
+);
+
+// Trigram blind tags for prefix/substring search (parallel to document_tags join pattern).
+export const vaultBlindTags = sqliteTable(
+  "vault_blind_tags",
+  {
+    itemId: text("item_id")
+      .notNull()
+      .references(() => vaultItems.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(), // HMAC(BIK, trigram), base64url
+  },
+  (t) => [
+    primaryKey({ columns: [t.itemId, t.tag] }),
+    index("idx_vbtag_tag").on(t.tag), // the search index
+  ],
+);
+
+// Per-item subkey, ONLY for private + escrowExcluded items (sealed under member KEK).
+export const vaultItemKeys = sqliteTable("vault_item_keys", {
+  itemId: text("item_id")
+    .primaryKey()
+    .references(() => vaultItems.id, { onDelete: "cascade" }),
+  memberId: text("member_id")
+    .notNull()
+    .references(() => familyMembers.id, { onDelete: "cascade" }),
+  wrappedKey: text("wrapped_key").notNull(), // item subkey wrapped by member KEK
+  wrapIv: text("wrap_iv").notNull(),
+});
+
+// Version history (undo/audit) — parallels files versioning + soft-delete style.
+export const vaultItemVersions = sqliteTable(
+  "vault_item_versions",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => vaultItems.id, { onDelete: "cascade" }),
+    cipher: text("cipher").notNull(),
+    iv: text("iv").notNull(),
+    editedByMemberId: text("edited_by_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_vitemver_item").on(t.itemId, t.createdAt)],
+);
+
+// ── Generic modules (the extensible "boring problems" long tail) ──────────────
+//
+// One table absorbs many future record-keeping modules (subscriptions, warranties,
+// insurance, bills, vehicles, credentials, wiki, checklists, important dates …).
+// Common fields are promoted to real columns (indexable); module-specific fields
+// live in JSON `data`, validated per-type by a Zod schema in worker/modules.
+export const items = sqliteTable(
+  "items",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // Module discriminator, e.g. 'subscription' | 'warranty' | 'insurance' | 'bill' | …
+    type: text("type").notNull(),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subjectMemberId: text("subject_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    title: text("title").notNull(),
+    // Generic "this has a date that should drive reminders" (renewal/expiry/service).
+    dueDate: text("due_date"), // ISO yyyy-mm-dd
+    amountCents: integer("amount_cents"),
+    data: text("data"), // JSON blob (module-specific, Zod-validated per type)
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("family"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    searchText: text("search_text"), // denormalized for cross-module search
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_item_family_type_status").on(t.familyId, t.type, t.status),
+    index("idx_item_family_due").on(t.familyId, t.dueDate), // reminder scan + "expiring soon"
+    index("idx_item_search").on(t.familyId, t.searchText),
+  ],
+);
+
+// Dedupe log for generic `items` reminders (parallel to reminders_log/event_reminders_log).
+export const itemRemindersLog = sqliteTable(
+  "item_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    windowDays: integer("window_days").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_item_reminder").on(
+      t.itemId,
+      t.userId,
+      t.windowDays,
+      t.channel,
+    ),
+  ],
+);
+
+// ── Platform / maintainer ops (NOT per-family — application-wide) ─────────────
+
+// Platform-level admins. Distinct from per-family roles. Runtime source of truth;
+// the FIRST admin is bootstrapped lazily from env.PLATFORM_ADMIN_EMAILS (no
+// self-promotion endpoint). See worker/middleware/requirePlatformAdmin.ts.
+export const platformAdmins = sqliteTable("platform_admins", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  level: text("level", { enum: ["maintainer", "superadmin"] })
+    .notNull()
+    .default("maintainer"),
+  grantedBy: text("granted_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// Time-series storage/usage metrics. Long-narrow (metric/value) so NEW metrics
+// never require a migration. scope='global' for D1/KV totals; 'family' for per-family rollups.
+export const storageSnapshots = sqliteTable(
+  "storage_snapshots",
+  {
+    id: text("id").primaryKey(),
+    capturedAt: integer("captured_at").notNull().default(now),
+    scope: text("scope", { enum: ["global", "family"] }).notNull(),
+    familyId: text("family_id").references(() => families.id, {
+      onDelete: "cascade",
+    }),
+    // e.g. 'd1_bytes','d1_freelist_bytes','kv_keys_total','drive_bytes_active','rows_audit_log'
+    metric: text("metric").notNull(),
+    value: integer("value").notNull(), // bytes or counts
+  },
+  (t) => [
+    index("idx_snap_metric_time").on(t.metric, t.capturedAt),
+    index("idx_snap_family_time").on(t.familyId, t.capturedAt),
+  ],
+);
+
+// Observable maintenance-job run history (reminders, purge, metrics, cleanup, retention …).
+export const jobRuns = sqliteTable(
+  "job_runs",
+  {
+    id: text("id").primaryKey(),
+    jobKey: text("job_key").notNull(),
+    trigger: text("trigger", { enum: ["cron", "manual"] }).notNull(),
+    triggeredBy: text("triggered_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: text("status", { enum: ["running", "ok", "error"] })
+      .notNull()
+      .default("running"),
+    startedAt: integer("started_at").notNull().default(now),
+    finishedAt: integer("finished_at"),
+    stats: text("stats"), // JSON result counts (mirrors cron RunStats)
+    error: text("error"),
+  },
+  (t) => [index("idx_jobrun_key_time").on(t.jobKey, t.startedAt)],
+);
+
+// Application-wide cloud-storage backend account. Single active row (id='default'):
+// all families' document files live in THIS account's Drive, not per-family-owner
+// Drives. Configured by a platform admin via the /admin/storage connect flow. The
+// OAuth refresh + access tokens live in KV (storage:refresh_token / storage:access_token),
+// NEVER in this table and NEVER exposed to the browser — D1 holds only config.
+export const storageAccounts = sqliteTable("storage_accounts", {
+  id: text("id").primaryKey(),
+  provider: text("provider", { enum: ["google_drive"] })
+    .notNull()
+    .default("google_drive"),
+  // Email of the connected storage account (e.g. albertjoshrock101@gmail.com).
+  email: text("email"),
+  // Root Drive folder under which per-family subfolders are created.
+  rootFolderId: text("root_folder_id"),
+  status: text("status", { enum: ["connected", "disconnected"] })
+    .notNull()
+    .default("disconnected"),
+  connectedBy: text("connected_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: integer("created_at").notNull().default(now),
+  updatedAt: integer("updated_at").notNull().default(now),
+});
