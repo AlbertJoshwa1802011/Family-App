@@ -175,6 +175,13 @@ describe("3. Correct HTTP methods on stub routes", () => {
     expect(body.error).toBe("unauthorized");
   });
 
+  it("GET /api/documents/:id/files → 401 without session (version listing)", async () => {
+    const res = await app.request("/api/documents/doc-1/files");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
+  });
+
   it("POST /api/documents → 401 without session (auth required)", async () => {
     const res = await app.request("/api/documents", {
       method: "POST",
