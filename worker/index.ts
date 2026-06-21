@@ -14,6 +14,8 @@ import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { activityRoutes } from "./routes/activity";
 import { adminRoutes } from "./routes/admin";
+import { vaultRoutes } from "./routes/vault";
+import { itemsRoutes } from "./routes/items";
 import { runExpiryReminders } from "./cron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
@@ -55,6 +57,8 @@ api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
 api.route("/activity", activityRoutes);
 api.route("/admin", adminRoutes);
+api.route("/vault", vaultRoutes);
+api.route("/items", itemsRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
