@@ -28,6 +28,8 @@ interface MeResponse {
 interface AuthValue {
   user: User | null;
   families: Family[];
+  /** The user's active family (first membership). Most screens are single-family today. */
+  currentFamily: Family | null;
   isLoading: boolean;
   isAuthenticated: boolean;
 }
@@ -42,9 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
+  const families = data?.families ?? [];
   const value: AuthValue = {
     user: data?.user ?? null,
-    families: data?.families ?? [],
+    families,
+    currentFamily: families[0] ?? null,
     isLoading,
     isAuthenticated: Boolean(data?.user),
   };

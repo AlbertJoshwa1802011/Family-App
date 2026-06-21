@@ -5,6 +5,7 @@ import { cn } from "../../lib/cn";
 
 interface ListItemProps {
   to?: string;
+  onClick?: () => void;
   leading?: ReactNode;
   title: ReactNode;
   subtitle?: ReactNode;
@@ -36,9 +37,10 @@ function Inner({ leading, title, subtitle, trailing, showChevron }: ListItemProp
 }
 
 export function ListItem(props: ListItemProps) {
+  const interactive = Boolean(props.to || props.onClick);
   const base = cn(
     "flex min-h-14 items-center gap-3 px-4 py-3 transition-colors",
-    props.to && "hover:bg-white/5 active:bg-white/[0.07]",
+    interactive && "hover:bg-white/5 active:bg-white/[0.07]",
     props.className,
   );
   if (props.to) {
@@ -46,6 +48,13 @@ export function ListItem(props: ListItemProps) {
       <Link to={props.to} className={base}>
         <Inner {...props} showChevron={props.showChevron ?? true} />
       </Link>
+    );
+  }
+  if (props.onClick) {
+    return (
+      <button type="button" onClick={props.onClick} className={cn(base, "w-full text-left")}>
+        <Inner {...props} showChevron={props.showChevron ?? true} />
+      </button>
     );
   }
   return (
