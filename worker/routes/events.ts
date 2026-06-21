@@ -6,7 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { insertAuditEvent } from "../lib/audit";
+import { insertAuditEvent, ACTIONS } from "../lib/audit";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -123,7 +123,7 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   await insertAuditEvent(db, {
     familyId: data.familyId,
     actorUserId: userId,
-    action: "event_created",
+    action: ACTIONS.EVENT_CREATED,
     targetType: "event",
     targetId: eventId,
     meta: { title: data.title },
@@ -222,7 +222,7 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: "event_updated",
+    action: ACTIONS.EVENT_UPDATED,
     targetType: "event",
     targetId: eventId,
   });
@@ -255,7 +255,7 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: "event_deleted",
+    action: ACTIONS.EVENT_TRASHED,
     targetType: "event",
     targetId: eventId,
   });
@@ -289,7 +289,7 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: "event_cancelled",
+    action: ACTIONS.EVENT_CANCELLED,
     targetType: "event",
     targetId: eventId,
   });

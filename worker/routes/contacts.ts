@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { audit, ACTIONS } from "../lib/audit";
 
 export const contactRoutes = new Hono<HonoEnv>();
 
@@ -77,6 +78,14 @@ contactRoutes.post("/", requireSession, zv(createContactSchema), async (c) => {
     updatedAt: now,
   });
 
+  await audit(c, {
+    familyId: data.familyId,
+    action: ACTIONS.CONTACT_CREATED,
+    targetType: "contact",
+    targetId: contactId,
+    meta: { name: data.name },
+  });
+
   const contact = await db
     .select()
     .from(schema.contacts)
@@ -133,6 +142,13 @@ contactRoutes.patch("/:id", requireSession, zv(updateContactSchema), async (c) =
 
   await db.update(schema.contacts).set(set).where(eq(schema.contacts.id, contactId));
 
+  await audit(c, {
+    familyId: contact.familyId,
+    action: ACTIONS.CONTACT_UPDATED,
+    targetType: "contact",
+    targetId: contactId,
+  });
+
   const updatedContact = await db
     .select()
     .from(schema.contacts)
@@ -164,6 +180,14 @@ contactRoutes.delete("/:id", requireSession, async (c) => {
   }
 
   await db.delete(schema.contacts).where(eq(schema.contacts.id, contactId));
+
+  await audit(c, {
+    familyId: contact.familyId,
+    action: ACTIONS.CONTACT_DELETED,
+    targetType: "contact",
+    targetId: contactId,
+    meta: { name: contact.name },
+  });
 
   return c.json({ ok: true });
 });

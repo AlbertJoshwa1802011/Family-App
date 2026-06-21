@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
+import { audit, ACTIONS } from "../lib/audit";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -155,6 +156,10 @@ authRoutes.get("/google/callback", async (c) => {
 
   if (!tokenRes.ok) {
     console.error("Token exchange failed:", await tokenRes.text());
+    await audit(c, {
+      action: ACTIONS.AUTH_LOGIN_FAILED,
+      meta: { reason: "token_exchange_failed" },
+    });
     return redirect("/login?error=token_exchange_failed");
   }
 
@@ -177,6 +182,10 @@ authRoutes.get("/google/callback", async (c) => {
     picture = payload["picture"] as string | undefined;
   } catch (e) {
     console.error("ID token verification failed:", e);
+    await audit(c, {
+      action: ACTIONS.AUTH_LOGIN_FAILED,
+      meta: { reason: "token_invalid" },
+    });
     return redirect("/login?error=token_invalid");
   }
 
@@ -227,6 +236,12 @@ authRoutes.get("/google/callback", async (c) => {
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
+  await audit(c, {
+    actorUserId: user.id,
+    action: ACTIONS.AUTH_LOGIN,
+    meta: { userAgent: c.req.header("user-agent") },
+  });
+
   return redirect("/");
 });
 
@@ -236,7 +251,14 @@ authRoutes.post("/logout", async (c) => {
   if (sessionId) {
     try {
       const db = getDb(c.env);
+      const session = await validateSession(db, sessionId);
       await deleteSession(db, sessionId);
+      if (session) {
+        await audit(c, {
+          actorUserId: session.userId,
+          action: ACTIONS.AUTH_LOGOUT,
+        });
+      }
     } catch {
       // Best-effort — still clear the cookie even if the DB call fails
     }

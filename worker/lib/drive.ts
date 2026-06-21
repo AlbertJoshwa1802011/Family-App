@@ -15,10 +15,47 @@
  */
 
 import type { Env } from "../types";
+import { getDb, schema } from "../db/client";
+import { eq } from "drizzle-orm";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+
+/** Single row id for the application-wide storage account config. */
+export const STORAGE_ACCOUNT_ID = "default";
+const STORAGE_REFRESH_KEY = "storage:refresh_token";
+const STORAGE_ACCESS_KEY = "storage:access_token";
+
+/**
+ * Exchanges a refresh token for a fresh access token via Google's token endpoint.
+ * Throws DriveError(502) on failure. Returns the token + its lifetime in seconds.
+ */
+async function refreshAccessToken(
+  env: Env,
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresIn: number }> {
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: env.GOOGLE_CLIENT_ID!,
+      client_secret: env.GOOGLE_CLIENT_SECRET!,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new DriveError(`Token refresh failed: ${await res.text()}`, 502);
+  }
+
+  const { access_token, expires_in } = (await res.json()) as {
+    access_token: string;
+    expires_in: number;
+  };
+  return { accessToken: access_token, expiresIn: expires_in };
+}
 
 /**
  * Returns a valid Drive access token for the given owner, refreshing if the
@@ -34,33 +71,49 @@ export async function getDriveAccessToken(env: Env, ownerId: string): Promise<st
     throw new DriveError("No refresh token — owner must re-authenticate", 503);
   }
 
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: env.GOOGLE_CLIENT_ID!,
-      client_secret: env.GOOGLE_CLIENT_SECRET!,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new DriveError(`Token refresh failed: ${body}`, 502);
-  }
-
-  const { access_token, expires_in } = (await res.json()) as {
-    access_token: string;
-    expires_in: number;
-  };
+  const { accessToken, expiresIn } = await refreshAccessToken(env, refreshToken);
 
   // Cache with a 5-minute buffer so we don't use a nearly-expired token
-  await env.KV.put(cacheKey, access_token, {
-    expirationTtl: Math.max(expires_in - 300, 60),
+  await env.KV.put(cacheKey, accessToken, {
+    expirationTtl: Math.max(expiresIn - 300, 60),
   });
 
-  return access_token;
+  return accessToken;
+}
+
+/**
+ * Returns a valid access token for the application-wide STORAGE account (the
+ * single shared Drive that holds every family's files). Refreshes + caches the
+ * same way as per-owner tokens, but keyed under storage:* in KV.
+ */
+export async function getStorageAccessToken(env: Env): Promise<string> {
+  const cached = await env.KV.get(STORAGE_ACCESS_KEY);
+  if (cached) return cached;
+
+  const refreshToken = await env.KV.get(STORAGE_REFRESH_KEY);
+  if (!refreshToken) {
+    throw new DriveError("Storage account not connected", 503);
+  }
+
+  const { accessToken, expiresIn } = await refreshAccessToken(env, refreshToken);
+  await env.KV.put(STORAGE_ACCESS_KEY, accessToken, {
+    expirationTtl: Math.max(expiresIn - 300, 60),
+  });
+  return accessToken;
+}
+
+/**
+ * True if the shared storage account is connected (D1 row status='connected'
+ * AND the OAuth client secrets are present). Gates all document Drive ops.
+ */
+export async function isStorageConfigured(env: Env): Promise<boolean> {
+  if (!isDriveConfigured(env)) return false;
+  const row = await getDb(env)
+    .select({ status: schema.storageAccounts.status })
+    .from(schema.storageAccounts)
+    .where(eq(schema.storageAccounts.id, STORAGE_ACCOUNT_ID))
+    .get();
+  return row?.status === "connected";
 }
 
 /**

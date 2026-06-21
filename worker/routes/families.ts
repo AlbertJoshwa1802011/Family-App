@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { insertAuditEvent } from "../lib/audit";
+import { insertAuditEvent, ACTIONS } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 
 export const familyRoutes = new Hono<HonoEnv>();
@@ -94,7 +94,7 @@ familyRoutes.post("/", requireSession, zv(createFamilySchema), async (c) => {
   await insertAuditEvent(db, {
     familyId,
     actorUserId: userId,
-    action: "family_created",
+    action: ACTIONS.FAMILY_CREATED,
     targetType: "family",
     targetId: familyId,
   });
@@ -205,7 +205,7 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
   await insertAuditEvent(db, {
     familyId: invite.familyId,
     actorUserId: userId,
-    action: "member_joined",
+    action: ACTIONS.MEMBER_JOINED,
     targetType: "family",
     targetId: invite.familyId,
     meta: { role: invite.role },
@@ -306,7 +306,10 @@ familyRoutes.patch(
     await insertAuditEvent(db, {
       familyId,
       actorUserId: userId,
-      action: "member_updated",
+      action:
+        updates.role !== undefined
+          ? ACTIONS.MEMBER_ROLE_CHANGED
+          : ACTIONS.MEMBER_UPDATED,
       targetType: "member",
       targetId: memberId,
       meta: updates as Record<string, unknown>,
@@ -356,7 +359,7 @@ familyRoutes.post(
     await insertAuditEvent(db, {
       familyId,
       actorUserId: userId,
-      action: "invite_created",
+      action: ACTIONS.MEMBER_INVITED,
       targetType: "invite",
       meta: { email, role },
     });
@@ -377,20 +380,60 @@ familyRoutes.post(
   },
 );
 
-// GET /families/:id/activity — surfaces audit_log entries for the family.
+// GET /families/:id/activity — the family activity feed (keyset-paginated).
+// PRIVACY: members see family-visible activity + their own actions; owners/admins
+// see everything. The audit row's snapshotted `visibility` drives this without a
+// join back to the (possibly deleted) target — mirrors the documents predicate.
 familyRoutes.get("/:id/activity", requireSession, async (c) => {
   const { id: familyId } = c.req.param();
+  const me = c.get("userId")!;
 
   const memberOrError = await requireFamilyMember(c, familyId);
   if (memberOrError instanceof Response) return memberOrError;
 
   const db = getDb(c.env);
-  const activities = await db
-    .select()
-    .from(schema.auditLog)
-    .where(eq(schema.auditLog.familyId, familyId))
-    .orderBy(desc(schema.auditLog.createdAt))
-    .limit(50);
+  const cursor = c.req.query("cursor");
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "50") || 50, 100);
+  const privileged =
+    memberOrError.role === "owner" || memberOrError.role === "admin";
 
-  return c.json({ activities });
+  const conds = [eq(schema.auditLog.familyId, familyId)];
+  if (!privileged) {
+    conds.push(
+      or(
+        eq(schema.auditLog.visibility, "family"),
+        eq(schema.auditLog.actorUserId, me),
+      )!,
+    );
+  }
+  if (cursor) {
+    const cur = parseInt(cursor);
+    if (!Number.isNaN(cur)) conds.push(lt(schema.auditLog.createdAt, cur));
+  }
+
+  const activities = await db
+    .select({
+      id: schema.auditLog.id,
+      action: schema.auditLog.action,
+      targetType: schema.auditLog.targetType,
+      targetId: schema.auditLog.targetId,
+      meta: schema.auditLog.meta,
+      severity: schema.auditLog.severity,
+      createdAt: schema.auditLog.createdAt,
+      actorUserId: schema.auditLog.actorUserId,
+      actorName: schema.users.name,
+      actorPicture: schema.users.picture,
+    })
+    .from(schema.auditLog)
+    .leftJoin(schema.users, eq(schema.auditLog.actorUserId, schema.users.id))
+    .where(and(...(conds as [(typeof conds)[0], ...typeof conds])))
+    .orderBy(desc(schema.auditLog.createdAt))
+    .limit(limit);
+
+  const nextCursor =
+    activities.length === limit
+      ? activities[activities.length - 1].createdAt
+      : null;
+
+  return c.json({ activities, nextCursor });
 });

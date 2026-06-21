@@ -21,6 +21,8 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Secret used to sign/derive session + invite token hashes. */
   SESSION_SECRET?: string;
+  /** Comma-separated emails bootstrapped as platform admins on first login. */
+  PLATFORM_ADMIN_EMAILS?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

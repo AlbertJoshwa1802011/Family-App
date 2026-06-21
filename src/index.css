@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
+/* ── Custom variants ──────────────────────────────────────────────────────────
+   `elder:` applies to descendants of <html data-density="elder"> (Simple mode),
+   e.g. `elder:hidden` to drop clutter, `hidden elder:flex` to reveal big controls. */
+@custom-variant elder (&:where([data-density="elder"] *));
+
 @theme {
-  /* Brand */
+  /* Brand (STATIC — brand identity, intentionally not themed) */
   --color-vault-50: #f0fdfa;
   --color-vault-300: #5eead4;
   --color-vault-400: #2dd4bf;
@@ -9,28 +14,33 @@
   --color-vault-600: #0d9488;
   --color-vault-700: #0f766e;
 
-  /* Surfaces (dark) */
+  /* Semantic surface/text/line tokens — DARK is the default (emitted to :root).
+     Runtime theming overrides these SAME names under [data-theme="light"] below, so
+     every Tailwind utility (bg-surface, text-fg, border-line, …) swaps automatically.
+     This indirection is the "lock theming now" decision: retrofitting it after pages
+     reference static colors would be a large migration. */
   --color-ink-950: #070b14;
   --color-ink-900: #0b1220;
   --color-ink-800: #111a2e;
   --color-ink-700: #1a2540;
   --color-surface: #111a2e;
   --color-surface-2: #16213c;
-
-  /* Text */
   --color-fg: #e6edf6;
   --color-fg-muted: #94a3b8;
   --color-fg-subtle: #64748b;
-
-  /* Borders */
   --color-line: #ffffff14;
   --color-line-strong: #ffffff24;
 
-  /* States */
+  /* States (static — legible on both themes) */
   --color-success: #34d399;
   --color-warning: #fbbf24;
   --color-danger: #f87171;
   --color-info: #60a5fa;
+
+  /* Themeable extras */
+  --backdrop-glow-1: #0f766e33;
+  --backdrop-glow-2: #14b8a61f;
+  --skeleton-sheen: #ffffff14;
 
   /* Radius & elevation */
   --radius-card: 16px;
@@ -39,6 +49,58 @@
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Breakpoints — mobile-first. Device intent: sm=big phone, md=tablet portrait,
+     lg=tablet landscape / small laptop, xl=laptop, 2xl=big screen. */
+  --breakpoint-sm: 24rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+  --breakpoint-2xl: 96rem;
+
+  /* Minimum touch target (WCAG 44px); Simple mode enlarges it below. */
+  --tap-min: 2.75rem;
+}
+
+/* ── Theme: light overrides (dark = @theme default → zero visual change today) ── */
+[data-theme="light"] {
+  --color-ink-950: #f8fafc;
+  --color-ink-900: #f1f5f9;
+  --color-ink-800: #e2e8f0;
+  --color-ink-700: #cbd5e1;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8fafc;
+  --color-fg: #0f172a;
+  --color-fg-muted: #475569;
+  --color-fg-subtle: #64748b;
+  --color-line: #0f172a14;
+  --color-line-strong: #0f172a24;
+  --backdrop-glow-1: #14b8a614;
+  --backdrop-glow-2: #0f766e0a;
+  --skeleton-sheen: #0f172a0a;
+}
+
+/* ── Density: Simple/Elder mode (composes with either theme) ───────────────────
+   Bumps the root font-size so EVERY rem-based size (Tailwind text + spacing) grows
+   together with zero component edits, raises contrast, strengthens lines, and enlarges
+   touch targets/radius. `--text-scale` is reserved for the Phase-2 fluid type scale.
+   The multiplier is intentionally moderate here (tunable up to ~1.35 once pages are
+   responsive) so today's max-w-md mobile layouts don't overflow. */
+:root {
+  --text-scale: 1;
+}
+[data-density="elder"] {
+  font-size: 125%; /* 16px → 20px */
+  --text-scale: 1.25;
+  --color-fg-muted: var(--color-fg); /* kill low-contrast muted text (→ AAA) */
+  --color-fg-subtle: #cbd5e1; /* promote subtle text one step */
+  --color-line: var(--color-line-strong); /* stronger separators */
+  --tap-min: 3.5rem; /* 56px targets */
+  --radius-card: 20px;
+}
+/* In light + elder, darken (don't lighten) subtle text for contrast. */
+[data-theme="light"][data-density="elder"] {
+  --color-fg-subtle: #334155;
 }
 
 html,
@@ -64,15 +126,19 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Subtle premium backdrop glow */
+/* Subtle premium backdrop glow (themeable) */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(60% 50% at 50% -10%, #0f766e33, transparent 70%),
-    radial-gradient(40% 30% at 90% 10%, #14b8a61f, transparent 70%);
+    radial-gradient(
+      60% 50% at 50% -10%,
+      var(--backdrop-glow-1),
+      transparent 70%
+    ),
+    radial-gradient(40% 30% at 90% 10%, var(--backdrop-glow-2), transparent 70%);
   pointer-events: none;
 }
 
@@ -113,7 +179,7 @@ body::before {
   background: linear-gradient(
     90deg,
     transparent,
-    #ffffff14,
+    var(--skeleton-sheen),
     transparent
   );
   animation: shimmer 1.4s infinite;
