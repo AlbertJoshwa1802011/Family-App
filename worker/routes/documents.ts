@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { reindexDocument } from "../lib/extract";
+import { rejectForeignOrigin } from "../middleware/requireValidOrigin";
 import {
   getDriveAccessToken,
   createDriveFolder,
@@ -532,7 +533,11 @@ documentRoutes.get("/:id/files", requireSession, async (c) => {
 
 // GET /documents/:id/files/:fid/download — proxy download from Drive.
 // Always sets Content-Disposition: attachment to prevent inline execution.
-documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
+// CSRF for the download proxy (CLAUDE.md §8): Lax cookies ride top-level GETs.
+// rejectForeignOrigin runs before requireSession and rejects only when an
+// explicitly foreign Origin/Referer is present, so legitimate same-origin
+// downloads (incl. Referer-stripped) still work.
+documentRoutes.get("/:id/files/:fid/download", rejectForeignOrigin, requireSession, async (c) => {
   const { id: docId, fid: fileId } = c.req.param();
   const userId = c.get("userId")!;
   const db = getDb(c.env);

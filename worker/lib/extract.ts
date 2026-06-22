@@ -138,10 +138,13 @@ export async function runDocumentExtraction(
         method: "POST",
         headers: {
           ...(env.OCR_API_KEY ? { Authorization: `Bearer ${env.OCR_API_KEY}` } : {}),
-          "Content-Type": file.mimeType,
+          // Guard against a malformed stored mime type producing an illegal header.
+          "Content-Type": file.mimeType || "application/octet-stream",
         },
         body: driveRes.body,
-      });
+        // Required when streaming a request body (workerd/undici).
+        duplex: "half",
+      } as RequestInit & { duplex: "half" });
       if (!ocrRes.ok) {
         await markExtract(db, row.documentId, "failed");
         continue;

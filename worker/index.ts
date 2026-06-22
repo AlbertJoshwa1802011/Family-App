@@ -35,9 +35,14 @@ app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
 // CSRF: credentialed state-changing requests must come from our own origin.
 app.use("/api/*", requireValidOrigin);
-// Rate limiting (per-IP, KV-backed; no-ops without KV). Auth is tightest; all
-// other state-changing requests share a looser bucket.
-app.use("/api/auth/*", rateLimit({ limit: 30, windowSecs: 60, keyPrefix: "auth" }));
+// Rate limiting (per-IP, KV-backed; no-ops without KV). The OAuth endpoints are
+// the abuse surface and get the tightest bucket; all other state-changing
+// requests share a looser bucket. (Session checks like GET /auth/me are NOT
+// rate-limited — refetch-on-focus must never 429 a valid user into a logout.)
+app.use(
+  "/api/auth/google/*",
+  rateLimit({ limit: 30, windowSecs: 60, keyPrefix: "auth" }),
+);
 app.use(
   "/api/*",
   rateLimit({ limit: 120, windowSecs: 60, keyPrefix: "mut", unsafeOnly: true }),

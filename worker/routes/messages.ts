@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -53,9 +53,11 @@ messageRoutes.get("/", requireSession, async (c) => {
     .from(schema.messages)
     .leftJoin(schema.users, eq(schema.messages.userId, schema.users.id))
     .where(and(...(conditions as [typeof conditions[0], ...typeof conditions])))
-    .orderBy(asc(schema.messages.createdAt))
+    // Fetch the most recent N, then present oldest→newest for the thread view.
+    .orderBy(desc(schema.messages.createdAt))
     .limit(MESSAGE_LIMIT);
 
+  rows.reverse();
   return c.json({ messages: rows });
 });
 

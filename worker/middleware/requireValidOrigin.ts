@@ -14,6 +14,36 @@ function originOf(value: string | undefined): string | null {
   }
 }
 
+function allowedOrigins(c: AppContext): Set<string> {
+  const allowed = new Set<string>();
+  const appOrigin = originOf(c.env?.APP_URL);
+  if (appOrigin) allowed.add(appOrigin);
+  try {
+    allowed.add(new URL(c.req.url).origin);
+  } catch {
+    // ignore malformed request URL
+  }
+  return allowed;
+}
+
+/**
+ * True when the request carries an Origin/Referer that is NOT our own. Used to
+ * guard the download proxy (a GET): top-level navigations from our own pages
+ * send a same-origin Referer (and no Origin), so legitimate downloads pass even
+ * when Referer is stripped, while a cross-site trigger is rejected.
+ */
+export function hasForeignOrigin(c: AppContext): boolean {
+  const candidate =
+    originOf(c.req.header("Origin")) ?? originOf(c.req.header("Referer"));
+  return candidate !== null && !allowedOrigins(c).has(candidate);
+}
+
+/** Route middleware: reject a request that carries an explicitly foreign origin. */
+export async function rejectForeignOrigin(c: AppContext, next: Next) {
+  if (hasForeignOrigin(c)) return c.json({ error: "forbidden_origin" }, 403);
+  return next();
+}
+
 /**
  * CSRF defense for credentialed, state-changing requests.
  *
@@ -33,20 +63,10 @@ export async function requireValidOrigin(c: AppContext, next: Next) {
   if (SAFE_METHODS.has(c.req.method)) return next();
   if (!getCookie(c, COOKIE_NAME)) return next();
 
-  const allowed = new Set<string>();
-  const appOrigin = originOf(c.env?.APP_URL);
-  if (appOrigin) allowed.add(appOrigin);
-  // Same-origin requests: trust the request's own origin (covers local/dev too).
-  try {
-    allowed.add(new URL(c.req.url).origin);
-  } catch {
-    // ignore malformed request URL
-  }
-
   const candidate =
     originOf(c.req.header("Origin")) ?? originOf(c.req.header("Referer"));
 
-  if (!candidate || !allowed.has(candidate)) {
+  if (!candidate || !allowedOrigins(c).has(candidate)) {
     return c.json({ error: "forbidden_origin" }, 403);
   }
   return next();

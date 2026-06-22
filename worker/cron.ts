@@ -101,6 +101,9 @@ async function occasionRecipients(
   const userIds = new Set(
     members.map((m) => m.userId).filter((u): u is string => Boolean(u)),
   );
+  // If the tagged members are all accountless dependents (no one notifiable),
+  // fall back to the whole family rather than silently reminding no one.
+  if (userIds.size === 0) return all;
   return all.filter((r) => userIds.has(r.userId));
 }
 

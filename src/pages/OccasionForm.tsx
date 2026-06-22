@@ -127,6 +127,7 @@ function FormFields({
   const [date, setDate] = useState(initial.date);
   const [recurring, setRecurring] = useState(initial.recurring);
   const [notes, setNotes] = useState(initial.notes);
+  const [subjectMemberId, setSubjectMemberId] = useState(initial.subjectMemberId);
   const [recipients, setRecipients] = useState<string[]>(initial.recipientMemberIds);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -159,6 +160,7 @@ function FormFields({
       title: title.trim(),
       date,
       recurring,
+      subjectMemberId: subjectMemberId || undefined,
       notes: notes.trim() || undefined,
       recipientMemberIds: recipients,
     };
@@ -274,6 +276,27 @@ function FormFields({
               />
             </button>
           </Card>
+
+          {members.length > 0 && (
+            <div>
+              <label className={labelCls} htmlFor="occ-subject">
+                Who is this for?
+              </label>
+              <select
+                id="occ-subject"
+                className={inputCls}
+                value={subjectMemberId}
+                onChange={(e) => setSubjectMemberId(e.target.value)}
+              >
+                <option value="">Not specified</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name ?? m.displayName ?? "Member"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Tag who to remind */}
           {members.length > 0 && (

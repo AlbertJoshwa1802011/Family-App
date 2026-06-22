@@ -41,4 +41,18 @@ describe("CSRF origin enforcement", () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it("blocks the download proxy from a foreign origin (before auth)", async () => {
+    const res = await app.request("/api/documents/d1/files/f1/download", {
+      headers: { Referer: "https://evil.example/page" },
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("forbidden_origin");
+  });
+
+  it("allows the download proxy with no Origin/Referer (falls through to auth)", async () => {
+    const res = await app.request("/api/documents/d1/files/f1/download");
+    expect(res.status).toBe(401);
+  });
 });
