@@ -21,6 +21,10 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Secret used to sign/derive session + invite token hashes. */
   SESSION_SECRET?: string;
+  /** Optional OCR/text-extraction provider endpoint (POST file bytes → {text}). */
+  OCR_PROVIDER_URL?: string;
+  /** Optional bearer token for the OCR provider. */
+  OCR_API_KEY?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

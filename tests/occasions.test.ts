@@ -77,6 +77,21 @@ describe("/api/occasions: 401 without session", () => {
   }
 });
 
+describe("/api/documents/search", () => {
+  it("401 without session", async () => {
+    const res = await app.request("/api/documents/search?familyId=fam-1&q=passport");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
+  });
+
+  it("returns JSON + nosniff", async () => {
+    const res = await app.request("/api/documents/search?familyId=fam-1&q=x");
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+});
+
 describe("/api/occasions: routing + headers", () => {
   it("deep path → 404 not_found", async () => {
     const res = await app.request("/api/occasions/x/y/z");

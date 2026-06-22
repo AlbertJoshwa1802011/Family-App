@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FolderOpen, Plus, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
@@ -52,11 +52,30 @@ export function Documents() {
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string | null>(null);
 
+  // Debounce the query so server search fires after typing settles.
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(query.trim()), 300);
+    return () => clearTimeout(id);
+  }, [query]);
+  const searching = debounced.length > 0;
+
   const { data, isLoading } = useQuery({
     queryKey: ["documents", familyId],
     queryFn: () =>
       api<{ documents: DocumentSummary[] }>(`/documents?familyId=${familyId}`),
     enabled: Boolean(familyId),
+  });
+
+  // Server-side search (matches title/description/category + extracted keywords
+  // & OCR contents). Only runs while there's a query.
+  const { data: searchData, isFetching: isSearching } = useQuery({
+    queryKey: ["documents-search", familyId, debounced],
+    queryFn: () =>
+      api<{ documents: DocumentSummary[] }>(
+        `/documents/search?familyId=${familyId}&q=${encodeURIComponent(debounced)}`,
+      ),
+    enabled: Boolean(familyId) && searching,
   });
 
   const docs = useMemo(() => data?.documents ?? [], [data]);
@@ -68,18 +87,14 @@ export function Documents() {
   }, [docs]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return docs
-      .filter((d) => (activeCat ? d.category === activeCat : true))
-      .filter((d) =>
-        q
-          ? d.title.toLowerCase().includes(q) ||
-            (d.description ?? "").toLowerCase().includes(q) ||
-            categoryMeta(d.category).label.toLowerCase().includes(q)
-          : true,
-      )
-      .sort(byUrgency);
-  }, [docs, query, activeCat]);
+    // While searching, use server results (already expiry-ordered); otherwise
+    // browse the full list with smart ordering. Category chip still applies.
+    const source = searching ? (searchData?.documents ?? []) : docs;
+    const byCat = source.filter((d) =>
+      activeCat ? d.category === activeCat : true,
+    );
+    return searching ? byCat : [...byCat].sort(byUrgency);
+  }, [docs, searchData, searching, activeCat]);
 
   return (
     <>
@@ -123,7 +138,7 @@ export function Documents() {
           </div>
         )}
 
-        {isLoading ? (
+        {isLoading || (searching && isSearching && filtered.length === 0) ? (
           <Card className="divide-y divide-line" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <DocSkeleton key={i} />

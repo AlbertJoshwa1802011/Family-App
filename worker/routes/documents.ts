@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
+import { reindexDocument } from "../lib/extract";
 import {
   getDriveAccessToken,
   createDriveFolder,
@@ -141,6 +142,60 @@ documentRoutes.get("/", requireSession, async (c) => {
   return c.json({ documents });
 });
 
+// GET /documents/search?familyId=:fid&q=:query — full search across title,
+// description, category and the extraction index (keywords + OCR text),
+// visibility-filtered, expiry-first ordered. Registered before /:id.
+documentRoutes.get("/search", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const familyId = c.req.query("familyId");
+  const q = (c.req.query("q") ?? "").trim();
+
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+
+  const membership = await requireFamilyMember(c, familyId);
+  if (membership instanceof Response) return membership;
+
+  if (q.length === 0) return c.json({ documents: [] });
+
+  const db = getDb(c.env);
+  const pattern = `%${q.toLowerCase()}%`;
+
+  const rows = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      category: schema.documents.category,
+      description: schema.documents.description,
+      expiryDate: schema.documents.expiryDate,
+      updatedAt: schema.documents.updatedAt,
+    })
+    .from(schema.documents)
+    .leftJoin(
+      schema.documentExtracts,
+      eq(schema.documentExtracts.documentId, schema.documents.id),
+    )
+    .where(
+      and(
+        visibilityWhere(familyId, userId, membership.role),
+        or(
+          like(schema.documents.title, pattern),
+          like(schema.documents.description, pattern),
+          like(schema.documents.category, pattern),
+          like(schema.documentExtracts.keywords, pattern),
+          like(schema.documentExtracts.text, pattern),
+        ),
+      ),
+    )
+    .orderBy(
+      sql`${schema.documents.expiryDate} is null`,
+      schema.documents.expiryDate,
+      desc(schema.documents.updatedAt),
+    )
+    .limit(50);
+
+  return c.json({ documents: rows });
+});
+
 // POST /documents — create document metadata record.
 documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => {
   const userId = c.get("userId")!;
@@ -176,6 +231,8 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
     targetId: docId,
     meta: { title: data.title, visibility: data.visibility },
   });
+
+  await reindexDocument(db, docId);
 
   const document = await db
     .select()
@@ -263,6 +320,8 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
     targetId: docId,
     meta: { fields: Object.keys(updates) },
   });
+
+  await reindexDocument(db, docId);
 
   const document = await db
     .select()
@@ -419,6 +478,13 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
     targetId: docId,
     meta: { fileName, mimeType, sizeBytes, version },
   });
+
+  // Re-index so the new file's name is searchable and OCR is re-queued.
+  await db
+    .update(schema.documentExtracts)
+    .set({ status: "pending" })
+    .where(eq(schema.documentExtracts.documentId, docId));
+  await reindexDocument(db, docId);
 
   const file = await db
     .select()

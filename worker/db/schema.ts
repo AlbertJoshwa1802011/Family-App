@@ -430,6 +430,30 @@ export const memberHealth = sqliteTable("member_health", {
   updatedAt: integer("updated_at").notNull().default(now),
 });
 
+// ── Search index / extraction ────────────────────────────────────────────────
+
+// One row per document. `keywords` is a normalized, lowercase search blob seeded
+// from the document metadata + current file name (always populated). `text` is
+// optional OCR/extracted body, filled in by the background extraction pass when
+// an OCR provider is configured. Search matches across both.
+export const documentExtracts = sqliteTable(
+  "document_extracts",
+  {
+    documentId: text("document_id")
+      .primaryKey()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    keywords: text("keywords").notNull().default(""),
+    text: text("text"),
+    status: text("status", {
+      enum: ["pending", "done", "skipped", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_extract_status").on(t.status)],
+);
+
 // ── Customizable email report template (per family) ──────────────────────────
 
 // One editable HTML template per family for reminder emails. The reminder

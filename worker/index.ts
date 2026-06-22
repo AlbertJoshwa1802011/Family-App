@@ -17,6 +17,7 @@ import { messageRoutes } from "./routes/messages";
 import { runExpiryReminders } from "./cron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
+import { runDocumentExtraction } from "./lib/extract";
 import { requireValidOrigin } from "./middleware/requireValidOrigin";
 import { rateLimit } from "./middleware/rateLimit";
 
@@ -99,5 +100,7 @@ export default {
   ) {
     ctx.waitUntil(runExpiryReminders(env));
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
+    // Background document extraction (no-op unless an OCR provider is configured).
+    ctx.waitUntil(runDocumentExtraction(getDb(env), env));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;
