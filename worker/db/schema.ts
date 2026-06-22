@@ -430,6 +430,23 @@ export const memberHealth = sqliteTable("member_health", {
   updatedAt: integer("updated_at").notNull().default(now),
 });
 
+// ── Customizable email report template (per family) ──────────────────────────
+
+// One editable HTML template per family for reminder emails. The reminder
+// heading/body/CTA are injected as {{placeholders}}; if no row exists the cron
+// falls back to the built-in default template.
+export const emailTemplates = sqliteTable("email_templates", {
+  familyId: text("family_id")
+    .primaryKey()
+    .references(() => families.id, { onDelete: "cascade" }),
+  subject: text("subject"),
+  html: text("html").notNull(),
+  updatedBy: text("updated_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  updatedAt: integer("updated_at").notNull().default(now),
+});
+
 // ── Family chat ──────────────────────────────────────────────────────────────
 
 // One group thread per family. Near-real-time delivery is handled by the client

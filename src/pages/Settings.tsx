@@ -212,6 +212,12 @@ export function Settings() {
               title="Notification center"
               subtitle="View reminders & updates"
             />
+            <ListItem
+              to="/settings/email-report"
+              leading={<Mail className="size-5 text-fg-muted" />}
+              title="Email report template"
+              subtitle="Customize your reminder emails"
+            />
           </Card>
         </section>
 

@@ -14,7 +14,11 @@ import {
   parseWindows,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
-import { reminderEmailHtml, sendEmail } from "./lib/email";
+import {
+  DEFAULT_REMINDER_TEMPLATE,
+  renderTemplate,
+  sendEmail,
+} from "./lib/email";
 
 /** ISO yyyy-mm-dd `daysAhead` days from the instant `nowMs` (UTC). */
 function isoDaysAhead(nowMs: number, daysAhead: number): string {
@@ -137,6 +141,29 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     return cached;
   }
 
+  // Resolve a family's reminder-email HTML, using their custom template if set
+  // (cached per family), otherwise the built-in default.
+  const templateCache = new Map<string, string>();
+  async function emailHtmlFor(
+    familyId: string,
+    opts: { heading: string; body: string; ctaLabel: string; ctaUrl: string },
+  ): Promise<string> {
+    let tpl = templateCache.get(familyId);
+    if (tpl === undefined) {
+      const row = await db
+        .select()
+        .from(schema.emailTemplates)
+        .where(eq(schema.emailTemplates.familyId, familyId))
+        .get();
+      tpl = row?.html ?? DEFAULT_REMINDER_TEMPLATE;
+      templateCache.set(familyId, tpl);
+    }
+    return renderTemplate(tpl, {
+      ...opts,
+      year: String(new Date().getUTCFullYear()),
+    });
+  }
+
   // ── Documents ───────────────────────────────────────────────────────────────
   const docs = await db
     .select()
@@ -200,7 +227,7 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: await emailHtmlFor(doc.familyId, {
               heading: text.title,
               body: text.body,
               ctaLabel: "View document",
@@ -274,7 +301,7 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: await emailHtmlFor(ev.familyId, {
               heading: text.title,
               body: text.body,
               ctaLabel: "View event",
@@ -351,7 +378,7 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: await emailHtmlFor(occ.familyId, {
               heading: text.title,
               body: text.body,
               ctaLabel: "Open Family Vault",

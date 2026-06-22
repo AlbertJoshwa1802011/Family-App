@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isEmailConfigured,
+  renderTemplate,
   reminderEmailHtml,
   sendEmail,
 } from "../worker/lib/email";
@@ -117,5 +118,24 @@ describe("reminderEmailHtml", () => {
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("a &amp; b &lt; c");
+  });
+});
+
+describe("renderTemplate (custom email templates)", () => {
+  it("substitutes known tokens (with whitespace tolerance)", () => {
+    const out = renderTemplate("Hi {{name}} — {{ greeting }}!", {
+      name: "Sam",
+      greeting: "welcome",
+    });
+    expect(out).toBe("Hi Sam — welcome!");
+  });
+
+  it("escapes substituted values but trusts the template", () => {
+    const out = renderTemplate("<b>{{v}}</b>", { v: "<i>x</i> & y" });
+    expect(out).toBe("<b>&lt;i&gt;x&lt;/i&gt; &amp; y</b>");
+  });
+
+  it("renders unknown tokens as empty", () => {
+    expect(renderTemplate("a{{missing}}b", {})).toBe("ab");
   });
 });

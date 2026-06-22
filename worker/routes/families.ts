@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
+import { DEFAULT_REMINDER_TEMPLATE } from "../lib/email";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -376,6 +377,100 @@ familyRoutes.post(
     );
   },
 );
+
+// ── Customizable email report template ────────────────────────────────────────
+
+const emailTemplateSchema = z.object({
+  html: z.string().min(1).max(50_000),
+  subject: z.string().max(300).optional(),
+});
+
+// GET /families/:id/email-template — current custom template (+ built-in default).
+familyRoutes.get("/:id/email-template", requireSession, async (c) => {
+  const { id: familyId } = c.req.param();
+  const memberOrError = await requireFamilyMember(c, familyId);
+  if (memberOrError instanceof Response) return memberOrError;
+
+  const db = getDb(c.env);
+  const row = await db
+    .select()
+    .from(schema.emailTemplates)
+    .where(eq(schema.emailTemplates.familyId, familyId))
+    .get();
+
+  return c.json({
+    template: row ? { html: row.html, subject: row.subject } : null,
+    default: DEFAULT_REMINDER_TEMPLATE,
+  });
+});
+
+// PUT /families/:id/email-template — upsert the family's custom template (admin+).
+familyRoutes.put(
+  "/:id/email-template",
+  requireSession,
+  zv(emailTemplateSchema),
+  async (c) => {
+    const { id: familyId } = c.req.param();
+    const userId = c.get("userId")!;
+    const { html, subject } = c.req.valid("json");
+
+    const callerOrError = await requireFamilyMember(c, familyId, "admin");
+    if (callerOrError instanceof Response) return callerOrError;
+
+    const db = getDb(c.env);
+    const now = Math.floor(Date.now() / 1000);
+    const existing = await db
+      .select({ familyId: schema.emailTemplates.familyId })
+      .from(schema.emailTemplates)
+      .where(eq(schema.emailTemplates.familyId, familyId))
+      .get();
+
+    if (existing) {
+      await db
+        .update(schema.emailTemplates)
+        .set({ html, subject, updatedBy: userId, updatedAt: now })
+        .where(eq(schema.emailTemplates.familyId, familyId));
+    } else {
+      await db
+        .insert(schema.emailTemplates)
+        .values({ familyId, html, subject, updatedBy: userId, updatedAt: now });
+    }
+
+    await insertAuditEvent(db, {
+      familyId,
+      actorUserId: userId,
+      action: "email_template_updated",
+      targetType: "family",
+      targetId: familyId,
+    });
+
+    return c.json({ template: { html, subject } });
+  },
+);
+
+// DELETE /families/:id/email-template — revert to the built-in default (admin+).
+familyRoutes.delete("/:id/email-template", requireSession, async (c) => {
+  const { id: familyId } = c.req.param();
+  const userId = c.get("userId")!;
+
+  const callerOrError = await requireFamilyMember(c, familyId, "admin");
+  if (callerOrError instanceof Response) return callerOrError;
+
+  const db = getDb(c.env);
+  await db
+    .delete(schema.emailTemplates)
+    .where(eq(schema.emailTemplates.familyId, familyId));
+
+  await insertAuditEvent(db, {
+    familyId,
+    actorUserId: userId,
+    action: "email_template_reset",
+    targetType: "family",
+    targetId: familyId,
+  });
+
+  return c.json({ ok: true });
+});
 
 // GET /families/:id/activity — surfaces audit_log entries for the family.
 familyRoutes.get("/:id/activity", requireSession, async (c) => {

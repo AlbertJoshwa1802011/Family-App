@@ -18,6 +18,7 @@ import { Occasions } from "./pages/Occasions";
 import { OccasionForm } from "./pages/OccasionForm";
 import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
+import { EmailReport } from "./pages/EmailReport";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
 
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/email-report" element={<EmailReport />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
