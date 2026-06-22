@@ -36,6 +36,13 @@
       "when": 1782090624375,
       "tag": "0004_friendly_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1782091019789,
+      "tag": "0005_fluffy_silver_fox",
+      "breakpoints": true
     }
   ]
 }

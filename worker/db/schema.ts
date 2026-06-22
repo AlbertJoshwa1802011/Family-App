@@ -430,6 +430,27 @@ export const memberHealth = sqliteTable("member_health", {
   updatedAt: integer("updated_at").notNull().default(now),
 });
 
+// ── Family chat ──────────────────────────────────────────────────────────────
+
+// One group thread per family. Near-real-time delivery is handled by the client
+// polling GET /messages?since=… (a WebSocket/Durable-Object upgrade can come later
+// without changing this shape).
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_message_family_created").on(t.familyId, t.createdAt)],
+);
+
 // ── Occasions (birthdays / anniversaries / custom recurring reminders) ───────
 
 export const occasions = sqliteTable(
