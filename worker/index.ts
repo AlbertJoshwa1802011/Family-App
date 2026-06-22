@@ -17,6 +17,8 @@ import { messageRoutes } from "./routes/messages";
 import { runExpiryReminders } from "./cron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
+import { requireValidOrigin } from "./middleware/requireValidOrigin";
+import { rateLimit } from "./middleware/rateLimit";
 
 // 1 MiB cap on JSON request bodies. File uploads go to a dedicated multipart
 // route with its own (larger) streaming limit; this protects every metadata
@@ -30,6 +32,15 @@ const app = new Hono<HonoEnv>();
 app.use("/api/*", requestId());
 app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
+// CSRF: credentialed state-changing requests must come from our own origin.
+app.use("/api/*", requireValidOrigin);
+// Rate limiting (per-IP, KV-backed; no-ops without KV). Auth is tightest; all
+// other state-changing requests share a looser bucket.
+app.use("/api/auth/*", rateLimit({ limit: 30, windowSecs: 60, keyPrefix: "auth" }));
+app.use(
+  "/api/*",
+  rateLimit({ limit: 120, windowSecs: 60, keyPrefix: "mut", unsafeOnly: true }),
+);
 // Reject oversized JSON bodies before any handler runs (memory-safety).
 app.use(
   "/api/*",

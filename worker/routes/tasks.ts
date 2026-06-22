@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { insertAuditEvent } from "../lib/audit";
 
 export const taskRoutes = new Hono<HonoEnv>();
 
@@ -100,6 +101,15 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     updatedAt: now,
   });
 
+  await insertAuditEvent(db, {
+    familyId: data.familyId,
+    actorUserId: userId,
+    action: "task_created",
+    targetType: "task",
+    targetId: taskId,
+    meta: { title: data.title },
+  });
+
   const task = await db
     .select()
     .from(schema.tasks)
@@ -168,6 +178,14 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, taskId));
 
+  await insertAuditEvent(db, {
+    familyId: task.familyId,
+    actorUserId: userId,
+    action: updates.status ? `task_${updates.status}` : "task_updated",
+    targetType: "task",
+    targetId: taskId,
+  });
+
   const updatedTask = await db
     .select()
     .from(schema.tasks)
@@ -199,6 +217,15 @@ taskRoutes.delete("/:id", requireSession, async (c) => {
   }
 
   await db.delete(schema.tasks).where(eq(schema.tasks.id, taskId));
+
+  await insertAuditEvent(db, {
+    familyId: task.familyId,
+    actorUserId: userId,
+    action: "task_deleted",
+    targetType: "task",
+    targetId: taskId,
+    meta: { title: task.title },
+  });
 
   return c.json({ ok: true });
 });

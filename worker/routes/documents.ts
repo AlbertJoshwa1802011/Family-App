@@ -255,6 +255,15 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
 
   await db.update(schema.documents).set(set).where(eq(schema.documents.id, docId));
 
+  await insertAuditEvent(db, {
+    familyId: doc.familyId,
+    actorUserId: userId,
+    action: "document_updated",
+    targetType: "document",
+    targetId: docId,
+    meta: { fields: Object.keys(updates) },
+  });
+
   const document = await db
     .select()
     .from(schema.documents)
@@ -619,6 +628,15 @@ documentRoutes.post("/:id/comments", requireSession, zv(createCommentSchema), as
     updatedAt: now,
   });
 
+  await insertAuditEvent(db, {
+    familyId: doc.familyId,
+    actorUserId: userId,
+    action: "comment_created",
+    targetType: "document",
+    targetId: docId,
+    meta: { commentId },
+  });
+
   const comment = await db
     .select()
     .from(schema.documentComments)
@@ -668,6 +686,15 @@ documentRoutes.delete("/:id/comments/:cid", requireSession, async (c) => {
     .update(schema.documentComments)
     .set({ deletedAt: Math.floor(Date.now() / 1000) })
     .where(eq(schema.documentComments.id, commentId));
+
+  await insertAuditEvent(db, {
+    familyId: doc.familyId,
+    actorUserId: userId,
+    action: "comment_deleted",
+    targetType: "document",
+    targetId: docId,
+    meta: { commentId },
+  });
 
   return c.json({ ok: true });
 });
