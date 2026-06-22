@@ -124,7 +124,7 @@ export function EventDetailPage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
-                <h2 className="flex-1 text-base font-semibold text-white leading-snug">
+                <h2 className="flex-1 text-base font-semibold text-fg leading-snug">
                   {ev.title}
                 </h2>
                 {ev.status === "cancelled" && (

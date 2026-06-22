@@ -1,7 +1,19 @@
 @import "tailwindcss";
 
+/*
+ * THEME SYSTEM
+ * ------------
+ * The @theme block defines the DEFAULT (Midnight) tokens — this is what makes
+ * Tailwind v4 generate the utility classes (bg-vault-600, text-fg, border-line…).
+ * Those utilities compile to `var(--color-…)`, so we can re-skin the entire app at
+ * runtime simply by overriding the same CSS variables under a [data-theme="…"]
+ * selector. No component markup changes required.
+ *
+ * `<html data-theme="…">` is set by src/context/ThemeContext.tsx (and a no-flash
+ * inline script in index.html).
+ */
 @theme {
-  /* Brand */
+  /* Brand / accent (Midnight = teal) */
   --color-vault-50: #f0fdfa;
   --color-vault-300: #5eead4;
   --color-vault-400: #2dd4bf;
@@ -39,6 +51,131 @@
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Per-theme overrides. Each block redefines the variables the utilities read. */
+:root,
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --glow-a: #0f766e33;
+  --glow-b: #14b8a61f;
+}
+
+[data-theme="ocean"] {
+  color-scheme: dark;
+  --color-vault-50: #eff6ff;
+  --color-vault-300: #93c5fd;
+  --color-vault-400: #60a5fa;
+  --color-vault-500: #3b82f6;
+  --color-vault-600: #2563eb;
+  --color-vault-700: #1d4ed8;
+  --color-ink-950: #060912;
+  --color-ink-900: #0a1120;
+  --color-ink-800: #0f1a30;
+  --color-ink-700: #16223f;
+  --color-surface: #0f1a30;
+  --color-surface-2: #14213c;
+  --color-fg: #e8eefc;
+  --color-fg-muted: #9fb0cc;
+  --color-fg-subtle: #64708a;
+  --color-info: #60a5fa;
+  --glow-a: #1d4ed83d;
+  --glow-b: #3b82f622;
+}
+
+[data-theme="sunset"] {
+  color-scheme: dark;
+  --color-vault-50: #fff7ed;
+  --color-vault-300: #fdba74;
+  --color-vault-400: #fb923c;
+  --color-vault-500: #f97316;
+  --color-vault-600: #ea580c;
+  --color-vault-700: #c2410c;
+  --color-ink-950: #120a08;
+  --color-ink-900: #1a0f0b;
+  --color-ink-800: #271713;
+  --color-ink-700: #38211a;
+  --color-surface: #1f120d;
+  --color-surface-2: #2a1812;
+  --color-fg: #f7ece6;
+  --color-fg-muted: #c9ab9c;
+  --color-fg-subtle: #8a6f62;
+  --glow-a: #c2410c40;
+  --glow-b: #f9731622;
+}
+
+[data-theme="forest"] {
+  color-scheme: dark;
+  --color-vault-50: #ecfdf5;
+  --color-vault-300: #6ee7b7;
+  --color-vault-400: #34d399;
+  --color-vault-500: #10b981;
+  --color-vault-600: #059669;
+  --color-vault-700: #047857;
+  --color-ink-950: #05100b;
+  --color-ink-900: #07160f;
+  --color-ink-800: #0c2218;
+  --color-ink-700: #123022;
+  --color-surface: #0a1d14;
+  --color-surface-2: #0e2519;
+  --color-fg: #e6f4ec;
+  --color-fg-muted: #93b3a1;
+  --color-fg-subtle: #5d7a68;
+  --color-success: #34d399;
+  --glow-a: #04785740;
+  --glow-b: #10b98122;
+}
+
+[data-theme="royal"] {
+  color-scheme: dark;
+  --color-vault-50: #f5f3ff;
+  --color-vault-300: #c4b5fd;
+  --color-vault-400: #a78bfa;
+  --color-vault-500: #8b5cf6;
+  --color-vault-600: #7c3aed;
+  --color-vault-700: #6d28d9;
+  --color-ink-950: #0b0814;
+  --color-ink-900: #110b1f;
+  --color-ink-800: #1b1230;
+  --color-ink-700: #261a42;
+  --color-surface: #160f29;
+  --color-surface-2: #1d1536;
+  --color-fg: #ece8f7;
+  --color-fg-muted: #a99fc4;
+  --color-fg-subtle: #6f6589;
+  --glow-a: #6d28d940;
+  --glow-b: #8b5cf622;
+}
+
+/* Light theme. Surfaces become light, text becomes dark, borders darken. */
+[data-theme="daylight"] {
+  color-scheme: light;
+  --color-vault-50: #f0fdfa;
+  --color-vault-300: #2dd4bf;
+  --color-vault-400: #14b8a6;
+  --color-vault-500: #0d9488;
+  --color-vault-600: #0f766e;
+  --color-vault-700: #115e59;
+  --color-ink-950: #eef2f7;
+  --color-ink-900: #e6ebf2;
+  --color-ink-800: #ffffff;
+  --color-ink-700: #dbe3ee;
+  --color-surface: #ffffff;
+  --color-surface-2: #f5f8fc;
+  --color-fg: #0f172a;
+  --color-fg-muted: #475569;
+  --color-fg-subtle: #94a3b8;
+  --color-line: #0f172a14;
+  --color-line-strong: #0f172a24;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+  --shadow-card: 0 1px 2px #0f172a14, 0 12px 30px -16px #0f172a26;
+  --shadow-pop: 0 -8px 40px -8px #0f172a1f;
+  --glow-a: #0d948826;
+  --glow-b: #14b8a614;
 }
 
 html,
@@ -60,20 +197,23 @@ body {
   color: var(--color-fg);
   font-family:
     "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 0.4s var(--ease-out), color 0.4s var(--ease-out);
 }
 
-/* Subtle premium backdrop glow */
+/* Subtle premium backdrop glow (theme-aware). */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(60% 50% at 50% -10%, #0f766e33, transparent 70%),
-    radial-gradient(40% 30% at 90% 10%, #14b8a61f, transparent 70%);
+    radial-gradient(60% 50% at 50% -10%, var(--glow-a), transparent 70%),
+    radial-gradient(40% 30% at 90% 10%, var(--glow-b), transparent 70%);
   pointer-events: none;
+  transition: background 0.4s var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -92,6 +232,30 @@ body::before {
 }
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Native-feeling momentum + hidden scrollbars for horizontal rails. */
+.no-scrollbar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Premium entrance: gentle rise + fade for page content. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: rise 0.4s var(--ease-out) both;
 }
 
 /* Skeleton shimmer */
@@ -113,7 +277,7 @@ body::before {
   background: linear-gradient(
     90deg,
     transparent,
-    #ffffff14,
+    color-mix(in srgb, var(--color-fg) 8%, transparent),
     transparent
   );
   animation: shimmer 1.4s infinite;

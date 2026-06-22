@@ -10,7 +10,7 @@ export function Page({
   className?: string;
 }) {
   return (
-    <div className={cn("mx-auto max-w-md px-4 pt-4 pb-28", className)}>
+    <div className={cn("animate-rise mx-auto max-w-md px-4 pt-4 pb-28", className)}>
       {children}
     </div>
   );

@@ -11,6 +11,19 @@
     <meta name="apple-mobile-web-app-title" content="Family Vault" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>Family Vault</title>
+    <script>
+      // No-flash theme: apply the persisted theme before first paint.
+      (function () {
+        try {
+          var t = localStorage.getItem("fv-theme");
+          var ok = ["midnight", "ocean", "sunset", "forest", "royal", "daylight"];
+          document.documentElement.dataset.theme =
+            ok.indexOf(t) !== -1 ? t : "midnight";
+        } catch (e) {
+          document.documentElement.dataset.theme = "midnight";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

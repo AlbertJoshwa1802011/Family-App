@@ -41,7 +41,7 @@ export function Login() {
         <ShieldCheck className="size-10 text-vault-300" aria-hidden="true" />
       </div>
 
-      <h1 className="mt-6 text-3xl font-bold tracking-tight text-white">
+      <h1 className="mt-6 text-3xl font-bold tracking-tight text-fg">
         Family Vault
       </h1>
       <p className="mt-3 max-w-xs text-sm leading-relaxed text-fg-muted">

@@ -32,7 +32,7 @@ function StatCard({
       >
         <Icon className="size-5" aria-hidden="true" />
       </div>
-      <div className="mt-3 text-2xl font-bold tabular-nums text-white">
+      <div className="mt-3 text-2xl font-bold tabular-nums text-fg">
         {value}
       </div>
       <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
@@ -109,7 +109,7 @@ export function Dashboard() {
       <Page className="space-y-6">
         <div>
           <p className="text-sm text-fg-muted">Welcome back,</p>
-          <h2 className="text-xl font-semibold text-white">{firstName} 👋</h2>
+          <h2 className="text-xl font-semibold text-fg">{firstName} 👋</h2>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

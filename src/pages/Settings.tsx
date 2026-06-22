@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Info, LogOut, Mail } from "lucide-react";
+import { Bell, Check, Info, LogOut, Mail, Palette } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -8,8 +8,58 @@ import { Avatar } from "../components/ui/Avatar";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { cn } from "../lib/cn";
 import { api } from "../lib/api";
+
+function ThemePicker() {
+  const { theme, setTheme, themes } = useTheme();
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-2">
+        <Palette className="size-5 text-fg-muted" />
+        <div>
+          <div className="text-sm font-medium text-fg">Theme</div>
+          <div className="text-xs text-fg-muted">Pick the look that suits you</div>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {themes.map((t) => {
+          const active = t.id === theme;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTheme(t.id)}
+              aria-pressed={active}
+              className={cn(
+                "group relative flex flex-col items-center gap-2 rounded-2xl border p-3 transition-all active:scale-[0.97]",
+                active
+                  ? "border-vault-500/60 ring-2 ring-vault-400/40"
+                  : "border-line hover:border-line-strong",
+              )}
+            >
+              <span
+                className="relative flex h-12 w-full items-center justify-center overflow-hidden rounded-xl"
+                style={{ background: t.swatch[0] }}
+              >
+                <span
+                  className="size-5 rounded-full shadow"
+                  style={{ background: t.swatch[1] }}
+                />
+                {active && (
+                  <span className="absolute right-1.5 top-1.5 flex size-4 items-center justify-center rounded-full bg-vault-500 text-white">
+                    <Check className="size-3" strokeWidth={3} />
+                  </span>
+                )}
+              </span>
+              <span className="text-xs font-medium text-fg">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
 
 interface ReminderPrefs {
   emailEnabled: boolean;
@@ -128,7 +178,7 @@ export function Settings() {
             className="size-12"
           />
           <div className="min-w-0">
-            <div className="truncate font-semibold text-white">
+            <div className="truncate font-semibold text-fg">
               {user?.name ?? "Guest"}
             </div>
             <div className="truncate text-sm text-fg-muted">
@@ -136,6 +186,13 @@ export function Settings() {
             </div>
           </div>
         </Card>
+
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            Appearance
+          </h3>
+          <ThemePicker />
+        </section>
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
