@@ -26,7 +26,7 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 136+ tests; must stay green
+npm run test           # vitest run — 211+ tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
@@ -174,7 +174,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **182 tests across 10 files**, all green.
+same depth. Current baseline: **211 tests across 15 files**, all green.
 
 Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
 timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
@@ -216,7 +216,10 @@ worker/
   cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
   db/schema.ts          ★ single source of truth for all 21 tables
   lib/                   crypto, session, audit, drive, reminders (pure windowing), email (Resend), notify
-  routes/               auth, families, documents, notifications, events, tasks, contacts
+  routes/               auth, families, documents, notifications, events, tasks, contacts,
+                        occasions, messages
+  middleware/           requireSession, requireMember, requireValidOrigin (CSRF), rateLimit
+  lib/                   …, extract (search index + gated OCR), email (renderTemplate engine)
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
@@ -246,6 +249,22 @@ vite.config.ts          plugin chain + PWA config
   (no-op without `RESEND_API_KEY`); session purge runs in the same cron. In-app notification
   center + per-user reminder prefs (channels + lead-time windows) are live on the frontend.
 
-The intended remaining build order is Phase 4 (offline/biometric/search) → Phase 5 (hardening +
-E2E: CSRF Origin/Referer checks, rate limiting, the private-doc authz-matrix test) → Phase 6
-(WhatsApp/push/OCR/shared-drive). See `docs/FEATURES.md §5` for the highest-value gaps.
+**Redesign (Phase 4+) — implemented** (see `docs/REDESIGN_PLAN.md`):
+- **Theming**: CSS-variable theme engine, 6 themes (`src/lib/themes.ts`,
+  `context/ThemeContext`), no-flash via same-origin `public/theme-init.js` (inline scripts
+  are CSP-blocked — never reintroduce an inline `<script>` in index.html).
+- **Documents**: full upload flow (`src/lib/upload.ts` resumable Drive PUT + progress),
+  real DocumentDetail (files/versions/download/comments), predefined categories
+  (`src/lib/categories.ts`), `GET /documents/search` + keyword index (`document_extracts`,
+  `worker/lib/extract.ts`); background OCR is gated on `OCR_PROVIDER_URL` (no-op otherwise).
+- **Occasions**: birthday/anniversary/custom annually-recurring reminders with member
+  **tagging** (`occasions`, `occasion_recipients`, `occasion_reminders_log`); cron scans them.
+- **Family chat**: `messages` table + `/api/messages`, polling-based thread UI (`src/pages/Chat`).
+- **Email reports**: per-family customizable HTML template (`email_templates`) + `renderTemplate`
+  `{{token}}` engine; cron resolves the active template per family.
+- **Security**: CSRF Origin/Referer middleware (`requireValidOrigin`; download proxy uses
+  `rejectForeignOrigin`), KV rate limiting (`rateLimit`, scoped tight on `/api/auth/google/*`),
+  broader audit-log coverage.
+
+Remaining: Phase 4 offline/biometric, Phase 5 the private-doc authz-matrix integration test,
+Phase 6 (push/WhatsApp/shared-drive, real OCR provider, WebSocket chat). See `docs/FEATURES.md §5`.

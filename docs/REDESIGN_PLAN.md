@@ -1,9 +1,15 @@
 # Redesign Plan — Premium Case-Management PWA
 
-> Status: in progress. This document is the execution plan for the redesign +
-> feature expansion. Definition of done per slice: `typecheck`, `lint`, `test`,
-> `build` all green (and `db:generate` + `validate_migrations.py` when the schema
-> changes).
+> Status: **shipped** (slices 1–5 + occasions + chat). This document is the
+> execution plan for the redesign + feature expansion. Definition of done per
+> slice: `typecheck`, `lint`, `test`, `build` all green (and `db:generate` +
+> `validate_migrations.py` when the schema changes). Suite: 211 tests, 15 files.
+>
+> Delivered: theme engine (6 themes) · iOS polish · fixed upload (drag-drop +
+> progress) · real DocumentDetail · categories + smart ordering · server search +
+> keyword/OCR index · occasions (birthday/anniversary/custom) with member tagging ·
+> occasion reminders in cron · WhatsApp-style family chat · customizable email
+> report templates · CSRF + rate limiting + fuller audit log.
 
 ## Goals (from the product owner)
 
