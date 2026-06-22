@@ -430,6 +430,84 @@ export const memberHealth = sqliteTable("member_health", {
   updatedAt: integer("updated_at").notNull().default(now),
 });
 
+// ── Occasions (birthdays / anniversaries / custom recurring reminders) ───────
+
+export const occasions = sqliteTable(
+  "occasions",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    type: text("type", { enum: ["birthday", "anniversary", "custom"] })
+      .notNull()
+      .default("custom"),
+    title: text("title").notNull(),
+    // Base date (ISO yyyy-mm-dd). For recurring occasions the cron computes the
+    // next annual occurrence from this; the year here is the original year.
+    date: text("date").notNull(),
+    recurring: integer("recurring", { mode: "boolean" }).notNull().default(true),
+    // Optional: whose birthday/anniversary this is.
+    subjectMemberId: text("subject_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_occasion_family").on(t.familyId, t.status)],
+);
+
+// Members tagged to be reminded for an occasion. If an occasion has no tagged
+// recipients, the cron reminds every notifiable member of the family.
+export const occasionRecipients = sqliteTable(
+  "occasion_recipients",
+  {
+    occasionId: text("occasion_id")
+      .notNull()
+      .references(() => occasions.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.occasionId, t.memberId] })],
+);
+
+// Per-occurrence dedupe for occasion reminders (occurrenceDate keys the year so
+// next year's birthday reminder isn't suppressed by this year's row).
+export const occasionRemindersLog = sqliteTable(
+  "occasion_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    occasionId: text("occasion_id")
+      .notNull()
+      .references(() => occasions.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    occurrenceDate: text("occurrence_date").notNull(),
+    windowDays: integer("window_days").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_occasion_reminder").on(
+      t.occasionId,
+      t.userId,
+      t.occurrenceDate,
+      t.windowDays,
+      t.channel,
+    ),
+  ],
+);
+
 // ── Document Comments ────────────────────────────────────────────────────────
 
 export const documentComments = sqliteTable(

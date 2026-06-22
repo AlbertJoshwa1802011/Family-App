@@ -105,6 +105,52 @@ export function expiryReminderText(
   };
 }
 
+/**
+ * Next annual occurrence of a recurring date (e.g. a birthday/anniversary) as
+ * `yyyy-mm-dd`, relative to `nowMs` (UTC). Returns this year's date if it hasn't
+ * passed, otherwise next year's. Feb-29 falls back to Feb-28 in non-leap years.
+ * Returns null for malformed input.
+ */
+export function nextOccurrenceIso(baseIso: string, nowMs: number): string | null {
+  const parts = baseIso.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  const [, m, d] = parts;
+  const year = new Date(nowMs).getUTCFullYear();
+
+  const build = (y: number): string => {
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate(); // last day of month m
+    const day = Math.min(d, lastDay);
+    return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  const thisYear = build(year);
+  return (daysUntilIso(thisYear, nowMs) ?? -1) >= 0 ? thisYear : build(year + 1);
+}
+
+/** Human label + body for an occasion (birthday/anniversary/custom) reminder. */
+export function occasionReminderText(
+  title: string,
+  type: "birthday" | "anniversary" | "custom",
+  daysUntil: number,
+): { title: string; body: string } {
+  const noun =
+    type === "birthday"
+      ? "🎂 Birthday"
+      : type === "anniversary"
+        ? "💍 Anniversary"
+        : "📌 Reminder";
+  if (daysUntil <= 0) {
+    return { title: `${noun} today: ${title}`, body: `${title} is today. 🎉` };
+  }
+  if (daysUntil === 1) {
+    return { title: `${noun} tomorrow: ${title}`, body: `${title} is tomorrow.` };
+  }
+  return {
+    title: `${noun} in ${daysUntil} days: ${title}`,
+    body: `${title} is coming up in ${daysUntil} days.`,
+  };
+}
+
 /** Human label + body for an upcoming event reminder. */
 export function eventReminderText(
   title: string,

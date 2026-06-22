@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, CalendarDays, CheckCheck, FileText } from "lucide-react";
+import { Bell, CalendarDays, CalendarHeart, CheckCheck, FileText, MessageCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
@@ -36,6 +36,8 @@ function relativeTime(epochSecs: number): string {
 function typeIcon(type: string) {
   if (type === "event") return CalendarDays;
   if (type === "expiry") return FileText;
+  if (type === "occasion") return CalendarHeart;
+  if (type === "message") return MessageCircle;
   return Bell;
 }
 

@@ -12,6 +12,7 @@ import { notificationRoutes } from "./routes/notifications";
 import { eventRoutes } from "./routes/events";
 import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
+import { occasionRoutes } from "./routes/occasions";
 import { runExpiryReminders } from "./cron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
@@ -51,6 +52,7 @@ api.route("/notifications", notificationRoutes);
 api.route("/events", eventRoutes);
 api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
+api.route("/occasions", occasionRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

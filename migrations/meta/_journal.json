@@ -29,6 +29,13 @@
       "when": 1780880777703,
       "tag": "0003_perfect_joystick",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782090624375,
+      "tag": "0004_friendly_hiroim",
+      "breakpoints": true
     }
   ]
 }

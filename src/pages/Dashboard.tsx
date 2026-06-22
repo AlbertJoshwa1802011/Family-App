@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, CalendarDays, Clock, Contact, FileText, HardDrive, ListTodo, Plus, Users } from "lucide-react";
+import { CalendarClock, CalendarDays, CalendarHeart, Clock, Contact, FileText, HardDrive, ListTodo, MessageCircle, Plus, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { NotificationBell } from "../components/NotificationBell";
@@ -9,10 +9,86 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ListItem } from "../components/ui/ListItem";
+import { Badge } from "../components/ui/Badge";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type { EventSummary } from "./Calendar";
 import { eventTypeColor, formatEventTime } from "../lib/eventTime";
+import {
+  countdownLabel,
+  daysUntil,
+  nextOccurrence,
+  occasionTypeMeta,
+} from "../lib/occasions";
+
+interface Occasion {
+  id: string;
+  type: string;
+  title: string;
+  date: string;
+  recurring: boolean;
+}
+
+function UpcomingOccasionsWidget() {
+  const { families } = useAuth();
+  const familyId = families[0]?.id;
+  const { data } = useQuery({
+    queryKey: ["occasions", familyId],
+    queryFn: () => api<{ occasions: Occasion[] }>(`/occasions?familyId=${familyId}`),
+    enabled: Boolean(familyId),
+  });
+
+  const upcoming = useMemo(() => {
+    return (data?.occasions ?? [])
+      .map((o) => {
+        const next = nextOccurrence(o.date, o.recurring);
+        return { ...o, days: daysUntil(next) };
+      })
+      .filter((o) => o.days >= 0)
+      .sort((a, b) => a.days - b.days)
+      .slice(0, 3);
+  }, [data]);
+
+  if (upcoming.length === 0) return null;
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-fg-muted">Upcoming occasions</h3>
+        <Link
+          to="/occasions"
+          className="flex items-center gap-1 text-xs text-vault-400 hover:text-vault-300"
+        >
+          View all
+        </Link>
+      </div>
+      <Card className="divide-y divide-line overflow-hidden">
+        {upcoming.map((o) => {
+          const meta = occasionTypeMeta(o.type);
+          const Icon = meta.icon;
+          return (
+            <ListItem
+              key={o.id}
+              to={`/occasions/${o.id}/edit`}
+              leading={
+                <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
+                  <Icon className="size-5" />
+                </span>
+              }
+              title={o.title}
+              subtitle={meta.label}
+              trailing={
+                <Badge tone={o.days <= 7 ? "warning" : "neutral"}>
+                  {countdownLabel(o.days)}
+                </Badge>
+              }
+            />
+          );
+        })}
+      </Card>
+    </section>
+  );
+}
 
 function StatCard({
   icon: Icon,
@@ -37,6 +113,30 @@ function StatCard({
       </div>
       <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
     </Card>
+  );
+}
+
+function QuickLink({
+  to,
+  icon: Icon,
+  label,
+  accent,
+}: {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  accent: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5 active:scale-[0.98]"
+    >
+      <span className={`flex size-9 items-center justify-center rounded-xl ${accent}`}>
+        <Icon className="size-5" />
+      </span>
+      <span className="text-sm font-medium text-fg">{label}</span>
+    </Link>
   );
 }
 
@@ -150,29 +250,17 @@ export function Dashboard() {
           />
         </section>
 
+        <UpcomingOccasionsWidget />
+
         <UpcomingEventsWidget />
 
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
           <div className="grid grid-cols-2 gap-3">
-            <Link
-              to="/tasks"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-info/15 text-info">
-                <ListTodo className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Tasks</span>
-            </Link>
-            <Link
-              to="/contacts"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-danger/15 text-danger">
-                <Contact className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Contacts</span>
-            </Link>
+            <QuickLink to="/occasions" icon={CalendarHeart} label="Occasions" accent="bg-vault-500/15 text-vault-300" />
+            <QuickLink to="/chat" icon={MessageCircle} label="Family chat" accent="bg-success/15 text-success" />
+            <QuickLink to="/tasks" icon={ListTodo} label="Tasks" accent="bg-info/15 text-info" />
+            <QuickLink to="/contacts" icon={Contact} label="Contacts" accent="bg-danger/15 text-danger" />
           </div>
         </section>
       </Page>

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, lte, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import type { Env } from "./types";
 import { getDb, type Db } from "./db/client";
 import { schema } from "./db/client";
@@ -9,6 +9,8 @@ import {
   dueReminderWindow,
   eventReminderText,
   expiryReminderText,
+  nextOccurrenceIso,
+  occasionReminderText,
   parseWindows,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
@@ -64,8 +66,38 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
 interface RunStats {
   docsScanned: number;
   eventsScanned: number;
+  occasionsScanned: number;
   inAppSent: number;
   emailsSent: number;
+}
+
+/**
+ * Resolve the notifiable recipients for an occasion. If members are explicitly
+ * tagged, only those (mapped to real user accounts) are reminded; otherwise the
+ * whole family is. Tagged recipients keep their own prefs/windows from `all`.
+ */
+async function occasionRecipients(
+  db: Db,
+  occasionId: string,
+  all: Recipient[],
+): Promise<Recipient[]> {
+  const tagged = await db
+    .select({ memberId: schema.occasionRecipients.memberId })
+    .from(schema.occasionRecipients)
+    .where(eq(schema.occasionRecipients.occasionId, occasionId));
+
+  if (tagged.length === 0) return all;
+
+  const memberIds = tagged.map((t) => t.memberId);
+  const members = await db
+    .select({ userId: schema.familyMembers.userId })
+    .from(schema.familyMembers)
+    .where(inArray(schema.familyMembers.id, memberIds));
+
+  const userIds = new Set(
+    members.map((m) => m.userId).filter((u): u is string => Boolean(u)),
+  );
+  return all.filter((r) => userIds.has(r.userId));
 }
 
 /**
@@ -87,7 +119,13 @@ export async function runExpiryReminders(env: Env): Promise<void> {
   const horizon = isoDaysAhead(nowMs, REMINDER_SCAN_DAYS);
   const appUrl = env.APP_URL ?? "";
 
-  const stats: RunStats = { docsScanned: 0, eventsScanned: 0, inAppSent: 0, emailsSent: 0 };
+  const stats: RunStats = {
+    docsScanned: 0,
+    eventsScanned: 0,
+    occasionsScanned: 0,
+    inAppSent: 0,
+    emailsSent: 0,
+  };
   const recipientCache = new Map<string, Recipient[]>();
 
   async function recipientsFor(familyId: string): Promise<Recipient[]> {
@@ -252,10 +290,124 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     }
   }
 
+  // ── Occasions (birthdays / anniversaries / custom, annually recurring) ────────
+  const occasions = await db
+    .select()
+    .from(schema.occasions)
+    .where(eq(schema.occasions.status, "active"));
+
+  for (const occ of occasions) {
+    stats.occasionsScanned++;
+    try {
+      const occurrence = occ.recurring
+        ? nextOccurrenceIso(occ.date, nowMs)
+        : occ.date;
+      if (!occurrence) continue;
+      const daysUntil = daysUntilIso(occurrence, nowMs);
+      if (daysUntil === null || daysUntil < 0 || daysUntil > REMINDER_SCAN_DAYS) {
+        continue;
+      }
+
+      const all = await recipientsFor(occ.familyId);
+      const recipients = await occasionRecipients(db, occ.id, all);
+
+      for (const r of recipients) {
+        const window = dueReminderWindow(daysUntil, r.windows);
+        if (window === null) continue;
+        const text = occasionReminderText(occ.title, occ.type, daysUntil);
+        const link = `/occasions`;
+
+        if (
+          await recordOccasionReminderOnce(db, {
+            occasionId: occ.id,
+            userId: r.userId,
+            occurrenceDate: occurrence,
+            windowDays: window,
+            channel: "in_app",
+          })
+        ) {
+          await createNotification(db, {
+            userId: r.userId,
+            familyId: occ.familyId,
+            type: "occasion",
+            title: text.title,
+            body: text.body,
+            link,
+          });
+          stats.inAppSent++;
+        }
+
+        if (
+          r.emailEnabled &&
+          r.email &&
+          (await recordOccasionReminderOnce(db, {
+            occasionId: occ.id,
+            userId: r.userId,
+            occurrenceDate: occurrence,
+            windowDays: window,
+            channel: "email",
+          }))
+        ) {
+          const ok = await sendEmail(env, {
+            to: r.email,
+            subject: text.title,
+            html: reminderEmailHtml({
+              heading: text.title,
+              body: text.body,
+              ctaLabel: "Open Family Vault",
+              ctaUrl: `${appUrl}${link}`,
+            }),
+          });
+          if (ok) stats.emailsSent++;
+          else
+            await db
+              .delete(schema.occasionRemindersLog)
+              .where(
+                and(
+                  eq(schema.occasionRemindersLog.occasionId, occ.id),
+                  eq(schema.occasionRemindersLog.userId, r.userId),
+                  eq(schema.occasionRemindersLog.occurrenceDate, occurrence),
+                  eq(schema.occasionRemindersLog.windowDays, window),
+                  eq(schema.occasionRemindersLog.channel, "email"),
+                ),
+              );
+        }
+      }
+    } catch (err) {
+      console.error(`[cron] occasion ${occ.id} reminder failed:`, err);
+    }
+  }
+
   console.log(
     `[cron] reminders done: docs=${stats.docsScanned} events=${stats.eventsScanned} ` +
-      `in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
+      `occasions=${stats.occasionsScanned} in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
   );
+}
+
+/** Idempotent claim for an occasion reminder slot (keyed by occurrence date). */
+async function recordOccasionReminderOnce(
+  db: Db,
+  log: {
+    occasionId: string;
+    userId: string;
+    occurrenceDate: string;
+    windowDays: number;
+    channel: "in_app" | "email";
+  },
+): Promise<boolean> {
+  const res = await db
+    .insert(schema.occasionRemindersLog)
+    .values({
+      id: crypto.randomUUID(),
+      occasionId: log.occasionId,
+      userId: log.userId,
+      occurrenceDate: log.occurrenceDate,
+      windowDays: log.windowDays,
+      channel: log.channel,
+    })
+    .onConflictDoNothing()
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 type DocLog = {
