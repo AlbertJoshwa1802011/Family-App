@@ -7,6 +7,7 @@ import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
+import { DocumentForm } from "./pages/DocumentForm";
 import { FamilyPage } from "./pages/Family";
 import { CalendarPage } from "./pages/Calendar";
 import { EventDetailPage } from "./pages/EventDetail";
@@ -44,7 +45,9 @@ export default function App() {
         >
           <Route path="/" element={<Dashboard />} />
           <Route path="/documents" element={<Documents />} />
+          <Route path="/documents/new" element={<DocumentForm />} />
           <Route path="/documents/:id" element={<DocumentDetail />} />
+          <Route path="/documents/:id/edit" element={<DocumentForm />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/calendar/events/new" element={<EventForm />} />
           <Route path="/calendar/events/:id" element={<EventDetailPage />} />

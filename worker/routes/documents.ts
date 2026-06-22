@@ -420,6 +420,41 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
   return c.json({ file }, 201);
 });
 
+// GET /documents/:id/files — list non-deleted files/versions for a document.
+documentRoutes.get("/:id/files", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId);
+  if (membership instanceof Response) return membership;
+
+  // Enforce private visibility (same rule as GET /:id).
+  if (
+    doc.visibility === "private" &&
+    doc.ownerUserId !== userId &&
+    membership.role === "member"
+  ) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  const fileRows = await db
+    .select()
+    .from(schema.files)
+    .where(and(eq(schema.files.documentId, docId), ne(schema.files.status, "deleted")))
+    .orderBy(desc(schema.files.version));
+
+  return c.json({ files: fileRows });
+});
+
 // GET /documents/:id/files/:fid/download — proxy download from Drive.
 // Always sets Content-Disposition: attachment to prevent inline execution.
 documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
