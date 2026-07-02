@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, ne, or } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -17,6 +17,11 @@ import {
   isDriveConfigured,
   DriveError,
 } from "../lib/drive";
+import {
+  isAiCategorizeConfigured,
+  suggestCategoryAI,
+  suggestCategoryHeuristic,
+} from "../lib/categorize";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -142,25 +147,78 @@ async function ensureDriveFolder(
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// GET /documents?familyId=:fid — list active documents (visibility-filtered).
+// GET /documents?familyId=:fid&q=:search — list active documents
+// (visibility-filtered; optional name/category/description search).
 documentRoutes.get("/", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const familyId = c.req.query("familyId");
+  const q = c.req.query("q")?.trim();
 
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
+  let where = visibilityWhere(familyId, userId, membership.role);
+  if (q) {
+    // SQLite LIKE has no default ESCAPE char — neutralize user wildcards.
+    const sanitized = q.replace(/[%_]/g, " ").trim();
+    // A query that was only wildcards matches nothing, not everything.
+    if (!sanitized) return c.json({ documents: [] });
+    const pattern = `%${sanitized}%`;
+    where = and(
+      where,
+      or(
+        like(schema.documents.title, pattern),
+        like(schema.documents.category, pattern),
+        like(schema.documents.description, pattern),
+      ),
+    );
+  }
+
   const db = getDb(c.env);
   const documents = await db
     .select()
     .from(schema.documents)
-    .where(visibilityWhere(familyId, userId, membership.role))
+    .where(where)
     .orderBy(desc(schema.documents.updatedAt));
 
   return c.json({ documents });
 });
+
+// POST /documents/suggest-category — AI/heuristic category suggestion.
+// MUST be before /:id routes so "suggest-category" isn't captured as an id.
+const suggestCategorySchema = z.object({
+  title: z.string().min(1).max(300),
+  fileName: z.string().max(500).optional(),
+});
+
+documentRoutes.post(
+  "/suggest-category",
+  requireSession,
+  zv(suggestCategorySchema),
+  async (c) => {
+    const userId = c.get("userId")!;
+    const { title, fileName } = c.req.valid("json");
+
+    const limited = await checkRateLimit(c, `suggest:${userId}`, {
+      limit: 30,
+      windowSecs: 60,
+    });
+    if (limited) return limited;
+
+    // Cheap deterministic pass first; only consult the model when ambiguous.
+    const heuristic = suggestCategoryHeuristic(title, fileName);
+    if (heuristic) return c.json({ category: heuristic, source: "heuristic" });
+
+    if (isAiCategorizeConfigured(c.env)) {
+      const ai = await suggestCategoryAI(c.env, title, fileName);
+      if (ai) return c.json({ category: ai, source: "ai" });
+    }
+
+    return c.json({ category: null, source: "none" });
+  },
+);
 
 // POST /documents — create document metadata record.
 documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => {

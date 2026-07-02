@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Lock, Users } from "lucide-react";
+import { Lock, Sparkles, Users } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -59,6 +59,34 @@ export function DocumentForm() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const categoryTouched = useRef(false);
+
+  // Suggest a category from the title (debounced; heuristics or AI server-side).
+  // Only while the user hasn't picked a category themselves, and only on create.
+  useEffect(() => {
+    if (isEdit || categoryTouched.current || form.title.trim().length < 3) {
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await api<{ category: string | null }>(
+          "/documents/suggest-category",
+          {
+            method: "POST",
+            body: JSON.stringify({ title: form.title.trim() }),
+          },
+        );
+        if (res.category && res.category !== form.category) {
+          setSuggestion(res.category);
+        }
+      } catch {
+        // Suggestions are best-effort; never surface an error for them.
+      }
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.title, isEdit]);
 
   // Edit mode: hydrate the form once from the existing document.
   useQuery({
@@ -151,7 +179,11 @@ export function DocumentForm() {
                 <button
                   key={value}
                   type="button"
-                  onClick={() => set("category", value)}
+                  onClick={() => {
+                    categoryTouched.current = true;
+                    setSuggestion(null);
+                    set("category", value);
+                  }}
                   className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
                     form.category === value
                       ? "bg-vault-600 text-white"
@@ -162,6 +194,19 @@ export function DocumentForm() {
                 </button>
               ))}
             </div>
+            {suggestion && form.category !== suggestion && (
+              <button
+                type="button"
+                onClick={() => {
+                  set("category", suggestion);
+                  setSuggestion(null);
+                }}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-vault-500/40 bg-vault-500/10 px-3 py-1.5 text-xs font-medium text-vault-300 hover:bg-vault-500/20"
+              >
+                <Sparkles className="size-3.5" />
+                Suggested: {CATEGORIES.find((c) => c.value === suggestion)?.label ?? suggestion} — tap to apply
+              </button>
+            )}
           </Card>
 
           <Card className="space-y-3 p-4">

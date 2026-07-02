@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileText, FolderOpen, Lock, Plus } from "lucide-react";
+import { FileText, FolderOpen, Lock, Plus, Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
@@ -37,23 +38,54 @@ function DocSkeleton() {
 export function Documents() {
   const navigate = useNavigate();
   const { activeFamily } = useAuth();
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+
+  // Debounce so we don't hit the API per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["documents", activeFamily?.id],
+    queryKey: ["documents", activeFamily?.id, debounced],
     // The API requires familyId and enforces family membership server-side.
     queryFn: () =>
       api<{ documents: DocumentSummary[] }>(
-        `/documents?familyId=${activeFamily!.id}`,
+        `/documents?familyId=${activeFamily!.id}${
+          debounced ? `&q=${encodeURIComponent(debounced)}` : ""
+        }`,
       ),
     enabled: Boolean(activeFamily),
   });
 
   const docs = data?.documents ?? [];
+  const searching = debounced.length > 0;
 
   return (
     <>
       <AppBar title="Documents" />
-      <Page>
+      <Page className="space-y-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, category, notes…"
+            aria-label="Search documents"
+            className="w-full rounded-xl border border-line bg-surface py-3 pr-10 pl-10 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-3 -translate-y-1/2 text-fg-subtle hover:text-fg"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
         {isLoading ? (
           <Card className="divide-y divide-line" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -89,6 +121,12 @@ export function Documents() {
               );
             })}
           </Card>
+        ) : searching ? (
+          <EmptyState
+            icon={Search}
+            title="No matches"
+            description={`Nothing found for "${debounced}". Try a different name or category.`}
+          />
         ) : (
           <EmptyState
             icon={FolderOpen}

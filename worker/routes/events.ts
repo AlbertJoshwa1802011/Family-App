@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { allDocumentsInFamily, allMembersInFamily } from "../lib/familyScope";
+import { buildCalendar } from "../lib/ics";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -183,6 +184,48 @@ eventRoutes.get("/:id", requireSession, async (c) => {
     .where(eq(schema.eventAttendees.eventId, eventId));
 
   return c.json({ event, attendees });
+});
+
+// GET /events/:id/ics — download a single event as an .ics file
+// ("Add to calendar" in Google/Apple/Outlook). Session + membership gated.
+eventRoutes.get("/:id/ics", requireSession, async (c) => {
+  const { id: eventId } = c.req.param();
+  const db = getDb(c.env);
+
+  const event = await db
+    .select()
+    .from(schema.events)
+    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+    .get();
+
+  if (!event) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, event.familyId);
+  if (membership instanceof Response) return membership;
+
+  const body = buildCalendar({
+    name: "Family Vault",
+    events: [
+      {
+        uid: `event-${event.id}@family-vault`,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        startAt: event.startAt,
+        endAt: event.endAt,
+        allDay: Boolean(event.allDay),
+        cancelled: event.status === "cancelled",
+      },
+    ],
+  });
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": `attachment; filename="event-${event.id}.ics"`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });
 
 // PATCH /events/:id — update event fields.
