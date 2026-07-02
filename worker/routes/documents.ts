@@ -374,6 +374,36 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
   }
 });
 
+// GET /documents/:id/files — list file versions (visibility enforced).
+documentRoutes.get("/:id/files", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId);
+  if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  const files = await db
+    .select()
+    .from(schema.files)
+    .where(and(eq(schema.files.documentId, docId), ne(schema.files.status, "deleted")))
+    .orderBy(desc(schema.files.version));
+
+  return c.json({ files });
+});
+
 // POST /documents/:id/files — record file metadata after client uploads to Drive.
 documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c) => {
   const { id: docId } = c.req.param();

@@ -138,6 +138,15 @@ describe("private-document visibility matrix", () => {
     ).toBe(404);
   });
 
+  it("file list: another member cannot enumerate a private doc's files (404)", async () => {
+    expect(
+      (await get(`/api/documents/${a.privateDocId}/files`, a.memberA.cookie)).status,
+    ).toBe(404);
+    expect(
+      (await get(`/api/documents/${a.privateDocId}/files`, a.memberB.cookie)).status,
+    ).toBe(200);
+  });
+
   it("file attach: another member cannot request an upload URL or record a file (404)", async () => {
     expect(
       (

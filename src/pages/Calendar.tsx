@@ -11,6 +11,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Fab } from "../components/ui/Fab";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import {
   formatEventTime,
   formatMonthYear,
@@ -77,15 +78,19 @@ function EventRow({ event }: { event: EventSummary }) {
 
 export function CalendarPage() {
   const navigate = useNavigate();
+  const { activeFamily } = useAuth();
 
   // Stable reference: computed once on mount so re-renders don't shift the query window.
   const [now] = useState(() => Math.floor(Date.now() / 1000));
   const sixMonths = now + 6 * 30 * 24 * 3600;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["events", { from: now, to: sixMonths }],
+    queryKey: ["events", activeFamily?.id, { from: now, to: sixMonths }],
     queryFn: () =>
-      api<{ events: EventSummary[] }>(`/events?from=${now}&to=${sixMonths}`),
+      api<{ events: EventSummary[] }>(
+        `/events?familyId=${activeFamily!.id}&from=${now}&to=${sixMonths}`,
+      ),
+    enabled: Boolean(activeFamily),
   });
 
   const events = (data?.events ?? []).filter((e) => e.status !== "trashed");
