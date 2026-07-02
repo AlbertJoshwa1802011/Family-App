@@ -7,6 +7,7 @@ import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
+import { allDocumentsInFamily, allMembersInFamily } from "../lib/familyScope";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -67,8 +68,11 @@ eventRoutes.get("/", requireSession, async (c) => {
     eq(schema.events.familyId, familyId),
     ne(schema.events.status, "trashed"),
   ];
-  if (fromParam) conditions.push(gte(schema.events.startAt, parseInt(fromParam)));
-  if (toParam) conditions.push(lte(schema.events.startAt, parseInt(toParam)));
+  // Ignore non-numeric range params instead of pushing NaN into SQL.
+  const from = fromParam ? parseInt(fromParam, 10) : NaN;
+  const to = toParam ? parseInt(toParam, 10) : NaN;
+  if (Number.isFinite(from)) conditions.push(gte(schema.events.startAt, from));
+  if (Number.isFinite(to)) conditions.push(lte(schema.events.startAt, to));
 
   const events = await db
     .select()
@@ -88,6 +92,15 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
+
+  // Client-supplied IDs must belong to this family (no cross-family references).
+  if (!(await allMembersInFamily(db, data.familyId, data.attendeeMemberIds))) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+  if (!(await allDocumentsInFamily(db, data.familyId, data.documentIds))) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
+
   const eventId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
@@ -205,6 +218,9 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
 
   // Replace attendees if provided
   if (updates.attendeeMemberIds !== undefined) {
+    if (!(await allMembersInFamily(db, event.familyId, updates.attendeeMemberIds))) {
+      return c.json({ error: "invalid_member_ids" }, 400);
+    }
     await db.delete(schema.eventAttendees).where(eq(schema.eventAttendees.eventId, eventId));
     if (updates.attendeeMemberIds.length > 0) {
       await db.insert(schema.eventAttendees).values(
@@ -313,6 +329,10 @@ eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async
 
   const membership = await requireFamilyMember(c, event.familyId);
   if (membership instanceof Response) return membership;
+
+  if (!(await allMembersInFamily(db, event.familyId, memberIds))) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
 
   // Insert attendees, ignore duplicates
   for (const memberId of memberIds) {

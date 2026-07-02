@@ -12,6 +12,7 @@ import { notificationRoutes } from "./routes/notifications";
 import { eventRoutes } from "./routes/events";
 import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
+import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
@@ -28,6 +29,9 @@ const app = new Hono<HonoEnv>();
 app.use("/api/*", requestId());
 app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
+// CSRF: reject cross-site state-changing requests before they touch a handler.
+// (Lax cookies alone don't cover top-level GETs or older browsers — CLAUDE.md §8.)
+app.use("/api/*", csrfProtect);
 // Reject oversized JSON bodies before any handler runs (memory-safety).
 app.use(
   "/api/*",

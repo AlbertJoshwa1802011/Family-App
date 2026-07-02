@@ -6,6 +6,8 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { csrfProtectGet } from "../middleware/csrf";
+import { checkRateLimit } from "../lib/rateLimit";
 import { insertAuditEvent } from "../lib/audit";
 import {
   getDriveAccessToken,
@@ -96,6 +98,25 @@ function visibilityWhere(
       eq(schema.documents.visibility, "family"),
       eq(schema.documents.ownerUserId, userId),
     ),
+  );
+}
+
+/**
+ * True when a private document must be hidden from this user. Applied to every
+ * read AND write that touches the document or its files — a member must not be
+ * able to read, edit, comment on, or attach/replace files of another member's
+ * private document.
+ */
+function isDocHiddenFrom(
+  doc: { visibility: string; ownerUserId: string },
+  userId: string,
+  role: string,
+): boolean {
+  return (
+    doc.visibility === "private" &&
+    doc.ownerUserId !== userId &&
+    role !== "owner" &&
+    role !== "admin"
   );
 }
 
@@ -203,12 +224,7 @@ documentRoutes.get("/:id", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404); // 404 not 403 (don't reveal existence)
   }
 
@@ -233,12 +249,7 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Only owner or admin can edit private docs that don't belong to them
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -247,8 +258,9 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
   };
   if (updates.title !== undefined) set.title = updates.title;
   if (updates.category !== undefined) set.category = updates.category;
-  if (updates.description !== undefined) set.description = updates.description ?? undefined;
-  if (updates.subjectMemberId !== undefined) set.subjectMemberId = updates.subjectMemberId ?? undefined;
+  // null means "clear the field" — must reach the DB as NULL, not be dropped.
+  if (updates.description !== undefined) set.description = updates.description;
+  if (updates.subjectMemberId !== undefined) set.subjectMemberId = updates.subjectMemberId;
   if (updates.expiryDate !== undefined) set.expiryDate = updates.expiryDate;
   if (updates.issuedDate !== undefined) set.issuedDate = updates.issuedDate;
   if (updates.visibility !== undefined) set.visibility = updates.visibility;
@@ -281,6 +293,11 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
+  // A private doc another member can't see must 404, not 403 (don't reveal it).
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
   // Members can only delete their own documents; owners/admins can delete any
   if (doc.ownerUserId !== userId && membership.role === "member") {
     return c.json({ error: "forbidden" }, 403);
@@ -309,8 +326,12 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
 // MUST be registered before /:id/files/:fid to avoid route collision.
 documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema), async (c) => {
   const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
   const { fileName, mimeType } = c.req.valid("json");
   const db = getDb(c.env);
+
+  const limited = await checkRateLimit(c, `upload:${userId}`, { limit: 30, windowSecs: 60 });
+  if (limited) return limited;
 
   const doc = await db
     .select()
@@ -322,6 +343,10 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
 
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
 
   if (!isDriveConfigured(c.env)) {
     return c.json({ error: "drive_not_configured" }, 503);
@@ -366,6 +391,10 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
 
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
 
   // Mark previous current file as non-current
   const now = Math.floor(Date.now() / 1000);
@@ -422,7 +451,9 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
 
 // GET /documents/:id/files/:fid/download — proxy download from Drive.
 // Always sets Content-Disposition: attachment to prevent inline execution.
-documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
+// csrfProtectGet: session cookies are SameSite=Lax, which still rides on
+// top-level cross-site GET navigations — verify Origin/Referer here too.
+documentRoutes.get("/:id/files/:fid/download", csrfProtectGet, requireSession, async (c) => {
   const { id: docId, fid: fileId } = c.req.param();
   const userId = c.get("userId")!;
   const db = getDb(c.env);
@@ -438,12 +469,7 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility on download
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -515,12 +541,7 @@ documentRoutes.get("/:id/comments", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -565,11 +586,7 @@ documentRoutes.post("/:id/comments", requireSession, zv(createCommentSchema), as
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
