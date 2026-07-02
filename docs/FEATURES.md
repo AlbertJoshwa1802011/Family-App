@@ -10,13 +10,17 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 |---|---|---|
 | Phase 0 | ✅ Complete | Scaffold, schema, route stubs, UI shell, security headers |
 | Phase 0.5 | ✅ Complete | Calendar/Events/Tasks/Contacts schema + API stubs + frontend |
-| Phase 1 | ⏳ Planned | Real Google OAuth, sessions, family CRUD, invites |
-| Phase 2 | ⏳ Planned | Document upload/download via Google Drive, full CRUD |
-| Phase 2.5 | ⏳ Planned | Connect Events/Tasks/Contacts stubs to D1 + auth |
-| Phase 3 | ⏳ Planned | Reminders, notifications, cron |
-| Phase 4 | ⏳ Planned | PWA offline, biometric lock, search |
-| Phase 5 | ⏳ Planned | Hardening, a11y, E2E tests, authz matrix |
+| Phase 1 | ✅ Complete | Real Google OAuth, sessions, family CRUD, invites (email-bound) |
+| Phase 2 | ✅ Complete | Document CRUD + Drive proxy + private-visibility enforcement + full frontend flows |
+| Phase 2.5 | ✅ Complete | Events/Tasks/Contacts on D1 + auth, wired frontend (composers, forms) |
+| Phase 3 | ✅ Complete | Reminder cron (range + dedupe), in-app notifications, Resend email, prefs |
+| Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
+| Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
+| Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+
+See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
+the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
@@ -174,16 +178,13 @@ ESLint rule `react-hooks/purity` will flag `Date.now()` in render as impure. The
 
 ## 5. The 5 Most Critical Missing Features
 
-### 5.1 Per-Document Private Visibility Enforcement ⚠️ SECURITY-CRITICAL
+### 5.1 Per-Document Private Visibility Enforcement ✅ ENFORCED + TESTED
 
-**Schema:** `documents.visibility` (`family|private`) exists.  
-**API:** Not enforced in any current stub. When Phase 2 implements list/get/download, it MUST filter:
-```sql
-WHERE (visibility = 'family' OR owner_user_id = :current_user OR role IN ('owner','admin'))
-```
-**Risk:** Without this, a `member`-role user can read another member's private documents (passport, medical, financial). This is a PII leak.  
-**Phase:** Phase 2 (must not ship document endpoints without this).  
-**Test needed:** Authz-matrix test asserting member cannot fetch another member's private document.
+**Implemented:** `visibilityWhere()` filters every list; `isDocHiddenFrom()`
+guards get/update/delete/download/comments/file-list/upload-url/file-record.
+Hidden docs return **404** (never 403) so existence isn't revealed.
+**Tested:** `tests/authz-matrix.test.ts` covers the full matrix (member vs
+doc-owner vs admin vs owner vs non-member) across all surfaces.
 
 ### 5.2 Member Profiles with Per-Member Document View
 
@@ -219,6 +220,10 @@ no invite); member-list UI to add/manage dependents. The EventForm attendee pick
 ---
 
 ## 6. Test Coverage Map
+
+**218+ tests across 14 files** — see `docs/TESTING.md` for the authoritative
+catalog (contract, integration-on-real-D1, authz matrix, CSRF/rate-limit,
+pure-unit, stress). The table below is the historical Phase-0.5 snapshot.
 
 **136 tests across 5 files** (all passing as of Phase 0.5).
 
