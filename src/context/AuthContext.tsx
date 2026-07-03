@@ -1,6 +1,8 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useState,
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,9 +29,19 @@ interface MeResponse {
 interface AuthValue {
   user: User | null;
   families: Family[];
+  /**
+   * The family every page operates on. All list/create calls MUST scope to
+   * activeFamily.id — the API requires familyId and enforces membership.
+   * Defaults to the first membership; persisted so multi-family users keep
+   * their selection across sessions.
+   */
+  activeFamily: Family | null;
+  setActiveFamilyId: (id: string) => void;
   isLoading: boolean;
   isAuthenticated: boolean;
 }
+
+const ACTIVE_FAMILY_KEY = "fv.activeFamilyId";
 
 const AuthContext = createContext<AuthValue | undefined>(undefined);
 
@@ -41,9 +53,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
+  const [storedFamilyId, setStoredFamilyId] = useState<string | null>(() =>
+    localStorage.getItem(ACTIVE_FAMILY_KEY),
+  );
+
+  const setActiveFamilyId = useCallback((id: string) => {
+    localStorage.setItem(ACTIVE_FAMILY_KEY, id);
+    setStoredFamilyId(id);
+  }, []);
+
+  const families = data?.families ?? [];
+  const activeFamily =
+    families.find((f) => f.id === storedFamilyId) ?? families[0] ?? null;
+
   const value: AuthValue = {
     user: data?.user ?? null,
-    families: data?.families ?? [],
+    families,
+    activeFamily,
+    setActiveFamilyId,
     isLoading,
     isAuthenticated: Boolean(data?.user),
   };

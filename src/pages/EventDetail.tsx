@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
+  CalendarPlus,
   MapPin,
   Pencil,
   Trash2,
@@ -177,6 +178,14 @@ export function EventDetailPage() {
         )}
 
         {/* Actions */}
+        <a
+          href={`/api/events/${ev.id}/ics`}
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 text-sm font-medium text-fg hover:border-line-strong"
+        >
+          <CalendarPlus className="size-4" />
+          Add to my calendar
+        </a>
+
         {ev.status === "active" && (
           <section className="space-y-2 pt-2">
             <Button

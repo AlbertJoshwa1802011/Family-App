@@ -174,7 +174,13 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **182 tests across 10 files**, all green.
+same depth. Current baseline: **218+ tests across 14 files**, all green.
+
+**Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
+built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
+dependencies. Use `seedActor()` to get a user+membership+session cookie in one call. Caveat:
+keep drizzle selects on **explicit aliased fields** (positional row mapping breaks on duplicate
+column names). See `docs/TESTING.md` for the full process + test-case catalog.
 
 Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
 timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
@@ -246,6 +252,18 @@ vite.config.ts          plugin chain + PWA config
   (no-op without `RESEND_API_KEY`); session purge runs in the same cron. In-app notification
   center + per-user reminder prefs (channels + lead-time windows) are live on the frontend.
 
-The intended remaining build order is Phase 4 (offline/biometric/search) → Phase 5 (hardening +
-E2E: CSRF Origin/Referer checks, rate limiting, the private-doc authz-matrix test) → Phase 6
-(WhatsApp/push/OCR/shared-drive). See `docs/FEATURES.md §5` for the highest-value gaps.
+**Phase-5 hardening (done):** CSRF Origin/Referer middleware on all `/api` mutations + the
+download proxy (`worker/middleware/csrf.ts`); KV fixed-window rate limits on OAuth
+start/callback, invite creation, and upload-url (`worker/lib/rateLimit.ts`, fails open without
+KV); private-doc enforcement on every surface via `isDocHiddenFrom()`; cross-family reference
+guards (`worker/lib/familyScope.ts`); email-bound invites; the authz-matrix + integration suites
+on a real D1 adapter (`tests/helpers/testEnv.ts`).
+
+**Frontend flows (done):** `activeFamily` in AuthContext (persisted, switchable) — every list
+query passes `familyId`; CreateFamily onboarding gate for zero-family users; DocumentForm +
+rebuilt DocumentDetail (Drive upload/download, versions); Tasks/Contacts composers; Family page
+invite flow + `/invite/:token` accept page; Dashboard real stats.
+
+Remaining build order: Phase 4 (offline/biometric/full-text search) → Phase 5 rest (a11y,
+component + E2E browser tests) → Phase 6 (WhatsApp/push/OCR/shared-drive). See
+`docs/FEATURES.md §5`, `docs/TESTING.md §4`, and the segmentation roadmap in `docs/PLAN.md`.

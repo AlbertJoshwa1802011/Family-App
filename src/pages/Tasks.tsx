@@ -11,6 +11,7 @@ import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
+import { useAuth } from "../context/AuthContext";
 
 interface TaskSummary {
   id: string;
@@ -80,11 +81,15 @@ function TaskRow({
 
 export function Tasks() {
   const qc = useQueryClient();
+  const { activeFamily } = useAuth();
   const [showDone, setShowDone] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => api<{ tasks: TaskSummary[] }>("/tasks"),
+    queryKey: ["tasks", activeFamily?.id],
+    queryFn: () =>
+      api<{ tasks: TaskSummary[] }>(`/tasks?familyId=${activeFamily!.id}`),
+    enabled: Boolean(activeFamily),
   });
 
   const toggle = useMutation({
@@ -110,13 +115,18 @@ export function Tasks() {
               <TaskSkeleton key={i} />
             ))}
           </Card>
-        ) : tasks.length === 0 ? (
+        ) : tasks.length === 0 && !composerOpen ? (
           <EmptyState
             icon={ListTodo}
             title="No tasks yet"
             description="Keep family to-dos in one place — renew a passport, book a dentist, pick up prescriptions."
             action={
-              <Button leadingIcon={<Plus className="size-4" />}>Add task</Button>
+              <Button
+                leadingIcon={<Plus className="size-4" />}
+                onClick={() => setComposerOpen(true)}
+              >
+                Add task
+              </Button>
             }
           />
         ) : (
@@ -167,8 +177,95 @@ export function Tasks() {
             )}
           </>
         )}
+
+        {composerOpen && activeFamily && (
+          <TaskComposer
+            familyId={activeFamily.id}
+            onClose={() => setComposerOpen(false)}
+          />
+        )}
       </Page>
-      <Fab icon={Plus} label="Add task" />
+      <Fab icon={Plus} label="Add task" onClick={() => setComposerOpen(true)} />
     </>
+  );
+}
+
+function TaskComposer({
+  familyId,
+  onClose,
+}: {
+  familyId: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [error, setError] = useState("");
+
+  const create = useMutation({
+    mutationFn: () =>
+      api("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId,
+          title: title.trim(),
+          dueDate: dueDate || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+      onClose();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError("What needs doing?");
+      return;
+    }
+    setError("");
+    create.mutate();
+  }
+
+  return (
+    <form onSubmit={submit} noValidate className="mt-4">
+      <Card className="space-y-3 p-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+            New task <span className="text-danger">*</span>
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Renew car insurance"
+            autoFocus
+            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+            Due date (optional)
+          </label>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+          />
+        </div>
+        {error && <p className="text-xs text-danger">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
+            Add task
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </Card>
+    </form>
   );
 }

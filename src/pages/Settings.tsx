@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Info, LogOut, Mail } from "lucide-react";
+import { useState } from "react";
+import { Bell, CalendarPlus, Check, Copy, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -112,6 +113,77 @@ function ReminderPrefsCard() {
   );
 }
 
+function CalendarFeedCard() {
+  const [feedUrl, setFeedUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const mint = useMutation({
+    mutationFn: () =>
+      api<{ url: string }>("/calendar/feed-token", { method: "POST" }),
+    onSuccess: (res) => {
+      setFeedUrl(res.url);
+      setCopied(false);
+    },
+  });
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex items-start gap-3">
+        <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
+        <div>
+          <div className="text-sm font-medium text-fg">
+            Subscribe in your calendar app
+          </div>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            Family events and document expiries in Google Calendar, Apple
+            Calendar, or Outlook — updates automatically.
+          </p>
+        </div>
+      </div>
+
+      {feedUrl ? (
+        <>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-ink-950 px-3 py-2 text-xs text-fg-muted">
+              {feedUrl}
+            </code>
+            <Button
+              size="md"
+              variant="secondary"
+              leadingIcon={
+                copied ? <Check className="size-4" /> : <Copy className="size-4" />
+              }
+              onClick={async () => {
+                await navigator.clipboard.writeText(feedUrl);
+                setCopied(true);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <p className="text-xs text-fg-subtle">
+            In your calendar app choose "Subscribe / Add calendar from URL" and
+            paste this link. Anyone with the link can read your calendar —
+            regenerate it to revoke the old one.
+          </p>
+        </>
+      ) : (
+        <Button
+          variant="secondary"
+          fullWidth
+          loading={mint.isPending}
+          onClick={() => mint.mutate()}
+        >
+          Get calendar link
+        </Button>
+      )}
+      {mint.isError && (
+        <p className="text-xs text-danger">{(mint.error as Error).message}</p>
+      )}
+    </Card>
+  );
+}
+
 export function Settings() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -142,6 +214,13 @@ export function Settings() {
             Reminders
           </h3>
           <ReminderPrefsCard />
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            Calendar
+          </h3>
+          <CalendarFeedCard />
         </section>
 
         <section className="space-y-2">

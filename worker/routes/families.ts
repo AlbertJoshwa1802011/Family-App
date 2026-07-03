@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
+import { checkRateLimit } from "../lib/rateLimit";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -174,6 +175,21 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
   if (invite.expiresAt < now) return c.json({ error: "invite_expired" }, 410);
   if (invite.acceptedAt !== null) return c.json({ error: "invite_already_used" }, 409);
 
+  // Invites are email-bound (invites.email + hashed single-use token). Enforce
+  // that binding: a leaked/forwarded link must not admit a different account.
+  const acceptingUser = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  if (
+    !acceptingUser ||
+    acceptingUser.email.toLowerCase() !== invite.email.toLowerCase()
+  ) {
+    return c.json({ error: "invite_email_mismatch" }, 403);
+  }
+
   // Check user is not already a member
   const existing = await db
     .select({ id: schema.familyMembers.id })
@@ -336,6 +352,13 @@ familyRoutes.post(
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
     if (callerOrError instanceof Response) return callerOrError;
 
+    // Throttle invite creation per user — each invite is a mailable token.
+    const limited = await checkRateLimit(c, `invite:${userId}`, {
+      limit: 20,
+      windowSecs: 3600,
+    });
+    if (limited) return limited;
+
     const db = getDb(c.env);
     const now = Math.floor(Date.now() / 1000);
 
@@ -386,8 +409,16 @@ familyRoutes.get("/:id/activity", requireSession, async (c) => {
 
   const db = getDb(c.env);
   const activities = await db
-    .select()
+    .select({
+      id: schema.auditLog.id,
+      action: schema.auditLog.action,
+      targetType: schema.auditLog.targetType,
+      targetId: schema.auditLog.targetId,
+      createdAt: schema.auditLog.createdAt,
+      actorName: schema.users.name,
+    })
     .from(schema.auditLog)
+    .leftJoin(schema.users, eq(schema.auditLog.actorUserId, schema.users.id))
     .where(eq(schema.auditLog.familyId, familyId))
     .orderBy(desc(schema.auditLog.createdAt))
     .limit(50);

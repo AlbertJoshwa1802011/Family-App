@@ -6,6 +6,11 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import {
+  allDocumentsInFamily,
+  allMembersInFamily,
+  eventInFamily,
+} from "../lib/familyScope";
 
 export const taskRoutes = new Hono<HonoEnv>();
 
@@ -83,6 +88,27 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
+
+  // Client-supplied references must belong to this family.
+  if (
+    data.assignedToMemberId &&
+    !(await allMembersInFamily(db, data.familyId, [data.assignedToMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+  if (
+    data.relatedDocumentId &&
+    !(await allDocumentsInFamily(db, data.familyId, [data.relatedDocumentId]))
+  ) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
+  if (
+    data.relatedEventId &&
+    !(await eventInFamily(db, data.familyId, data.relatedEventId))
+  ) {
+    return c.json({ error: "invalid_event_id" }, 400);
+  }
+
   const taskId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
@@ -155,16 +181,37 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   if (!canEdit) return c.json({ error: "forbidden" }, 403);
 
+  // New references must stay within this family.
+  if (
+    updates.assignedToMemberId &&
+    !(await allMembersInFamily(db, task.familyId, [updates.assignedToMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+  if (
+    updates.relatedDocumentId &&
+    !(await allDocumentsInFamily(db, task.familyId, [updates.relatedDocumentId]))
+  ) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
+  if (
+    updates.relatedEventId &&
+    !(await eventInFamily(db, task.familyId, updates.relatedEventId))
+  ) {
+    return c.json({ error: "invalid_event_id" }, 400);
+  }
+
   const set: Partial<typeof schema.tasks.$inferInsert> = {
     updatedAt: Math.floor(Date.now() / 1000),
   };
   if (updates.title !== undefined) set.title = updates.title;
-  if (updates.notes !== undefined) set.notes = updates.notes ?? undefined;
-  if (updates.assignedToMemberId !== undefined) set.assignedToMemberId = updates.assignedToMemberId ?? undefined;
+  if (updates.notes !== undefined) set.notes = updates.notes;
+  // null means "clear" (unassign / unlink) — pass it through to the DB.
+  if (updates.assignedToMemberId !== undefined) set.assignedToMemberId = updates.assignedToMemberId;
   if (updates.dueDate !== undefined) set.dueDate = updates.dueDate;
   if (updates.status !== undefined) set.status = updates.status;
-  if (updates.relatedDocumentId !== undefined) set.relatedDocumentId = updates.relatedDocumentId ?? undefined;
-  if (updates.relatedEventId !== undefined) set.relatedEventId = updates.relatedEventId ?? undefined;
+  if (updates.relatedDocumentId !== undefined) set.relatedDocumentId = updates.relatedDocumentId;
+  if (updates.relatedEventId !== undefined) set.relatedEventId = updates.relatedEventId;
 
   await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, taskId));
 

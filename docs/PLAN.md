@@ -132,6 +132,52 @@ Enhancements (proposed, prioritized after review):
 
 ---
 
+## Roles, Privileges & Segmentation Roadmap
+
+What exists today and the plan for "many users, different privileges,
+enterprise-style segmentation".
+
+### Already implemented (and tested)
+
+- **Tenant isolation by family.** Every resource is family-scoped; every route
+  checks active membership before reading or writing. Cross-family references
+  (attendees, assignees, linked docs) are rejected. A user can belong to many
+  families and switch between them (persisted active-family selector).
+- **Three roles**: `owner` (full control, cannot be demoted by others),
+  `admin` (sees everything incl. private docs, invites members, manages roles),
+  `member` (family-visible data + own private data only).
+- **Row-level visibility**: `documents.visibility = family | private`,
+  enforced server-side on every read AND write surface; covered by the
+  authz-matrix test suite. Private-doc reminders go only to the doc owner.
+- **Email-bound, single-use, expiring invites** with role selection.
+- **Dependents** (children/elders without accounts) as first-class members.
+- **Audit log** written on create/upload/download/delete/role-change,
+  surfaced as the family activity feed.
+
+### Next steps, in order of leverage
+
+1. **Per-member document scoping UI** — `documents.subject_member_id` exists;
+   add "belongs to" picker in DocumentForm + a member-profile page filtering
+   documents by subject. (Schema done; pure UI work.)
+2. **Member management UI** — role change + remove member (PATCH endpoint
+   exists and is admin-gated; needs frontend on the Family page).
+3. **Per-document ACLs** — a `document_shares (document_id, member_id, level)`
+   table to grant specific members access to an otherwise-private doc
+   ("share my passport with mum only"). Extends `visibilityWhere()` with an
+   EXISTS subquery; add matching authz-matrix rows.
+4. **Custom roles / permission matrix** — if families need finer grants than
+   the 3-role ladder (e.g. "can add but not delete"), introduce a
+   `role_permissions` lookup checked by `requireFamilyMember(minPermission)`.
+   Keep the 3 built-ins as presets.
+5. **Session & device management** — sessions table already stores user-agent;
+   add "active sessions" list + revoke ("log out everywhere") in Settings.
+6. **Org-level segmentation (true enterprise)** — if this ever serves
+   organizations rather than families: add an `orgs` table above families,
+   per-org Drive (Shared Drive), per-org admin console, and SSO (Google
+   Workspace domain-wide). The family-scoping pattern generalizes directly.
+
+---
+
 ## Multi-Agent Execution Strategy (for build phases)
 
 When implementing each phase, dispatch in parallel where independent:

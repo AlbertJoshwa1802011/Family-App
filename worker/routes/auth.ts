@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
+import { checkRateLimit, clientIp } from "../lib/rateLimit";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -84,6 +85,13 @@ authRoutes.post("/google/start", async (c) => {
     return c.json({ error: "oauth_not_configured" }, 503);
   }
 
+  // Per-IP throttle: OAuth start writes to KV; don't let one client spam it.
+  const limited = await checkRateLimit(c, `auth-start:${clientIp(c)}`, {
+    limit: 10,
+    windowSecs: 60,
+  });
+  if (limited) return limited;
+
   // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
   const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
   const codeChallenge = await sha256Base64url(codeVerifier);
@@ -128,6 +136,13 @@ authRoutes.get("/google/callback", async (c) => {
 
   if (error) return redirect(`/login?error=${encodeURIComponent(error)}`);
   if (!code || !state) return redirect("/login?error=missing_params");
+
+  // Per-IP throttle: the callback does a token exchange + D1 writes.
+  const limited = await checkRateLimit(c, `auth-callback:${clientIp(c)}`, {
+    limit: 10,
+    windowSecs: 60,
+  });
+  if (limited) return redirect("/login?error=rate_limited");
 
   const clientId = c.env?.GOOGLE_CLIENT_ID;
   const clientSecret = c.env?.GOOGLE_CLIENT_SECRET;

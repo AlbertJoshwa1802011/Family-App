@@ -19,6 +19,8 @@ export interface Env {
   GOOGLE_OWNER_REFRESH_TOKEN?: string;
   /** Resend API key for transactional email. */
   RESEND_API_KEY?: string;
+  /** Claude API key for AI document categorization (optional; heuristics otherwise). */
+  ANTHROPIC_API_KEY?: string;
   /** Secret used to sign/derive session + invite token hashes. */
   SESSION_SECRET?: string;
 }

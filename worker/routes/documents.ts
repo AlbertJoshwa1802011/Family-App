@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, ne, or } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { csrfProtectGet } from "../middleware/csrf";
+import { checkRateLimit } from "../lib/rateLimit";
 import { insertAuditEvent } from "../lib/audit";
 import {
   getDriveAccessToken,
@@ -15,6 +17,11 @@ import {
   isDriveConfigured,
   DriveError,
 } from "../lib/drive";
+import {
+  isAiCategorizeConfigured,
+  suggestCategoryAI,
+  suggestCategoryHeuristic,
+} from "../lib/categorize";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -99,6 +106,25 @@ function visibilityWhere(
   );
 }
 
+/**
+ * True when a private document must be hidden from this user. Applied to every
+ * read AND write that touches the document or its files — a member must not be
+ * able to read, edit, comment on, or attach/replace files of another member's
+ * private document.
+ */
+function isDocHiddenFrom(
+  doc: { visibility: string; ownerUserId: string },
+  userId: string,
+  role: string,
+): boolean {
+  return (
+    doc.visibility === "private" &&
+    doc.ownerUserId !== userId &&
+    role !== "owner" &&
+    role !== "admin"
+  );
+}
+
 // ── Helper: ensure family has a Drive folder ──────────────────────────────────
 
 async function ensureDriveFolder(
@@ -121,25 +147,78 @@ async function ensureDriveFolder(
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// GET /documents?familyId=:fid — list active documents (visibility-filtered).
+// GET /documents?familyId=:fid&q=:search — list active documents
+// (visibility-filtered; optional name/category/description search).
 documentRoutes.get("/", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const familyId = c.req.query("familyId");
+  const q = c.req.query("q")?.trim();
 
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
+  let where = visibilityWhere(familyId, userId, membership.role);
+  if (q) {
+    // SQLite LIKE has no default ESCAPE char — neutralize user wildcards.
+    const sanitized = q.replace(/[%_]/g, " ").trim();
+    // A query that was only wildcards matches nothing, not everything.
+    if (!sanitized) return c.json({ documents: [] });
+    const pattern = `%${sanitized}%`;
+    where = and(
+      where,
+      or(
+        like(schema.documents.title, pattern),
+        like(schema.documents.category, pattern),
+        like(schema.documents.description, pattern),
+      ),
+    );
+  }
+
   const db = getDb(c.env);
   const documents = await db
     .select()
     .from(schema.documents)
-    .where(visibilityWhere(familyId, userId, membership.role))
+    .where(where)
     .orderBy(desc(schema.documents.updatedAt));
 
   return c.json({ documents });
 });
+
+// POST /documents/suggest-category — AI/heuristic category suggestion.
+// MUST be before /:id routes so "suggest-category" isn't captured as an id.
+const suggestCategorySchema = z.object({
+  title: z.string().min(1).max(300),
+  fileName: z.string().max(500).optional(),
+});
+
+documentRoutes.post(
+  "/suggest-category",
+  requireSession,
+  zv(suggestCategorySchema),
+  async (c) => {
+    const userId = c.get("userId")!;
+    const { title, fileName } = c.req.valid("json");
+
+    const limited = await checkRateLimit(c, `suggest:${userId}`, {
+      limit: 30,
+      windowSecs: 60,
+    });
+    if (limited) return limited;
+
+    // Cheap deterministic pass first; only consult the model when ambiguous.
+    const heuristic = suggestCategoryHeuristic(title, fileName);
+    if (heuristic) return c.json({ category: heuristic, source: "heuristic" });
+
+    if (isAiCategorizeConfigured(c.env)) {
+      const ai = await suggestCategoryAI(c.env, title, fileName);
+      if (ai) return c.json({ category: ai, source: "ai" });
+    }
+
+    return c.json({ category: null, source: "none" });
+  },
+);
 
 // POST /documents — create document metadata record.
 documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => {
@@ -203,12 +282,7 @@ documentRoutes.get("/:id", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404); // 404 not 403 (don't reveal existence)
   }
 
@@ -233,12 +307,7 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Only owner or admin can edit private docs that don't belong to them
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -247,8 +316,9 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
   };
   if (updates.title !== undefined) set.title = updates.title;
   if (updates.category !== undefined) set.category = updates.category;
-  if (updates.description !== undefined) set.description = updates.description ?? undefined;
-  if (updates.subjectMemberId !== undefined) set.subjectMemberId = updates.subjectMemberId ?? undefined;
+  // null means "clear the field" — must reach the DB as NULL, not be dropped.
+  if (updates.description !== undefined) set.description = updates.description;
+  if (updates.subjectMemberId !== undefined) set.subjectMemberId = updates.subjectMemberId;
   if (updates.expiryDate !== undefined) set.expiryDate = updates.expiryDate;
   if (updates.issuedDate !== undefined) set.issuedDate = updates.issuedDate;
   if (updates.visibility !== undefined) set.visibility = updates.visibility;
@@ -281,6 +351,11 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
+  // A private doc another member can't see must 404, not 403 (don't reveal it).
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
   // Members can only delete their own documents; owners/admins can delete any
   if (doc.ownerUserId !== userId && membership.role === "member") {
     return c.json({ error: "forbidden" }, 403);
@@ -309,8 +384,12 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
 // MUST be registered before /:id/files/:fid to avoid route collision.
 documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema), async (c) => {
   const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
   const { fileName, mimeType } = c.req.valid("json");
   const db = getDb(c.env);
+
+  const limited = await checkRateLimit(c, `upload:${userId}`, { limit: 30, windowSecs: 60 });
+  if (limited) return limited;
 
   const doc = await db
     .select()
@@ -322,6 +401,10 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
 
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
 
   if (!isDriveConfigured(c.env)) {
     return c.json({ error: "drive_not_configured" }, 503);
@@ -349,6 +432,36 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
   }
 });
 
+// GET /documents/:id/files — list file versions (visibility enforced).
+documentRoutes.get("/:id/files", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId);
+  if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  const files = await db
+    .select()
+    .from(schema.files)
+    .where(and(eq(schema.files.documentId, docId), ne(schema.files.status, "deleted")))
+    .orderBy(desc(schema.files.version));
+
+  return c.json({ files });
+});
+
 // POST /documents/:id/files — record file metadata after client uploads to Drive.
 documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c) => {
   const { id: docId } = c.req.param();
@@ -366,6 +479,10 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
 
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
 
   // Mark previous current file as non-current
   const now = Math.floor(Date.now() / 1000);
@@ -422,7 +539,9 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
 
 // GET /documents/:id/files/:fid/download — proxy download from Drive.
 // Always sets Content-Disposition: attachment to prevent inline execution.
-documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
+// csrfProtectGet: session cookies are SameSite=Lax, which still rides on
+// top-level cross-site GET navigations — verify Origin/Referer here too.
+documentRoutes.get("/:id/files/:fid/download", csrfProtectGet, requireSession, async (c) => {
   const { id: docId, fid: fileId } = c.req.param();
   const userId = c.get("userId")!;
   const db = getDb(c.env);
@@ -438,12 +557,7 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility on download
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -515,12 +629,7 @@ documentRoutes.get("/:id/comments", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  // Enforce private visibility
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 
@@ -565,11 +674,7 @@ documentRoutes.post("/:id/comments", requireSession, zv(createCommentSchema), as
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
-  if (
-    doc.visibility === "private" &&
-    doc.ownerUserId !== userId &&
-    membership.role === "member"
-  ) {
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
   }
 

@@ -7,6 +7,7 @@ import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 type EventType = "gathering" | "appointment" | "milestone" | "other";
 
@@ -46,6 +47,7 @@ export function EventForm() {
   const isEdit = Boolean(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { activeFamily } = useAuth();
 
   const [form, setForm] = useState<FormState>({
     title: "",
@@ -59,6 +61,48 @@ export function EventForm() {
     attendeeMemberIds: [],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [hydrated, setHydrated] = useState(false);
+
+  // Edit mode: hydrate the form once from the existing event.
+  useQuery({
+    queryKey: ["event", id, "form"],
+    queryFn: async () => {
+      const res = await api<{
+        event: {
+          title: string;
+          type: EventType;
+          startAt: number;
+          endAt: number | null;
+          allDay: boolean;
+          location: string | null;
+          description: string | null;
+        };
+        attendees: { memberId: string }[];
+      }>(`/events/${id}`);
+      if (!hydrated) {
+        const ev = res.event;
+        const start = new Date(ev.startAt * 1000);
+        const end = ev.endAt ? new Date(ev.endAt * 1000) : null;
+        const pad = (n: number) => String(n).padStart(2, "0");
+        setForm({
+          title: ev.title,
+          type: ev.type,
+          date: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+          allDay: ev.allDay,
+          startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+          endTime: end
+            ? `${pad(end.getHours())}:${pad(end.getMinutes())}`
+            : "10:00",
+          location: ev.location ?? "",
+          description: ev.description ?? "",
+          attendeeMemberIds: res.attendees.map((a) => a.memberId),
+        });
+        setHydrated(true);
+      }
+      return res;
+    },
+    enabled: isEdit,
+  });
 
   // Fetch family members for attendee picker
   const { data: membersData } = useQuery({
@@ -102,6 +146,8 @@ export function EventForm() {
       : toUnixSeconds(form.date, form.endTime);
 
     mutation.mutate({
+      // POST /events requires familyId (server-side membership check).
+      ...(isEdit ? {} : { familyId: activeFamily!.id }),
       title: form.title.trim(),
       type: form.type,
       startAt,
