@@ -22,6 +22,8 @@ import {
   suggestCategoryAI,
   suggestCategoryHeuristic,
 } from "../lib/categorize";
+import { allMembersInFamily } from "../lib/familyScope";
+import { loadMentionableMembers, notifyMember } from "../lib/mentions";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -147,12 +149,13 @@ async function ensureDriveFolder(
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// GET /documents?familyId=:fid&q=:search — list active documents
-// (visibility-filtered; optional name/category/description search).
+// GET /documents?familyId=:fid&q=:search&member=:memberId — list active
+// documents (visibility-filtered; optional search; optional subject-member).
 documentRoutes.get("/", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const familyId = c.req.query("familyId");
   const q = c.req.query("q")?.trim();
+  const memberFilter = c.req.query("member");
 
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
@@ -160,6 +163,9 @@ documentRoutes.get("/", requireSession, async (c) => {
   if (membership instanceof Response) return membership;
 
   let where = visibilityWhere(familyId, userId, membership.role);
+  if (memberFilter) {
+    where = and(where, eq(schema.documents.subjectMemberId, memberFilter));
+  }
   if (q) {
     // SQLite LIKE has no default ESCAPE char — neutralize user wildcards.
     const sanitized = q.replace(/[%_]/g, " ").trim();
@@ -229,6 +235,15 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
+
+  // subject member must belong to this family (no cross-family references)
+  if (
+    data.subjectMemberId &&
+    !(await allMembersInFamily(db, data.familyId, [data.subjectMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+
   const docId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
@@ -309,6 +324,13 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
+  }
+
+  if (
+    updates.subjectMemberId &&
+    !(await allMembersInFamily(db, doc.familyId, [updates.subjectMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
   }
 
   const set: Partial<typeof schema.documents.$inferInsert> = {
@@ -610,6 +632,65 @@ documentRoutes.get("/:id/files/:fid/download", csrfProtectGet, requireSession, a
     }
     throw e;
   }
+});
+
+// POST /documents/:id/remind — nudge a family member about this document
+// ("tag someone": in-app notification + email per their prefs).
+const remindSchema = z.object({
+  userId: z.string().min(1),
+  note: z.string().max(500).optional(),
+});
+
+documentRoutes.post("/:id/remind", requireSession, zv(remindSchema), async (c) => {
+  const { id: docId } = c.req.param();
+  const senderId = c.get("userId")!;
+  const { userId: targetUserId, note } = c.req.valid("json");
+  const db = getDb(c.env);
+
+  const limited = await checkRateLimit(c, `remind:${senderId}`, {
+    limit: 20,
+    windowSecs: 3600,
+  });
+  if (limited) return limited;
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId);
+  if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, senderId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  const members = await loadMentionableMembers(db, doc.familyId);
+  const recipient = members.find((m) => m.userId === targetUserId);
+  // Target must be a user-member of the same family.
+  if (!recipient) return c.json({ error: "invalid_member_ids" }, 400);
+
+  // Don't let a reminder leak a private doc to someone who can't see it.
+  if (doc.visibility === "private" && doc.ownerUserId !== targetUserId) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+
+  const sender = members.find((m) => m.userId === senderId);
+  const senderName = sender?.name?.split(" ")[0] ?? "A family member";
+
+  await notifyMember(c.env, db, {
+    recipient,
+    familyId: doc.familyId,
+    type: "reminder",
+    title: `${senderName} asked you to look at "${doc.title}"`,
+    body: note?.trim() || `Reminder about ${doc.title}${doc.expiryDate ? ` (expires ${doc.expiryDate})` : ""}.`,
+    link: `/documents/${doc.id}`,
+  });
+
+  return c.json({ ok: true });
 });
 
 // GET /documents/:id/comments — list non-deleted comments.

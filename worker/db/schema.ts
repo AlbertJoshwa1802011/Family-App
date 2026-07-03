@@ -12,6 +12,7 @@ import {
   sqliteTable,
   text,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 const now = sql`(unixepoch())`;
@@ -448,4 +449,41 @@ export const documentComments = sqliteTable(
     deletedAt: integer("deleted_at"),
   },
   (t) => [index("idx_comment_doc").on(t.documentId, t.createdAt)],
+);
+
+// ── Family Chat ──────────────────────────────────────────────────────────────
+// One shared conversation per family. Soft-delete keeps thread continuity
+// ("message deleted" placeholder) and preserves the audit trail.
+
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+    deletedAt: integer("deleted_at"),
+  },
+  (t) => [index("idx_chat_family_created").on(t.familyId, t.createdAt)],
+);
+
+// ── Digest Log ───────────────────────────────────────────────────────────────
+// Dedupe for the weekly email digest: one row per (user, ISO week) sent.
+
+export const digestLog = sqliteTable(
+  "digest_log",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(), // e.g. "2026-W27"
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("uq_digest_user_period").on(t.userId, t.periodKey)],
 );

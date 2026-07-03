@@ -13,8 +13,10 @@ import { eventRoutes } from "./routes/events";
 import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { calendarRoutes } from "./routes/calendar";
+import { chatRoutes } from "./routes/chat";
 import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
+import { runWeeklyDigest } from "./lib/digest";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
 
@@ -57,6 +59,7 @@ api.route("/events", eventRoutes);
 api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
 api.route("/calendar", calendarRoutes);
+api.route("/chat", chatRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
@@ -89,6 +92,7 @@ export default {
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(runExpiryReminders(env));
+    ctx.waitUntil(runWeeklyDigest(env)); // Mondays only; per-week dedupe inside
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;
