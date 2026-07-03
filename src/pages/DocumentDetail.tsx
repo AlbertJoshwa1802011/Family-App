@@ -19,7 +19,7 @@ import { Badge } from "../components/ui/Badge";
 import { Avatar } from "../components/ui/Avatar";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
-import { api, ApiError } from "../lib/api";
+import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
 import { useAuth } from "../context/AuthContext";
 
@@ -113,13 +113,7 @@ export function DocumentDetail() {
       });
       void qc.invalidateQueries({ queryKey: ["document", id] });
     } catch (e) {
-      if (e instanceof ApiError && e.message === "drive_not_configured") {
-        setUploadError(
-          "File storage isn't connected yet — ask the family owner to finish Google Drive setup.",
-        );
-      } else {
-        setUploadError((e as Error).message);
-      }
+      setUploadError((e as Error).message);
     } finally {
       setUploading(false);
     }
