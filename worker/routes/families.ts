@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -152,6 +152,119 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
     );
 
   return c.json({ members });
+});
+
+// GET /families/me/dashboard-stats — retrieve aggregated family statistics.
+familyRoutes.get("/me/dashboard-stats", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  // Find user's first active family
+  const membership = await db
+    .select({ familyId: schema.familyMembers.familyId })
+    .from(schema.familyMembers)
+    .where(
+      and(
+        eq(schema.familyMembers.userId, userId),
+        eq(schema.familyMembers.status, "active"),
+      ),
+    )
+    .get();
+
+  if (!membership) {
+    return c.json({
+      documentCount: 0,
+      expiringCount: 0,
+      memberCount: 0,
+      storageBytes: 0,
+      tasksTotal: 0,
+      tasksCompleted: 0,
+    });
+  }
+
+  const familyId = membership.familyId;
+
+  // 1. Document Count
+  const docCountResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.documents)
+    .where(
+      and(
+        eq(schema.documents.familyId, familyId),
+        eq(schema.documents.status, "active"),
+      ),
+    )
+    .get();
+
+  // 2. Expiring soon Count (expiring in <= 30 days)
+  const now = new Date();
+  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
+  const nowStr = now.toISOString().slice(0, 10);
+  const thirtyDaysStr = thirtyDaysLater.toISOString().slice(0, 10);
+
+  const expiringCountResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.documents)
+    .where(
+      and(
+        eq(schema.documents.familyId, familyId),
+        eq(schema.documents.status, "active"),
+        sql`${schema.documents.expiryDate} >= ${nowStr}`,
+        sql`${schema.documents.expiryDate} <= ${thirtyDaysStr}`,
+      ),
+    )
+    .get();
+
+  // 3. Family Members Count
+  const memberCountResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.familyMembers)
+    .where(
+      and(
+        eq(schema.familyMembers.familyId, familyId),
+        eq(schema.familyMembers.status, "active"),
+      ),
+    )
+    .get();
+
+  // 4. Storage Bytes (Sum sizeBytes of current active files)
+  const storageResult = await db
+    .select({ totalBytes: sql<number>`sum(${schema.files.sizeBytes})` })
+    .from(schema.files)
+    .innerJoin(schema.documents, eq(schema.files.documentId, schema.documents.id))
+    .where(
+      and(
+        eq(schema.documents.familyId, familyId),
+        eq(schema.documents.status, "active"),
+        eq(schema.files.isCurrent, true),
+        eq(schema.files.status, "active"),
+      ),
+    )
+    .get();
+
+  // 5. Tasks Stats (Total & Completed, excluding archived)
+  const tasksResult = await db
+    .select({
+      total: sql<number>`count(*)`,
+      completed: sql<number>`sum(case when ${schema.tasks.status} = 'done' then 1 else 0 end)`,
+    })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.familyId, familyId),
+        sql`${schema.tasks.status} != 'archived'`,
+      ),
+    )
+    .get();
+
+  return c.json({
+    documentCount: docCountResult?.count ?? 0,
+    expiringCount: expiringCountResult?.count ?? 0,
+    memberCount: memberCountResult?.count ?? 0,
+    storageBytes: storageResult?.totalBytes ?? 0,
+    tasksTotal: tasksResult?.total ?? 0,
+    tasksCompleted: tasksResult?.completed ?? 0,
+  });
 });
 
 // POST /invites/:token/accept — accept an invite using the plain token.

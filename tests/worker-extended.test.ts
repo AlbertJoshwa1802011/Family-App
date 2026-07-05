@@ -363,4 +363,11 @@ describe("7. Auth enforcement on event/task/contact routes", () => {
       expect(responseBody.error).toBe("unauthorized");
     });
   }
+
+  it("GET /api/families/me/dashboard-stats → 401 without session (auth required)", async () => {
+    const res = await app.request("/api/families/me/dashboard-stats");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
+  });
 });
