@@ -26,14 +26,22 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 136+ tests; must stay green
+npm run test           # vitest run — 270+ tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
+npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth needed)
+npm run dev:screenshots # Playwright mobile screenshots of every screen → screenshots/
 ```
 
 **Definition of done for any change:** `typecheck` ✅, `lint` ✅, `test` ✅, `build` ✅.
 If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` ✅.
+
+**Project skills** (`.claude/skills/`) encode the house workflows — invoke them instead
+of re-deriving: `gate` (definition of done), `add-api-resource` (the full backend
+pattern with all guards), `live-test` (real-runtime multi-user testing + screenshots),
+`db-migration` (schema change safely), `email-template` (email-safe HTML +
+notification delivery), `release` (commit → PR → merge-deploys → remote migration).
 
 ---
 

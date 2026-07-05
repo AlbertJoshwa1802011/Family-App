@@ -10,7 +10,7 @@ suite guarantees. Read alongside `CLAUDE.md §7` (philosophy) and `docs/DEPLOYME
 ```bash
 npm run typecheck   # tsc project refs + worker + node configs
 npm run lint        # eslint (incl. react-hooks/purity)
-npm run test        # vitest — 218 tests across 14 files
+npm run test        # vitest — 270+ tests across 18+ files
 npm run build       # tsc -b && vite build (catches PWA/plugin breakage)
 ```
 
@@ -45,7 +45,17 @@ in-memory KV with TTL. Tests exercise the real route → drizzle → SQL path wi
 seeded users, sessions, families, and documents — zero extra dependencies.
 
 Files: `integration-flows.test.ts` (success paths), `authz-matrix.test.ts`
-(security), `security-hardening.test.ts` (CSRF + rate limits).
+(security), `security-hardening.test.ts` (CSRF + rate limits), `chat.test.ts`,
+`mentions-remind.test.ts`, `email-digest.test.ts` (fetch-stubbed Resend),
+`search-categorize-calendar.test.ts`, `regression-deep.test.ts` (session
+lifecycle, cross-family isolation matrix, trashed surfaces, unicode/limits).
+
+### Layer 2.5: Live application testing (real runtime, real users)
+`npm run dev` + `npm run dev:seed` (two users with session cookies, no OAuth
+needed) → drive real user journeys with curl → `npm run dev:screenshots` for
+mobile-viewport UI review. The full scripted family journey lives in
+`.claude/skills/live-test/SKILL.md`. Use this before shipping anything
+user-visible.
 
 Seed helpers: `seedUser`, `seedSession` (returns a `sid=` cookie),
 `seedFamily`, `seedMember`, `seedActor` (user+membership+session in one call),
