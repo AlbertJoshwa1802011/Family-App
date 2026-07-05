@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, ListTodo, Plus } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -11,6 +12,7 @@ import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
+import { useAuth } from "../context/AuthContext";
 
 interface TaskSummary {
   id: string;
@@ -37,10 +39,12 @@ function TaskRow({
   task,
   onToggle,
   pending,
+  onEdit,
 }: {
   task: TaskSummary;
   onToggle: (t: TaskSummary) => void;
   pending: boolean;
+  onEdit: (id: string) => void;
 }) {
   const done = task.status === "done";
   const due = expiryStatus(task.dueDate);
@@ -58,9 +62,9 @@ function TaskRow({
           <Circle className="size-6" />
         )}
       </button>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onEdit(task.id)}>
         <div
-          className={`truncate text-sm font-medium ${
+          className={`truncate text-sm font-medium hover:text-vault-300 transition-colors ${
             done ? "text-fg-subtle line-through" : "text-fg"
           }`}
         >
@@ -80,11 +84,17 @@ function TaskRow({
 
 export function Tasks() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { families } = useAuth();
+  const activeFamilyId = families[0]?.id;
   const [showDone, setShowDone] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => api<{ tasks: TaskSummary[] }>("/tasks"),
+    queryKey: ["tasks", activeFamilyId],
+    queryFn: () =>
+      api<{ tasks: TaskSummary[] }>(
+        activeFamilyId ? `/tasks?familyId=${activeFamilyId}` : "/tasks"
+      ),
   });
 
   const toggle = useMutation({
@@ -116,7 +126,12 @@ export function Tasks() {
             title="No tasks yet"
             description="Keep family to-dos in one place — renew a passport, book a dentist, pick up prescriptions."
             action={
-              <Button leadingIcon={<Plus className="size-4" />}>Add task</Button>
+              <Button
+                leadingIcon={<Plus className="size-4" />}
+                onClick={() => navigate("/tasks/new")}
+              >
+                Add task
+              </Button>
             }
           />
         ) : (
@@ -137,6 +152,7 @@ export function Tasks() {
                       task={t}
                       onToggle={toggle.mutate}
                       pending={toggle.isPending}
+                      onEdit={(id) => navigate(`/tasks/${id}/edit`)}
                     />
                   ))}
                 </Card>
@@ -159,6 +175,7 @@ export function Tasks() {
                         task={t}
                         onToggle={toggle.mutate}
                         pending={toggle.isPending}
+                        onEdit={(id) => navigate(`/tasks/${id}/edit`)}
                       />
                     ))}
                   </Card>
@@ -168,7 +185,7 @@ export function Tasks() {
           </>
         )}
       </Page>
-      <Fab icon={Plus} label="Add task" />
+      <Fab icon={Plus} label="Add task" onClick={() => navigate("/tasks/new")} />
     </>
   );
 }

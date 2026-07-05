@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -38,13 +38,29 @@ function zv<T extends z.ZodType>(s: T) {
 
 // GET /contacts?familyId=:id
 contactRoutes.get("/", requireSession, async (c) => {
-  const familyId = c.req.query("familyId");
-  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+  let familyId = c.req.query("familyId");
+
+  if (!familyId) {
+    // Resolve user's first active family
+    const membership = await db
+      .select({ familyId: schema.familyMembers.familyId })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.userId, userId),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      )
+      .get();
+    if (!membership) return c.json({ contacts: [] });
+    familyId = membership.familyId;
+  }
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
-  const db = getDb(c.env);
   const contacts = await db
     .select()
     .from(schema.contacts)

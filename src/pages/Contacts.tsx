@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Mail, Phone, Plus, Contact as ContactIcon } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -8,6 +9,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 interface ContactSummary {
   id: string;
@@ -31,9 +33,16 @@ function ContactSkeleton() {
 }
 
 export function Contacts() {
+  const navigate = useNavigate();
+  const { families } = useAuth();
+  const activeFamilyId = families[0]?.id;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts"],
-    queryFn: () => api<{ contacts: ContactSummary[] }>("/contacts"),
+    queryKey: ["contacts", activeFamilyId],
+    queryFn: () =>
+      api<{ contacts: ContactSummary[] }>(
+        activeFamilyId ? `/contacts?familyId=${activeFamilyId}` : "/contacts"
+      ),
   });
 
   const contacts = data?.contacts ?? [];
@@ -54,7 +63,10 @@ export function Contacts() {
             title="No contacts yet"
             description="Keep doctors, schools, and trusted helpers handy — the numbers you need in an emergency."
             action={
-              <Button leadingIcon={<Plus className="size-4" />}>
+              <Button
+                leadingIcon={<Plus className="size-4" />}
+                onClick={() => navigate("/contacts/new")}
+              >
                 Add contact
               </Button>
             }
@@ -63,12 +75,15 @@ export function Contacts() {
           <Card className="divide-y divide-line overflow-hidden">
             {contacts.map((c) => (
               <div key={c.id} className="px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center gap-3 cursor-pointer"
+                  onClick={() => navigate(`/contacts/${c.id}/edit`)}
+                >
                   <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
                     <ContactIcon className="size-5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-fg">
+                    <div className="truncate text-sm font-medium text-fg hover:text-vault-300 transition-colors">
                       {c.name}
                     </div>
                     {c.relationship && (
@@ -105,7 +120,11 @@ export function Contacts() {
           </Card>
         )}
       </Page>
-      <Fab icon={Plus} label="Add contact" />
+      <Fab
+        icon={Plus}
+        label="Add contact"
+        onClick={() => navigate("/contacts/new")}
+      />
     </>
   );
 }

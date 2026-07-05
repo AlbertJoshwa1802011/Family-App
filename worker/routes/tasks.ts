@@ -48,13 +48,29 @@ function zv<T extends z.ZodType>(s: T) {
 
 // GET /tasks?familyId=:id&status=open|done|archived&assignee=:memberId
 taskRoutes.get("/", requireSession, async (c) => {
-  const familyId = c.req.query("familyId");
-  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+  let familyId = c.req.query("familyId");
+
+  if (!familyId) {
+    // Resolve user's first active family
+    const membership = await db
+      .select({ familyId: schema.familyMembers.familyId })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.userId, userId),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      )
+      .get();
+    if (!membership) return c.json({ tasks: [] });
+    familyId = membership.familyId;
+  }
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
-  const db = getDb(c.env);
   const statusFilter = c.req.query("status");
   const assigneeFilter = c.req.query("assignee");
 
