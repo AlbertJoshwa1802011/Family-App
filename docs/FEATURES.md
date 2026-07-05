@@ -15,6 +15,7 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 2.5 | ✅ Complete | Events/Tasks/Contacts on D1 + auth, wired frontend (composers, forms) |
 | Phase 3 | ✅ Complete | Reminder cron (range + dedupe), in-app notifications, Resend email, prefs |
 | Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
+| Premium batch | ✅ Complete | Family chat + @mentions, tag-to-remind, dependents + member profiles, search + AI categories, ICS calendar feed, HTML email reports + weekly digest, Instagram-style nav |
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
@@ -69,60 +70,50 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ## 3. API Surface
 
-All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all `/api/*`. Unknown `/api/*` paths return `{ error: "not_found" }` JSON 404.
+All routes live under `/api` and are **fully implemented against D1**.
+Middleware on `/api/*`: `requestId` → `logger` → `secureHeaders` → **CSRF
+Origin/Referer check on mutations** → 1 MiB `bodyLimit`. Unknown `/api/*`
+paths return `{ error: "not_found" }` JSON 404. Every route below (except
+`/health`, OAuth, and the capability-URL calendar feed) requires a session;
+family-scoped routes verify active membership; document routes additionally
+enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
-### Route Status Legend
-- **Stub-200**: Returns empty data (e.g. `{ events: [] }`)
-- **Stub-501**: Returns `{ error: "not_implemented", phase: N }`
-- **Val-501**: Zod validation wired; stub returns 501 on valid input; 400 on invalid
-- **Real**: Actually queries D1 and returns live data
-
-| Method | Path | Status | Phase |
-|---|---|---|---|
-| GET | `/health` | Real | 0 |
-| GET | `/auth/me` | Stub-200 (`user:null`) | 0 |
-| POST | `/auth/google/start` | Stub-501 | 1 |
-| GET | `/auth/google/callback` | Stub-501 | 1 |
-| POST | `/auth/logout` | Stub-200 (`ok:true`) | 0 |
-| GET | `/families` | Stub-200 | 1 |
-| POST | `/families` | Val-501 | 1 |
-| GET | `/families/:id` | Stub-501 | 1 |
-| GET | `/families/:id/members` | Stub-200 | 1 |
-| GET | `/families/me/members` | Stub-200 | 1 |
-| PATCH | `/families/:id/members/:mid` | Val-501 | 1 |
-| POST | `/families/:id/invites` | Val-501 | 1 |
-| POST | `/invites/:token/accept` | Stub-501 | 1 |
-| GET | `/families/:id/activity` | Stub-200 | 5 |
-| GET | `/documents` | Stub-200 | 2 |
-| POST | `/documents` | Val-501 | 2 |
-| GET | `/documents/:id` | Stub-501 | 2 |
-| PATCH | `/documents/:id` | Val-501 | 2 |
-| DELETE | `/documents/:id` | Stub-501 | 2 |
-| POST | `/documents/:id/files` | Stub-501 | 2 |
-| GET | `/documents/:id/files/:fid/download` | Stub-501 | 2 |
-| GET | `/documents/:id/comments` | Stub-200 | 2 |
-| POST | `/documents/:id/comments` | Val-501 | 2 |
-| DELETE | `/documents/:id/comments/:cid` | Stub-501 | 2 |
-| GET | `/notifications` | Stub-200 | 3 |
-| POST | `/notifications/:id/read` | Stub-200 | 3 |
-| GET | `/events` | Stub-200 | 2.5 |
-| POST | `/events` | Val-501 | 2.5 |
-| GET | `/events/:id` | Stub-501 | 2.5 |
-| PATCH | `/events/:id` | Val-501 | 2.5 |
-| DELETE | `/events/:id` | Stub-501 | 2.5 |
-| POST | `/events/:id/cancel` | Stub-501 | 2.5 |
-| POST | `/events/:id/attendees` | Val-501 | 2.5 |
-| DELETE | `/events/:id/attendees/:memberId` | Stub-501 | 2.5 |
-| GET | `/tasks` | Stub-200 | 2.5 |
-| POST | `/tasks` | Val-501 | 2.5 |
-| GET | `/tasks/:id` | Stub-501 | 2.5 |
-| PATCH | `/tasks/:id` | Val-501 | 2.5 |
-| DELETE | `/tasks/:id` | Stub-501 | 2.5 |
-| GET | `/contacts` | Stub-200 | 2.5 |
-| POST | `/contacts` | Val-501 | 2.5 |
-| GET | `/contacts/:id` | Stub-501 | 2.5 |
-| PATCH | `/contacts/:id` | Val-501 | 2.5 |
-| DELETE | `/contacts/:id` | Stub-501 | 2.5 |
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/health` | liveness |
+| GET | `/auth/me` | user + families (null when signed out) |
+| POST | `/auth/google/start` | PKCE + state in KV · RL 10/min/IP |
+| GET | `/auth/google/callback` | token exchange, jose ID-token verify, session cookie · RL 10/min/IP |
+| POST | `/auth/logout` | revokes session server-side |
+| GET/POST | `/families` | list / create (creator = owner) |
+| GET | `/families/:id` · `/families/:id/members` · `/families/me/members` | details / member lists |
+| POST | `/families/:id/members` | add **dependent** (admin+) |
+| PATCH | `/families/:id/members/:mid` | role change / remove (admin+; owner protected) |
+| POST | `/families/:id/invites` | email-bound single-use token + HTML invite email · admin+ · RL 20/h |
+| POST | `/families/invites/:token/accept` | accepting account's email must match |
+| GET | `/families/:id/activity` | audit feed w/ actor names |
+| GET | `/documents?familyId&q&member` | visibility-filtered list + search + per-member filter |
+| POST | `/documents` | create (subjectMemberId family-scope-validated) |
+| POST | `/documents/suggest-category` | heuristics → Claude (if `ANTHROPIC_API_KEY`) · RL 30/min |
+| GET/PATCH/DELETE | `/documents/:id` | get / update (null clears) / soft-trash |
+| POST | `/documents/:id/remind` | tag a member → notification + email · RL 20/h |
+| POST | `/documents/:id/files/upload-url` | Drive resumable URL · RL 30/min |
+| GET/POST | `/documents/:id/files` | version list / record after Drive upload |
+| GET | `/documents/:id/files/:fid/download` | streaming proxy, `attachment` + nosniff, CSRF-checked GET |
+| GET/POST | `/documents/:id/comments` · DELETE `.../:cid` | comments (soft-delete; author or admin+) |
+| GET | `/notifications?unreadOnly` | inbox + unread count |
+| POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
+| GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
+| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated) |
+| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees / update / trash |
+| POST | `/events/:id/cancel` | cancelled stays visible |
+| GET | `/events/:id/ics` | "Add to calendar" download |
+| POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
+| GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | tasks (assignee/related family-scope-validated; null clears) |
+| GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
+| GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
+| POST | `/calendar/feed-token` | mint/rotate capability URL |
+| GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
 
 ### Zod Validation Rules (Critical Constraints)
 
@@ -156,9 +147,13 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
 
-### Bottom Navigation
+### Bottom Navigation (Instagram-style)
 
-5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`. Tasks (`/tasks`) and Contacts (`/contacts`) are reached from the Dashboard "Quick access" row (keeps the nav at 5 items).
+5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
+unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
+the gear on the Family tab (profile-style); Calendar, Tasks and Contacts are in
+the Dashboard "Quick access" grid. Active state: `text-vault-300` +
+`strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
 
 ### Key Libraries
 
@@ -186,42 +181,36 @@ Hidden docs return **404** (never 403) so existence isn't revealed.
 **Tested:** `tests/authz-matrix.test.ts` covers the full matrix (member vs
 doc-owner vs admin vs owner vs non-member) across all surfaces.
 
-### 5.2 Member Profiles with Per-Member Document View
+### 5.2 Member Profiles with Per-Member Document View ✅ DONE
 
-**Schema:** `documents.subject_member_id` exists for per-member document assignment.  
-**Gap:** `FamilyPage` was an empty state; it now shows a member list UI but requires real data from Phase 1 (`GET /families/:id/members`). Per-member document filtering (`WHERE subject_member_id = :memberId`) has no UI surface.  
-**What to build in Phase 1:** Real member list endpoint → click member → profile page → their documents  
-**Also needed:** `member_health` table has no API or UI yet (health notes per member)
+Member list links to `/family/members/:id` (profile + that member's documents
+via `GET /documents?member=`); DocumentForm has a "Belongs to" picker
+(`subjectMemberId`, family-scope-validated). **Still open:** `member_health`
+table has no API or UI yet (health notes per member).
 
-### 5.3 Document Comments
+### 5.3 Document Comments ✅ DONE
 
-**Schema:** `document_comments` fully defined (soft-delete, compound index).  
-**API:** `GET/POST /documents/:id/comments` and `DELETE /documents/:id/comments/:cid` are stubbed but not connected to D1.  
-**UI:** `DocumentDetail` has no comments section.  
-**Phase:** Phase 2 — implement alongside document detail UI.
+API live (`GET/POST /documents/:id/comments`, `DELETE .../:cid`, soft-delete,
+author-or-admin delete, visibility-gated) + comments section on DocumentDetail.
 
-### 5.4 Activity Feed Write Path
+### 5.4 Activity Feed Write Path ✅ DONE
 
-**Schema:** `audit_log` exists.  
-**Gap:** Nothing writes to `audit_log` yet. The read path (`GET /families/:id/activity`) is stubbed. But if Phase 2 document mutations don't call `insertAuditEvent()`, the audit log will be permanently empty for all early actions.  
-**Must-do in Phase 2:** Add `insertAuditEvent(db, { familyId, actorUserId, action, targetType, targetId })` helper and call it from: document create/upload/download/delete, family invite, member remove.  
-**Read path:** Phase 5.
+`insertAuditEvent()` is called from family/member/invite/document/event
+mutations; `GET /families/:id/activity` joins actor names and feeds the
+Family page "Recent activity" section. Keep adding audit calls to NEW mutations.
 
-### 5.5 Child / Non-User Family Members ✅ SCHEMA DONE
+### 5.5 Child / Non-User Family Members ✅ DONE
 
-**Resolved (migration 0003):** `family_members.user_id` is now **nullable**, plus new columns
-`member_type` (`user|dependent`), `display_name`, and `date_of_birth`. Dependents (children,
-elderly relatives without a Google account) can be represented; NULL user_ids are distinct in the
-unique index so multiple dependents coexist in one family.  
-**Still TODO (Phase 1 API/UI):** `POST /families/:id/members` to create a dependent (name only,
-no invite); member-list UI to add/manage dependents. The EventForm attendee picker already renders
-`name ?? email ?? "Member"`, so it works structurally once data flows.
+Migration 0003 (nullable `user_id`, `member_type`, `display_name`,
+`date_of_birth`) + `POST /families/:id/members` (admin+) + add-dependent UI on
+the Family page. Dependents appear in attendee pickers, "Belongs to", and
+member profiles; they are excluded from notification/mention delivery (no account).
 
 ---
 
 ## 6. Test Coverage Map
 
-**218+ tests across 14 files** — see `docs/TESTING.md` for the authoritative
+**270+ tests across 18+ files** — see `docs/TESTING.md` for the authoritative
 catalog (contract, integration-on-real-D1, authz matrix, CSRF/rate-limit,
 pure-unit, stress). The table below is the historical Phase-0.5 snapshot.
 

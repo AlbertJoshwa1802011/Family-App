@@ -1,6 +1,13 @@
 # Family Vault — Mobile UI/UX Audit
 
-Audited: 2026-06-07. Stack: React 19, React Router 7, Tailwind v4 (`@theme`), vite-plugin-pwa. Target: mobile-first, premium app-like feel. Today the app is a basic dark web page: top horizontal tab nav, emoji icons, no skeletons, no safe-area handling, undersized tap targets, flat surfaces.
+> **Status (2026-07-05): the P0/P1 items below are implemented** — token ramp,
+> lucide icons, skeletons, safe areas, 44px+ targets, fixed bottom nav (now
+> Instagram-style: Home · Docs · Chat · Activity+badge · Family), empty states,
+> and app-like detail screens. Kept for history and for the still-open P2 ideas
+> (haptics/transitions, pull-to-refresh). For current UI review, use
+> `npm run dev:screenshots` (see `.claude/skills/live-test`).
+
+Audited: 2026-06-07. Stack: React 19, React Router 7, Tailwind v4 (`@theme`), vite-plugin-pwa. Target: mobile-first, premium app-like feel. At audit time the app was a basic dark web page: top horizontal tab nav, emoji icons, no skeletons, no safe-area handling, undersized tap targets, flat surfaces.
 
 ---
 

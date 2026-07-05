@@ -1,82 +1,103 @@
 # 🗄️ Family Vault
 
-A mobile-first **PWA** for families to store important documents (passports, insurance,
-licenses, warranties, medical records…) securely — and **never miss an expiry**.
+A mobile-first **PWA** where a family stores its important documents (passports,
+insurance, licenses, warranties, medical records…), **never misses an expiry**,
+and coordinates life together — chat, events, tasks, reminders.
 
-- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4, installable PWA.
-- **Backend:** Cloudflare Worker + Hono (single deployable unit, same-origin API).
-- **Database:** Cloudflare D1 (SQLite) via Drizzle ORM. **Cache:** Cloudflare KV.
-- **Storage:** Documents live in the family owner's Google Drive (5TB) via the Drive API.
-- **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
-- **Reminders:** Daily Cron Trigger → in-app notifications + email (Resend); WhatsApp later.
+> **Status: live in production.** All core product phases are implemented and
+> tested (270+ tests). New here? Read [`CLAUDE.md`](CLAUDE.md) first — it is the
+> institutional memory of this repo — then [`docs/FEATURES.md`](docs/FEATURES.md)
+> for what exists and [`docs/TESTING.md`](docs/TESTING.md) /
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for how to work on it.
+> Agent workflows live in [`.claude/skills/`](.claude/skills/) (gate,
+> add-api-resource, live-test, db-migration, email-template, release).
 
-> **Status: Phase 0 — scaffold.** Runnable skeleton (build/lint/typecheck/test green) with
-> stubbed routes. See [`docs/PLAN.md`](docs/PLAN.md) for the phased roadmap,
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design, and
-> [`docs/RESEARCH.md`](docs/RESEARCH.md) / [`docs/REVIEW_NOTES.md`](docs/REVIEW_NOTES.md)
-> for the research + plan-review history.
+## What the product does today
+
+- 📄 **Documents** — upload to the family's Google Drive, categories with
+  **AI suggestions**, expiry tracking, search by name, per-person assignment
+  ("Ella's passport"), **family vs private visibility** (enforced server-side,
+  covered by an authz-matrix test suite), comments, version history.
+- ⏰ **Reminders** — daily cron scans expiries/events with per-window dedupe:
+  in-app notifications + urgency-coded HTML emails; per-user channels and
+  lead-time windows; **tag someone** to remind them (`@mention` in chat or
+  "Remind a family member" on a document).
+- 💬 **Family chat** — WhatsApp-style bubbles, @mentions with notifications,
+  soft-delete, 5s polling.
+- 📅 **Calendar** — events with attendees, per-event `.ics` download, and a
+  subscribable feed (Google/Apple/Outlook) carrying events + document expiries.
+- 👨‍👩‍👧 **Family management** — Google-login invites (email-bound, single-use,
+  beautiful HTML invite email), roles (owner/admin/member), dependents without
+  accounts, member profiles, activity feed.
+- 📱 **App-like UI** — Instagram-style bottom tabs (Home · Docs · Chat ·
+  Activity with live unread badge · Family), installable PWA, dark theme,
+  safe-area aware.
+- 📧 **Weekly digest** — Monday "your family week ahead" email report
+  (expiring docs, events, open tasks), per-recipient privacy, deduped.
+
+**Stack:** React 19 + Vite + Tailwind v4 PWA · Cloudflare Worker + Hono
+(single deploy unit, same-origin `/api`) · D1 (Drizzle) + KV · Google Drive
+(`drive.file`) for bytes · Google OAuth (PKCE) + opaque session cookies ·
+Resend email · optional Claude API for document categorization.
 
 ## Quick start
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # fill in secrets (see below)
-npm run dev                      # Vite + Cloudflare Worker (workerd) with HMR
+cp .dev.vars.example .dev.vars   # secrets optional for local UI work
+npm run db:migrate:local         # create local D1
+npm run dev                      # real workerd runtime + HMR
+npm run dev:seed                 # seed two users w/ session cookies (no OAuth needed locally)
 ```
 
-Open the printed local URL. The API is served same-origin under `/api` (try `/api/health`).
+Open the printed URL. API is same-origin under `/api` (try `/api/health`).
+Full local multi-user walkthrough: `.claude/skills/live-test/SKILL.md`.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
 | `npm run dev` | Dev server (Vite + `@cloudflare/vite-plugin`, real `workerd` + bindings) |
-| `npm run build` | Type-check then build client + worker |
-| `npm run typecheck` | TS type-check (app + worker + config) |
-| `npm run lint` | ESLint (flat config) |
-| `npm run test` | Vitest unit tests |
-| `npm run db:generate` | Generate D1 SQL migrations from the Drizzle schema |
-| `npm run db:migrate:local` | Apply migrations to local D1 |
-| `npm run db:migrate:remote` | Apply migrations to production D1 |
-| `npm run deploy` | Build + `wrangler deploy` |
+| `npm run dev:seed` | Seed local D1 with two users + live sessions (`sid=sess-priya` / `sid=sess-ravi`) |
+| `npm run dev:screenshots` | Playwright mobile screenshots of every screen → `screenshots/` |
+| `npm run typecheck` / `lint` / `test` / `build` | The gate — ALL must pass before every commit |
+| `npm run db:generate` | Generate D1 migrations from `worker/db/schema.ts` (then `python3 scripts/validate_migrations.py`) |
+| `npm run db:migrate:local` / `db:migrate:remote` | Apply migrations (remote is **manual** after deploys!) |
+| `npm run deploy` | Build + `wrangler deploy` (normally done by the merge pipeline) |
 
-## First-time Cloudflare setup
+## Deployment
 
-```bash
-npx wrangler login
-npx wrangler d1 create family-vault-db          # paste database_id into wrangler.jsonc
-npx wrangler kv namespace create KV             # paste id into wrangler.jsonc
-npm run db:generate && npm run db:migrate:remote
-# set secrets:
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put GOOGLE_OWNER_REFRESH_TOKEN
-npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put SESSION_SECRET
-npm run deploy
-```
+Merging to the default branch triggers the production pipeline. **Migrations
+are not auto-applied** — run `npm run db:migrate:remote` after merging a PR
+that contains one. Full runbook incl. first-time provisioning, secrets, Google
+Cloud setup, smoke tests, and ops: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-## Google Cloud setup (summary)
-
-1. Enable the **Google Drive API**.
-2. **OAuth consent screen** (External): scopes `openid email profile` (identity) + `drive.file`
-   (storage). All non-sensitive → no restricted-scope verification needed.
-3. Create a **Web OAuth client**; add exact redirect URIs (e.g. `https://<app>/api/auth/google/callback`).
-4. **Publish to production** (Testing mode expires refresh tokens after 7 days).
-5. Obtain the owner's long-lived refresh token via an offline-consent flow → store as
-   `GOOGLE_OWNER_REFRESH_TOKEN`.
-
-> ⚠️ **Trust/privacy:** all families' documents physically reside in one Google account's Drive.
-> Acceptable for a single trusted family; see `docs/ARCHITECTURE.md` → "Trust, Privacy & Storage
-> Model" before onboarding unrelated families (Shared Drive + envelope encryption are on the roadmap).
+> ⚠️ **Trust/privacy:** all families' documents physically reside in one Google
+> account's Drive. Acceptable for a single trusted family; see
+> `docs/ARCHITECTURE.md` → "Trust, Privacy & Storage Model" before onboarding
+> unrelated families (Shared Drive + envelope encryption are on the roadmap).
 
 ## Project structure
 
 ```
-src/            React PWA (pages, components, context, lib)
-worker/         Hono API + scheduled() cron; db/ (Drizzle schema = source of truth), routes/
-migrations/     Generated D1 SQL migrations
-docs/           PLAN, ARCHITECTURE, RESEARCH, REVIEW_NOTES
-scripts/        Icon generator
-tests/          Vitest
+src/              React PWA — pages/, components/ (ui/ kit + BottomNav), context/, lib/
+worker/           Hono API + cron — db/schema.ts (★ source of truth), routes/, lib/, middleware/
+migrations/       Generated D1 SQL (0000–0004) — never hand-edit applied ones
+tests/            Vitest — contract + real-D1 integration + authz matrix + stress
+scripts/          dev-seed, dev-screenshots, validate_migrations.py, gen_icons.py
+docs/             FEATURES, ARCHITECTURE, TESTING, DEPLOYMENT, PLAN, PRODUCTION_READINESS…
+.claude/skills/   Agent workflows: gate, add-api-resource, live-test, db-migration,
+                  email-template, release
 ```
+
+## Documentation map
+
+| Read… | When you need… |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | **Start here** — commands, golden rules, gotchas, current state |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | What exists: schema, API surface, frontend routes |
+| [`docs/TESTING.md`](docs/TESTING.md) | Test architecture, full test-case catalog, what to add next |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Provisioning, secrets, deploy, ops, rollback |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The why: auth, Drive model, cron design, trust model |
+| [`docs/PLAN.md`](docs/PLAN.md) | Roadmap + roles/segmentation plan |
+| [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) | Honest scorecard + remaining hardening |
