@@ -66,6 +66,7 @@ export function TaskForm() {
   useEffect(() => {
     if (taskData?.task) {
       const task = taskData.task;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         title: task.title,
         notes: task.notes ?? "",

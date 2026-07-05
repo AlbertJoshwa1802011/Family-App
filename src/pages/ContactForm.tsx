@@ -53,6 +53,7 @@ export function ContactForm() {
   useEffect(() => {
     if (contactData?.contact) {
       const contact = contactData.contact;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         name: contact.name,
         relationship: contact.relationship ?? "",
