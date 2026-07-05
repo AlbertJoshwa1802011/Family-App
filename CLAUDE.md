@@ -174,7 +174,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **218+ tests across 14 files**, all green.
+same depth. Current baseline: **270 tests across 18 files**, all green.
 
 **Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
 built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
@@ -264,6 +264,17 @@ query passes `familyId`; CreateFamily onboarding gate for zero-family users; Doc
 rebuilt DocumentDetail (Drive upload/download, versions); Tasks/Contacts composers; Family page
 invite flow + `/invite/:token` accept page; Dashboard real stats.
 
+**Premium batch (done):** family chat (`chat_messages`, paginated, soft-delete, @mention →
+notification + email via `worker/lib/mentions.ts`); document search (`?q=`) + AI category
+suggestion (`worker/lib/categorize.ts`, Claude structured output behind `ANTHROPIC_API_KEY`,
+heuristics otherwise); calendar integration (per-event ICS + rotatable capability-URL feed,
+`worker/lib/ics.ts` / `routes/calendar.ts`); document remind (`POST /documents/:id/remind`);
+dependents (`POST /families/:id/members`) + member profiles (`?member=` filter); rich HTML
+email templates (`worker/lib/emailTemplates.ts` — email-client-safe: tables, inline styles,
+light palette) + Monday weekly digest (`worker/lib/digest.ts`, `digest_log` dedupe); Instagram
+style bottom nav (Home/Docs/Chat/Activity+badge/Family; Settings behind Family's gear).
+Friendly API error copy lives in `src/lib/api.ts` (`ApiError.code` keeps the machine code).
+
 Remaining build order: Phase 4 (offline/biometric/full-text search) → Phase 5 rest (a11y,
-component + E2E browser tests) → Phase 6 (WhatsApp/push/OCR/shared-drive). See
+component + E2E browser tests) → Phase 6 (push notifications/OCR/shared-drive). See
 `docs/FEATURES.md §5`, `docs/TESTING.md §4`, and the segmentation roadmap in `docs/PLAN.md`.

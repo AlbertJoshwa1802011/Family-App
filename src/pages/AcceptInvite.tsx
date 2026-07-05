@@ -48,7 +48,7 @@ export function AcceptInvite() {
   }, [token]);
 
   const errorKey =
-    accept.error instanceof ApiError ? accept.error.message : undefined;
+    accept.error instanceof ApiError ? accept.error.code : undefined;
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">

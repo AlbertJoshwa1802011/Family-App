@@ -28,6 +28,14 @@ interface DocumentPayload {
   expiryDate: string | null;
   issuedDate: string | null;
   visibility: "family" | "private";
+  subjectMemberId: string | null;
+}
+
+interface Member {
+  id: string;
+  displayName: string | null;
+  name: string | null;
+  email: string | null;
 }
 
 interface FormState {
@@ -37,6 +45,7 @@ interface FormState {
   expiryDate: string;
   issuedDate: string;
   visibility: "family" | "private";
+  subjectMemberId: string;
 }
 
 const inputCls =
@@ -56,7 +65,16 @@ export function DocumentForm() {
     expiryDate: "",
     issuedDate: "",
     visibility: "family",
+    subjectMemberId: "",
   });
+
+  const { data: membersData } = useQuery({
+    queryKey: ["family-members", activeFamily?.id],
+    queryFn: () =>
+      api<{ members: Member[] }>(`/families/${activeFamily!.id}/members`),
+    enabled: Boolean(activeFamily),
+  });
+  const members = membersData?.members ?? [];
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -102,6 +120,7 @@ export function DocumentForm() {
           expiryDate: d.expiryDate ?? "",
           issuedDate: d.issuedDate ?? "",
           visibility: d.visibility,
+          subjectMemberId: d.subjectMemberId ?? "",
         });
         setLoaded(true);
       }
@@ -148,6 +167,7 @@ export function DocumentForm() {
       expiryDate: form.expiryDate || undefined,
       issuedDate: form.issuedDate || undefined,
       visibility: form.visibility,
+      subjectMemberId: form.subjectMemberId || (isEdit ? null : undefined),
     });
   }
 
@@ -268,6 +288,44 @@ export function DocumentForm() {
               </button>
             </div>
           </Card>
+
+          {members.length > 0 && (
+            <Card className="p-4">
+              <p className="mb-2 text-xs font-semibold text-fg-muted">
+                Belongs to (optional)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => set("subjectMemberId", "")}
+                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                    !form.subjectMemberId
+                      ? "bg-vault-600 text-white"
+                      : "bg-white/5 text-fg-muted hover:bg-white/10"
+                  }`}
+                >
+                  Whole family
+                </button>
+                {members.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => set("subjectMemberId", m.id)}
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                      form.subjectMemberId === m.id
+                        ? "bg-vault-600 text-white"
+                        : "bg-white/5 text-fg-muted hover:bg-white/10"
+                    }`}
+                  >
+                    {m.displayName ?? m.name ?? m.email ?? "Member"}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-fg-subtle">
+                Shows on that person's profile — e.g. Ella's passport.
+              </p>
+            </Card>
+          )}
 
           <Card className="p-4">
             <label className="mb-1.5 block text-xs font-semibold text-fg-muted">

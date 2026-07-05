@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  BellRing,
   Download,
   FileText,
   Lock,
@@ -15,13 +16,17 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
+import { Avatar } from "../components/ui/Avatar";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
-import { api, ApiError } from "../lib/api";
+import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
+import { useAuth } from "../context/AuthContext";
 
 interface DocumentDetailPayload {
   id: string;
+  familyId: string;
+  ownerUserId: string;
   title: string;
   category: string;
   description: string | null;
@@ -108,13 +113,7 @@ export function DocumentDetail() {
       });
       void qc.invalidateQueries({ queryKey: ["document", id] });
     } catch (e) {
-      if (e instanceof ApiError && e.message === "drive_not_configured") {
-        setUploadError(
-          "File storage isn't connected yet — ask the family owner to finish Google Drive setup.",
-        );
-      } else {
-        setUploadError((e as Error).message);
-      }
+      setUploadError((e as Error).message);
     } finally {
       setUploading(false);
     }
@@ -259,9 +258,230 @@ export function DocumentDetail() {
           />
         </Card>
 
+        <RemindSomeone doc={doc} />
+
         <FileVersions docId={doc.id} />
+
+        <Comments docId={doc.id} />
       </Page>
     </>
+  );
+}
+
+interface MemberOption {
+  id: string;
+  userId: string | null;
+  memberType: "user" | "dependent";
+  displayName: string | null;
+  name: string | null;
+  email: string | null;
+}
+
+/** Tag a family member: they get an in-app notification + email. */
+function RemindSomeone({ doc }: { doc: DocumentDetailPayload }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const { data } = useQuery({
+    queryKey: ["family-members", doc.familyId],
+    queryFn: () =>
+      api<{ members: MemberOption[] }>(`/families/${doc.familyId}/members`),
+    enabled: open,
+  });
+
+  const remind = useMutation({
+    mutationFn: (target: MemberOption) =>
+      api(`/documents/${doc.id}/remind`, {
+        method: "POST",
+        body: JSON.stringify({
+          userId: target.userId,
+          note: note.trim() || undefined,
+        }),
+      }),
+    onSuccess: (_res, target) => {
+      setSentTo(target.name ?? target.email ?? "them");
+      setNote("");
+      setError("");
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  // Only user-members (not dependents, not yourself) can be reminded; private
+  // docs can only nudge their owner.
+  const candidates = (data?.members ?? []).filter(
+    (m) =>
+      m.memberType === "user" &&
+      m.userId &&
+      m.userId !== user?.id &&
+      (doc.visibility !== "private" || m.userId === doc.ownerUserId),
+  );
+
+  return (
+    <Card className="p-4">
+      <button
+        onClick={() => {
+          setOpen((v) => !v);
+          setSentTo(null);
+        }}
+        className="flex w-full items-center gap-2 text-sm font-medium text-fg"
+      >
+        <BellRing className="size-4 text-vault-300" />
+        Remind a family member
+      </button>
+
+      {sentTo && (
+        <p className="mt-2 text-xs text-success">
+          Done — {sentTo} got a notification{" "}
+          <span className="text-fg-subtle">(and an email if they have them on)</span>.
+        </p>
+      )}
+
+      {open && !sentTo && (
+        <div className="mt-3 space-y-3">
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Optional note — e.g. please renew this before Friday"
+            maxLength={500}
+            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+          />
+          {candidates.length === 0 ? (
+            <p className="text-xs text-fg-subtle">
+              No one to remind here — invite family members first
+              {doc.visibility === "private" && ", or this is a private document"}.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {candidates.map((m) => (
+                <button
+                  key={m.id}
+                  disabled={remind.isPending}
+                  onClick={() => remind.mutate(m)}
+                  className="rounded-full bg-white/5 px-3.5 py-1.5 text-xs font-semibold text-fg-muted transition-colors hover:bg-vault-600 hover:text-white disabled:opacity-50"
+                >
+                  {m.name ?? m.email ?? "Member"}
+                </button>
+              ))}
+            </div>
+          )}
+          {error && <p className="text-xs text-danger">{error}</p>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface Comment {
+  id: string;
+  userId: string;
+  body: string;
+  createdAt: number;
+  authorName: string | null;
+  authorPicture: string | null;
+}
+
+function Comments({ docId }: { docId: string }) {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState("");
+
+  const { data } = useQuery({
+    queryKey: ["document-comments", docId],
+    queryFn: () => api<{ comments: Comment[] }>(`/documents/${docId}/comments`),
+    retry: false,
+  });
+
+  const post = useMutation({
+    mutationFn: (body: string) =>
+      api(`/documents/${docId}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      }),
+    onSuccess: () => {
+      setDraft("");
+      void qc.invalidateQueries({ queryKey: ["document-comments", docId] });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (commentId: string) =>
+      api(`/documents/${docId}/comments/${commentId}`, { method: "DELETE" }),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ["document-comments", docId] }),
+  });
+
+  const comments = data?.comments ?? [];
+
+  return (
+    <section className="space-y-2">
+      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+        Notes & comments {comments.length > 0 && `(${comments.length})`}
+      </h3>
+      <Card className="divide-y divide-line overflow-hidden">
+        {comments.map((cm) => (
+          <div key={cm.id} className="group flex items-start gap-3 px-4 py-3">
+            <Avatar
+              name={cm.authorName}
+              email={null}
+              src={cm.authorPicture}
+              className="mt-0.5 size-8"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm font-medium text-fg">
+                  {cm.authorName ?? "Member"}
+                </span>
+                <span className="text-xs text-fg-subtle">
+                  {new Intl.DateTimeFormat(undefined, {
+                    day: "numeric",
+                    month: "short",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  }).format(new Date(cm.createdAt * 1000))}
+                </span>
+              </div>
+              <p className="mt-0.5 text-sm break-words whitespace-pre-wrap text-fg-muted">
+                {cm.body}
+              </p>
+            </div>
+            {cm.userId === user?.id && (
+              <button
+                onClick={() => remove.mutate(cm.id)}
+                aria-label="Delete comment"
+                className="hidden text-fg-subtle group-hover:block hover:text-danger"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            )}
+          </div>
+        ))}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const body = draft.trim();
+            if (body && !post.isPending) post.mutate(body);
+          }}
+          className="flex items-center gap-2 px-4 py-3"
+        >
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add a note — renewal steps, where the original is…"
+            aria-label="Add a comment"
+            maxLength={2000}
+            className="min-h-10 flex-1 rounded-xl border border-line bg-ink-950 px-3.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+          />
+          <Button type="submit" size="md" loading={post.isPending} disabled={!draft.trim()}>
+            Post
+          </Button>
+        </form>
+      </Card>
+    </section>
   );
 }
 

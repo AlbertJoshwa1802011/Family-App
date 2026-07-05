@@ -11,11 +11,13 @@ import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
 import { DocumentForm } from "./pages/DocumentForm";
 import { FamilyPage } from "./pages/Family";
+import { MemberProfile } from "./pages/MemberProfile";
 import { CalendarPage } from "./pages/Calendar";
 import { EventDetailPage } from "./pages/EventDetail";
 import { EventForm } from "./pages/EventForm";
 import { Tasks } from "./pages/Tasks";
 import { Contacts } from "./pages/Contacts";
+import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
@@ -80,7 +82,9 @@ export default function App() {
           <Route path="/calendar/events/:id/edit" element={<EventForm />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/contacts" element={<Contacts />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/family" element={<FamilyPage />} />
+          <Route path="/family/members/:id" element={<MemberProfile />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

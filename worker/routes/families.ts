@@ -9,6 +9,8 @@ import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
+import { sendEmail } from "../lib/email";
+import { inviteEmail } from "../lib/emailTemplates";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -276,6 +278,61 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
   return c.json({ members });
 });
 
+// POST /families/:id/members — add a DEPENDENT member (child/elder without an
+// account). Real users join via invites; this is for people who can't log in.
+const addDependentSchema = z.object({
+  displayName: z.string().min(1).max(200),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
+    .optional(),
+});
+
+familyRoutes.post(
+  "/:id/members",
+  requireSession,
+  zv(addDependentSchema),
+  async (c) => {
+    const { id: familyId } = c.req.param();
+    const { displayName, dateOfBirth } = c.req.valid("json");
+    const userId = c.get("userId")!;
+
+    const callerOrError = await requireFamilyMember(c, familyId, "admin");
+    if (callerOrError instanceof Response) return callerOrError;
+
+    const db = getDb(c.env);
+    const memberId = crypto.randomUUID();
+
+    await db.insert(schema.familyMembers).values({
+      id: memberId,
+      familyId,
+      userId: null,
+      memberType: "dependent",
+      displayName,
+      dateOfBirth,
+      role: "member",
+      status: "active",
+    });
+
+    await insertAuditEvent(db, {
+      familyId,
+      actorUserId: userId,
+      action: "member_added",
+      targetType: "member",
+      targetId: memberId,
+      meta: { displayName, memberType: "dependent" },
+    });
+
+    const member = await db
+      .select()
+      .from(schema.familyMembers)
+      .where(eq(schema.familyMembers.id, memberId))
+      .get();
+
+    return c.json({ member }, 201);
+  },
+);
+
 // PATCH /families/:id/members/:mid — change a member's role or status (admin+ only).
 familyRoutes.patch(
   "/:id/members/:mid",
@@ -384,8 +441,24 @@ familyRoutes.post(
       meta: { email, role },
     });
 
+    // Best-effort invite email (no-op without RESEND_API_KEY — the caller
+    // still gets the link to share manually).
+    const [inviter, family] = await Promise.all([
+      db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+      db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
+    ]);
+    const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
+    await sendEmail(c.env, {
+      to: email,
+      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
+      html: inviteEmail({
+        inviterName: inviter?.name ?? null,
+        familyName: family?.name ?? "your family",
+        inviteUrl: `${appUrl}/invite/${token}`,
+      }),
+    });
+
     // Return the plain token so the caller can include it in an email link.
-    // In Phase 3 this route will also trigger a Resend email.
     return c.json(
       {
         invite: {

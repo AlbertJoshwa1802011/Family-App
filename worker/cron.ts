@@ -12,7 +12,14 @@ import {
   parseWindows,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
-import { reminderEmailHtml, sendEmail } from "./lib/email";
+import { sendEmail } from "./lib/email";
+import { reminderEmail } from "./lib/emailTemplates";
+
+function urgencyFor(daysUntil: number): "danger" | "warning" | "info" {
+  if (daysUntil <= 7) return "danger";
+  if (daysUntil <= 30) return "warning";
+  return "info";
+}
 
 /** ISO yyyy-mm-dd `daysAhead` days from the instant `nowMs` (UTC). */
 function isoDaysAhead(nowMs: number, daysAhead: number): string {
@@ -162,11 +169,12 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: reminderEmail({
               heading: text.title,
               body: text.body,
               ctaLabel: "View document",
               ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
             }),
           });
           if (ok) stats.emailsSent++;
@@ -236,11 +244,12 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: reminderEmail({
               heading: text.title,
               body: text.body,
               ctaLabel: "View event",
               ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
             }),
           });
           if (ok) stats.emailsSent++;

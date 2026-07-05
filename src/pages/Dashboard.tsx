@@ -248,6 +248,15 @@ export function Dashboard() {
           <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
           <div className="grid grid-cols-2 gap-3">
             <Link
+              to="/calendar"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/15 text-vault-300">
+                <CalendarDays className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Calendar</span>
+            </Link>
+            <Link
               to="/tasks"
               className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
             >

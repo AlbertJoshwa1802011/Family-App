@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, CalendarDays, CheckCheck, FileText } from "lucide-react";
+import {
+  Bell,
+  BellRing,
+  CalendarDays,
+  CheckCheck,
+  FileText,
+  Heart,
+  MessageCircle,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
@@ -36,6 +44,8 @@ function relativeTime(epochSecs: number): string {
 function typeIcon(type: string) {
   if (type === "event") return CalendarDays;
   if (type === "expiry") return FileText;
+  if (type === "mention") return MessageCircle;
+  if (type === "reminder") return BellRing;
   return Bell;
 }
 
@@ -75,8 +85,7 @@ export function Notifications() {
   return (
     <>
       <AppBar
-        title="Notifications"
-        back
+        title="Activity"
         trailing={
           unread > 0 ? (
             <Button
@@ -99,9 +108,9 @@ export function Notifications() {
           </Card>
         ) : notifications.length === 0 ? (
           <EmptyState
-            icon={Bell}
-            title="No notifications"
-            description="Reminders about expiring documents and upcoming events will appear here."
+            icon={Heart}
+            title="You're all caught up"
+            description="Mentions, reminders from family, expiring documents and event alerts will show up here."
           />
         ) : (
           <Card className="divide-y divide-line overflow-hidden">
