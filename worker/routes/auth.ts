@@ -40,7 +40,7 @@ authRoutes.get("/me", async (c) => {
   if (!user) return c.json({ user: null, families: [] });
 
   // Fetch all active family memberships for this user
-  const memberships = await db
+  let memberships = await db
     .select({
       familyId: schema.familyMembers.familyId,
       role: schema.familyMembers.role,
@@ -56,6 +56,42 @@ authRoutes.get("/me", async (c) => {
         eq(schema.familyMembers.status, "active"),
       ),
     );
+
+  if (memberships.length === 0) {
+    // Auto-create a default family for this user
+    const familyId = crypto.randomUUID();
+    const memberId = crypto.randomUUID();
+    const familyName = user.name ? `${user.name.split(" ")[0]}'s Family` : "Personal Family";
+    const now = Math.floor(Date.now() / 1000);
+
+    await db.insert(schema.families).values({
+      id: familyId,
+      name: familyName,
+      ownerUserId: user.id,
+      createdAt: now,
+    });
+
+    await db.insert(schema.familyMembers).values({
+      id: memberId,
+      familyId,
+      userId: user.id,
+      role: "owner",
+      memberType: "user",
+      displayName: user.name,
+      status: "active",
+      createdAt: now,
+    });
+
+    memberships = [
+      {
+        familyId,
+        role: "owner",
+        familyName,
+        driveFolderId: null,
+        familyCreatedAt: now,
+      },
+    ];
+  }
 
   const families = memberships.map((m) => ({
     id: m.familyId,
