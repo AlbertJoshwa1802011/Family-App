@@ -35,5 +35,12 @@
   },
   "vars": {
     "APP_URL": "http://localhost:5173"
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "APP_URL": "https://fam.connect-cloud.workers.dev/vault"
+      }
+    }
   }
 }

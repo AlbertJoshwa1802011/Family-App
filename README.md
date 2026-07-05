@@ -10,11 +10,10 @@ licenses, warranties, medical records…) securely — and **never miss an expir
 - **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
 - **Reminders:** Daily Cron Trigger → in-app notifications + email (Resend); WhatsApp later.
 
-> **Status: Phase 0 — scaffold.** Runnable skeleton (build/lint/typecheck/test green) with
-> stubbed routes. See [`docs/PLAN.md`](docs/PLAN.md) for the phased roadmap,
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design, and
-> [`docs/RESEARCH.md`](docs/RESEARCH.md) / [`docs/REVIEW_NOTES.md`](docs/REVIEW_NOTES.md)
-> for the research + plan-review history.
+> **Status: live in production** at **[https://fam.connect-cloud.workers.dev/vault](https://fam.connect-cloud.workers.dev/vault)**
+> All core phases implemented (270+ tests green). See [`CLAUDE.md`](CLAUDE.md) for the 
+> operational guide, [`docs/FEATURES.md`](docs/FEATURES.md) for what exists, and
+> [`docs/PLAN.md`](docs/PLAN.md) for the roadmap.
 
 ## Quick start
 
