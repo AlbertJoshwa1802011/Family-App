@@ -27,7 +27,7 @@ const isoDate = z
   .optional();
 
 const createDocumentSchema = z.object({
-  familyId: z.string().min(1),
+  familyId: z.string().optional(),
   title: z.string().min(1).max(300),
   category: z.string().max(100).optional().default("other"),
   subjectMemberId: z.string().optional(),
@@ -171,17 +171,36 @@ documentRoutes.get("/", requireSession, async (c) => {
 documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
+  const db = getDb(c.env);
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  let familyId = data.familyId;
+  if (!familyId) {
+    // Resolve user's first active family
+    const m = await db
+      .select({ familyId: schema.familyMembers.familyId })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.userId, userId),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      )
+      .get();
+    if (!m) {
+      return c.json({ error: "no_family_membership" }, 400);
+    }
+    familyId = m.familyId;
+  }
+
+  const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
-  const db = getDb(c.env);
   const docId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
   await db.insert(schema.documents).values({
     id: docId,
-    familyId: data.familyId,
+    familyId,
     ownerUserId: userId,
     title: data.title,
     category: data.category,
@@ -195,7 +214,7 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
   });
 
   await insertAuditEvent(db, {
-    familyId: data.familyId,
+    familyId,
     actorUserId: userId,
     action: ACTIONS.DOCUMENT_CREATED,
     targetType: "document",
@@ -464,8 +483,7 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
   return c.json({ file }, 201);
 });
 
-// GET /documents/:id/files — list file versions for a document (newest first).
-// Visibility is enforced the same way as the single-document GET.
+// GET /documents/:id/files — list files for a document (visibility enforced).
 documentRoutes.get("/:id/files", requireSession, async (c) => {
   const { id: docId } = c.req.param();
   const userId = c.get("userId")!;
@@ -482,6 +500,7 @@ documentRoutes.get("/:id/files", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, doc.familyId);
   if (membership instanceof Response) return membership;
 
+  // Enforce private visibility
   if (
     doc.visibility === "private" &&
     doc.ownerUserId !== userId &&

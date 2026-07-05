@@ -168,28 +168,28 @@ describe("2. Unknown routes return JSON 404", () => {
 // 3. Correct HTTP methods on stub routes
 // ---------------------------------------------------------------------------
 describe("3. Correct HTTP methods on stub routes", () => {
-  it("GET /api/documents → 401 without session (auth required)", async () => {
-    const res = await app.request("/api/documents");
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("unauthorized");
-  });
+  const docProtected = [
+    { method: "GET",    path: "/api/documents" },
+    { method: "POST",   path: "/api/documents" },
+    { method: "GET",    path: "/api/documents/doc-1" },
+    { method: "PATCH",  path: "/api/documents/doc-1" },
+    { method: "DELETE", path: "/api/documents/doc-1" },
+    { method: "POST",   path: "/api/documents/doc-1/files/upload-url" },
+    { method: "POST",   path: "/api/documents/doc-1/files" },
+    { method: "GET",    path: "/api/documents/doc-1/files/file-1/download" },
+    { method: "GET",    path: "/api/documents/doc-1/comments" },
+    { method: "POST",   path: "/api/documents/doc-1/comments" },
+    { method: "DELETE", path: "/api/documents/doc-1/comments/comment-1" },
+  ];
 
-  it("GET /api/documents/:id/files → 401 without session (version listing)", async () => {
-    const res = await app.request("/api/documents/doc-1/files");
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("unauthorized");
-  });
-
-  it("POST /api/documents → 401 without session (auth required)", async () => {
-    const res = await app.request("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ familyId: "fam-1", title: "Passport" }),
+  for (const { method, path } of docProtected) {
+    it(`${method} ${path} → 401 without session (auth required)`, async () => {
+      const res = await app.request(path, { method });
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("unauthorized");
     });
-    expect(res.status).toBe(401);
-  });
+  }
 
   it("GET /api/families → 401 without session (auth required)", async () => {
     const res = await app.request("/api/families");

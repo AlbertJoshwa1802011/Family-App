@@ -5,7 +5,6 @@ import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
 import { VaultProvider } from "./context/VaultContext";
 import { Login } from "./pages/Login";
-import { JoinInvite } from "./pages/JoinInvite";
 import { Dashboard } from "./pages/Dashboard";
 import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
@@ -44,7 +43,6 @@ export default function App() {
     <>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/join/:token" element={<JoinInvite />} />
         <Route
           element={
             <Protected>

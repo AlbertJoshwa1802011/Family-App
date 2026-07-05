@@ -15,7 +15,7 @@ export const eventRoutes = new Hono<HonoEnv>();
 const EventType = z.enum(["gathering", "appointment", "milestone", "other"]);
 
 const eventBaseSchema = z.object({
-  familyId: z.string().min(1),
+  familyId: z.string().optional(),
   title: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   startAt: z.number().int().positive(),
@@ -99,17 +99,36 @@ eventRoutes.get("/", requireSession, async (c) => {
 eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
+  const db = getDb(c.env);
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  let familyId = data.familyId;
+  if (!familyId) {
+    // Resolve user's first active family
+    const m = await db
+      .select({ familyId: schema.familyMembers.familyId })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.userId, userId),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      )
+      .get();
+    if (!m) {
+      return c.json({ error: "no_family_membership" }, 400);
+    }
+    familyId = m.familyId;
+  }
+
+  const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
-  const db = getDb(c.env);
   const eventId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
   await db.insert(schema.events).values({
     id: eventId,
-    familyId: data.familyId,
+    familyId,
     title: data.title,
     description: data.description,
     startAt: data.startAt,

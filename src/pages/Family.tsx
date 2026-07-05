@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Check, Copy, Shield, Trash2, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, UserPlus, Users, X } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -10,9 +10,9 @@ import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
-import { Modal } from "../components/ui/Modal";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { cn } from "../lib/cn";
 
 interface FamilyMember {
   id: string;
@@ -59,288 +59,34 @@ function formatRelativeTime(unixSec: number): string {
   return `${Math.floor(diffSec / 86400)}d ago`;
 }
 
-// Maps the backend audit-log action verbs (dotted, from lib/audit ACTIONS) to
-// friendly sentences for the activity feed.
-function formatAction(action: string): string {
+function formatAction(action: string, targetType: string | null): string {
+  const type = targetType ?? "item";
   const labels: Record<string, string> = {
-    "family.created": "Created the family",
-    "family.updated": "Updated the family",
-    "member.invited": "Invited a member",
-    "member.joined": "Joined the family",
-    "member.role_changed": "Changed a member's role",
-    "member.updated": "Updated a member",
-    "member.removed": "Removed a member",
-    "document.created": "Added a document",
-    "document.updated": "Updated a document",
-    "document.uploaded": "Uploaded a file",
-    "document.downloaded": "Downloaded a document",
-    "document.trashed": "Deleted a document",
-    "document.restored": "Restored a document",
-    "event.created": "Created an event",
-    "event.updated": "Updated an event",
-    "event.cancelled": "Cancelled an event",
-    "event.trashed": "Deleted an event",
-    "task.created": "Added a task",
-    "task.updated": "Updated a task",
-    "task.completed": "Completed a task",
-    "task.deleted": "Deleted a task",
-    "contact.created": "Added a contact",
-    "contact.updated": "Updated a contact",
-    "contact.deleted": "Deleted a contact",
+    "document.upload": `Uploaded a ${type}`,
+    "document.download": `Downloaded a ${type}`,
+    "document.delete": `Deleted a ${type}`,
+    "document.create": `Added a ${type}`,
+    "member.invite": "Invited a member",
+    "member.remove": "Removed a member",
+    "member.role_change": "Updated a member's role",
+    "event.create": "Created an event",
+    "event.cancel": "Cancelled an event",
+    "task.create": "Added a task",
+    "task.complete": "Completed a task",
   };
-  return labels[action] ?? action.replace(/[._]/g, " ");
-}
-
-function InviteModal({
-  familyId,
-  open,
-  onClose,
-}: {
-  familyId: string;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"admin" | "member">("member");
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      api<{ invite: { token: string } }>(`/families/${familyId}/invites`, {
-        method: "POST",
-        body: JSON.stringify({ email, role }),
-      }),
-    onSuccess: (data) => {
-      const link = `${window.location.origin}/join/${data.invite.token}`;
-      setInviteLink(link);
-      void qc.invalidateQueries({ queryKey: ["family-activity"] });
-    },
-  });
-
-  function reset() {
-    setEmail("");
-    setRole("member");
-    setInviteLink(null);
-    setCopied(false);
-    mutation.reset();
-  }
-
-  function close() {
-    reset();
-    onClose();
-  }
-
-  async function copyLink() {
-    if (!inviteLink) return;
-    await navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <Modal open={open} onClose={close} title="Invite a family member">
-      {inviteLink ? (
-        <div className="space-y-4 pb-2">
-          <p className="text-sm text-fg-muted">
-            Share this secure link with{" "}
-            <span className="font-medium text-fg">{email}</span>. It expires in 7 days.
-          </p>
-          <div className="flex items-center gap-2 rounded-xl border border-line bg-ink-950 p-2">
-            <span className="flex-1 truncate px-1 text-xs text-fg-muted">
-              {inviteLink}
-            </span>
-            <Button
-              size="md"
-              variant={copied ? "secondary" : "primary"}
-              leadingIcon={
-                copied ? <Check className="size-4" /> : <Copy className="size-4" />
-              }
-              onClick={copyLink}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          </div>
-          <Button variant="secondary" fullWidth onClick={close}>
-            Done
-          </Button>
-        </div>
-      ) : (
-        <form
-          className="space-y-4 pb-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (email.trim()) mutation.mutate();
-          }}
-        >
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-              Email address
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="family@example.com"
-              className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-              Role
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {(["member", "admin"] as const).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setRole(r)}
-                  className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
-                    role === r
-                      ? "border-vault-500 bg-vault-600/15 text-vault-300"
-                      : "border-line bg-ink-950 text-fg-muted hover:border-line-strong"
-                  }`}
-                >
-                  {ROLE_LABELS[r]}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-xs text-fg-subtle">
-              {role === "admin"
-                ? "Admins can invite members and manage the family."
-                : "Members can view and add shared documents and events."}
-            </p>
-          </div>
-          {mutation.isError && (
-            <p className="text-sm text-danger">
-              {(mutation.error as Error).message}
-            </p>
-          )}
-          <Button
-            type="submit"
-            variant="primary"
-            fullWidth
-            loading={mutation.isPending}
-            leadingIcon={<UserPlus className="size-4" />}
-          >
-            Create invite link
-          </Button>
-        </form>
-      )}
-    </Modal>
-  );
-}
-
-function MemberActionsModal({
-  familyId,
-  member,
-  canManage,
-  onClose,
-}: {
-  familyId: string;
-  member: FamilyMember | null;
-  canManage: boolean;
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: (body: { role?: string; status?: string }) =>
-      api(`/families/${familyId}/members/${member!.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["family-members"] });
-      void qc.invalidateQueries({ queryKey: ["family-activity"] });
-      onClose();
-    },
-  });
-
-  if (!member) return null;
-  const isOwner = member.role === "owner";
-
-  return (
-    <Modal
-      open={Boolean(member)}
-      onClose={onClose}
-      title={member.name ?? member.email ?? "Member"}
-    >
-      <div className="space-y-4 pb-2">
-        <div className="flex items-center gap-3">
-          <Avatar
-            name={member.name}
-            email={member.email}
-            src={member.picture}
-            className="size-12"
-          />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-fg">
-              {member.name ?? "Member"}
-            </p>
-            <p className="truncate text-xs text-fg-muted">{member.email}</p>
-          </div>
-        </div>
-
-        {isOwner ? (
-          <p className="rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg-muted">
-            <Shield className="mr-1.5 inline size-4 text-vault-400" />
-            This member is the family owner and can't be changed.
-          </p>
-        ) : canManage ? (
-          <>
-            <div>
-              <p className="mb-1.5 text-xs font-semibold text-fg-muted">Role</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(["member", "admin"] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ role: r })}
-                    className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
-                      member.role === r
-                        ? "border-vault-500 bg-vault-600/15 text-vault-300"
-                        : "border-line bg-ink-950 text-fg-muted hover:border-line-strong"
-                    }`}
-                  >
-                    {ROLE_LABELS[r]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <Button
-              variant="danger"
-              fullWidth
-              loading={mutation.isPending}
-              leadingIcon={<Trash2 className="size-4" />}
-              onClick={() => {
-                if (confirm(`Remove ${member.name ?? member.email} from the family?`))
-                  mutation.mutate({ status: "removed" });
-              }}
-            >
-              Remove from family
-            </Button>
-          </>
-        ) : (
-          <p className="rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg-muted">
-            Only owners and admins can manage members.
-          </p>
-        )}
-      </div>
-    </Modal>
-  );
+  return labels[action] ?? action;
 }
 
 export function FamilyPage() {
-  const { currentFamily } = useAuth();
-  const familyId = currentFamily?.id;
-  const canManage =
-    currentFamily?.role === "owner" || currentFamily?.role === "admin";
+  const qc = useQueryClient();
+  const { families } = useAuth();
+  const activeFamilyId = families[0]?.id;
 
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState("");
 
   const { data: membersData, isLoading: membersLoading } = useQuery({
     queryKey: ["family-members"],
@@ -348,9 +94,27 @@ export function FamilyPage() {
   });
 
   const { data: activityData } = useQuery({
-    queryKey: ["family-activity", familyId],
-    queryFn: () =>
-      api<{ activities: ActivityItem[] }>(`/families/me/activity`),
+    queryKey: ["family-activity"],
+    queryFn: () => api<{ activities: ActivityItem[] }>("/families/me/activity"),
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: (payload: { email: string; role: "admin" | "member" }) =>
+      api(`/families/${activeFamilyId}/invites`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["family-members"] });
+      setInviteEmail("");
+      setInviteSuccess("Invitation sent!");
+      setInviteError("");
+      setTimeout(() => setInviteSuccess(""), 4000);
+      setShowInviteForm(false);
+    },
+    onError: (err) => {
+      setInviteError(err instanceof Error ? err.message : "Failed to invite member");
+    },
   });
 
   const members = membersData?.members ?? [];
@@ -358,27 +122,129 @@ export function FamilyPage() {
   const activeMembers = members.filter((m) => m.status === "active");
   const pendingMembers = members.filter((m) => m.status === "invited");
 
+  function handleInviteSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    inviteMutation.mutate({
+      email: inviteEmail.trim(),
+      role: inviteRole,
+    });
+  }
+
   return (
     <>
       <AppBar
         title="Family"
         trailing={
-          canManage ? (
-            <Button
-              size="md"
-              leadingIcon={<UserPlus className="size-4" />}
-              onClick={() => setInviteOpen(true)}
-            >
-              Invite
-            </Button>
-          ) : undefined
+          <Button
+            size="md"
+            leadingIcon={<UserPlus className="size-4" />}
+            onClick={() => {
+              setShowInviteForm((s) => !s);
+              setInviteError("");
+            }}
+          >
+            Invite
+          </Button>
         }
       />
       <Page className="space-y-6">
+        {/* Success message */}
+        {inviteSuccess && (
+          <div className="rounded-xl bg-success/15 border border-success/30 p-3 text-sm text-success flex items-center gap-2">
+            <span>✓</span> {inviteSuccess}
+          </div>
+        )}
+
+        {/* Invite Form */}
+        {showInviteForm && (
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-2.5">
+              <h3 className="text-sm font-semibold text-fg flex items-center gap-2">
+                <UserPlus className="size-4 text-fg-muted" />
+                Invite Family Member
+              </h3>
+              <button
+                onClick={() => {
+                  setShowInviteForm(false);
+                  setInviteError("");
+                }}
+                className="rounded-lg p-1 text-fg-muted hover:bg-white/5 hover:text-fg"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleInviteSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="e.g. spouse@email.com, sibling@email.com"
+                  className="w-full rounded-xl bg-ink-950 px-3.5 py-2.5 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                  Role
+                </label>
+                <div className="flex gap-2">
+                  {(["member", "admin"] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setInviteRole(r)}
+                      className={cn(
+                        "flex-1 rounded-xl px-3 py-2 text-xs font-medium transition-all border",
+                        inviteRole === r
+                          ? "bg-vault-500/15 border-vault-500/40 text-vault-300"
+                          : "bg-transparent border-line text-fg-muted hover:bg-white/5"
+                      )}
+                    >
+                      {r === "admin" ? "🛠️ Admin" : "👤 Member"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              {inviteError && (
+                <p className="text-xs text-danger">{inviteError}</p>
+              )}
+              
+              <div className="flex gap-2.5 justify-end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="md"
+                  onClick={() => {
+                    setShowInviteForm(false);
+                    setInviteError("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="md"
+                  loading={inviteMutation.isPending}
+                >
+                  Send Invitation
+                </Button>
+              </div>
+            </form>
+          </Card>
+        )}
+
         {/* Members section */}
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-            Members{activeMembers.length > 0 ? ` · ${activeMembers.length}` : ""}
+            Members
           </h3>
           {membersLoading ? (
             <Card className="divide-y divide-line">
@@ -392,14 +258,15 @@ export function FamilyPage() {
               title="Build your family circle"
               description="Invite family members so everyone can access shared documents and stay on top of renewals together."
               action={
-                canManage ? (
-                  <Button
-                    leadingIcon={<UserPlus className="size-4" />}
-                    onClick={() => setInviteOpen(true)}
-                  >
-                    Invite a member
-                  </Button>
-                ) : undefined
+                <Button
+                  leadingIcon={<UserPlus className="size-4" />}
+                  onClick={() => {
+                    setShowInviteForm(true);
+                    setInviteError("");
+                  }}
+                >
+                  Invite a member
+                </Button>
               }
             />
           ) : (
@@ -407,11 +274,6 @@ export function FamilyPage() {
               {activeMembers.map((m) => (
                 <ListItem
                   key={m.id}
-                  onClick={
-                    canManage && m.role !== "owner"
-                      ? () => setSelectedMember(m)
-                      : undefined
-                  }
                   leading={
                     <Avatar
                       name={m.name}
@@ -429,7 +291,7 @@ export function FamilyPage() {
                           ? "vault"
                           : m.role === "admin"
                             ? "warning"
-                            : "neutral"
+                            : undefined
                       }
                     >
                       {ROLE_LABELS[m.role] ?? m.role}
@@ -489,7 +351,7 @@ export function FamilyPage() {
                       <span className="font-medium">
                         {a.actorName ?? "Someone"}
                       </span>{" "}
-                      {formatAction(a.action)}
+                      {formatAction(a.action, a.targetType)}
                     </p>
                     <p className="mt-0.5 text-xs text-fg-subtle">
                       {formatRelativeTime(a.createdAt)}
@@ -501,22 +363,6 @@ export function FamilyPage() {
           </section>
         )}
       </Page>
-
-      {familyId && (
-        <InviteModal
-          familyId={familyId}
-          open={inviteOpen}
-          onClose={() => setInviteOpen(false)}
-        />
-      )}
-      {familyId && (
-        <MemberActionsModal
-          familyId={familyId}
-          member={selectedMember}
-          canManage={canManage}
-          onClose={() => setSelectedMember(null)}
-        />
-      )}
     </>
   );
 }

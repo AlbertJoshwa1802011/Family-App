@@ -74,6 +74,10 @@ If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` 
    (e.g. removing a family), write **explicit multi-statement deletes in app code** + a test.
    Do not rely on DB-level `ON DELETE` for correctness.
 
+9. **Every new route or feature must have corresponding test cases and updated `.md` documentation files.** Never deploy or complete a change without:
+   - Adding or extending contract, security, and validation tests in the test suite (e.g., in `tests/vault.test.ts` or `tests/worker-extended.test.ts`).
+   - Documenting the new feature's design, roadmap, or architectural decisions in the relevant markdown files (e.g., `docs/PLAN.md`, `docs/ARCHITECTURE.md`, or `CLAUDE.md` itself) so future agents have full context.
+
 ---
 
 ## 3. Conventions

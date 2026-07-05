@@ -100,13 +100,19 @@ export function EventForm() {
     e.preventDefault();
     if (!validate()) return;
 
+    const targetFamilyId = activeFamilyId || families[0]?.id;
+    if (!targetFamilyId && !isEdit) {
+      setErrors((prev) => ({ ...prev, title: "No active family found. Please create a family first." }));
+      return;
+    }
+
     const startAt = toUnixSeconds(form.date, form.allDay ? "00:00" : form.startTime);
     const endAt = form.allDay
       ? undefined
       : toUnixSeconds(form.date, form.endTime);
 
     mutation.mutate({
-      familyId: activeFamilyId || "",
+      familyId: targetFamilyId || "",
       title: form.title.trim(),
       type: form.type,
       startAt,

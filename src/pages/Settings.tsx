@@ -69,14 +69,14 @@ function ReminderPrefsCard() {
             disabled={save.isPending}
             onClick={() => save.mutate({ emailEnabled: !prefs.emailEnabled })}
             className={cn(
-              "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
+              "relative flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 px-0.5",
               prefs.emailEnabled ? "bg-vault-600" : "bg-white/10",
             )}
           >
             <span
               className={cn(
-                "absolute top-0.5 size-5 rounded-full bg-white transition-transform",
-                prefs.emailEnabled ? "translate-x-5" : "translate-x-0.5",
+                "size-5 rounded-full bg-white transition-transform duration-200 shadow-sm",
+                prefs.emailEnabled ? "translate-x-5" : "translate-x-0",
               )}
             />
           </button>
