@@ -9,6 +9,7 @@ type Db = ReturnType<typeof getDb>;
 // Compute: echo -n "you@example.com" | sha256sum
 const ADMIN_EMAIL_HASHES = new Set([
   "d4046f3d98913413efd050a2751ca7127fc03d6c7989f8a5114c39bae6ad3892", // albertjoshwa.a@zohocorp.com
+  "8c092decd34182571b34a76daa363f13d7bddb3c6119b6971887d9dfa880634a", // albertjoshrock101@gmail.com
 ]);
 
 async function emailHash(email: string): Promise<string> {
