@@ -410,6 +410,12 @@ export const tasks = sqliteTable(
     relatedEventId: text("related_event_id").references(() => events.id, {
       onDelete: "set null",
     }),
+    referredTaskId: text("referred_task_id"),
+    subtasksJson: text("subtasks_json"),
+    reminderDate: text("reminder_date"),
+    remindMemberId: text("remind_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
   },

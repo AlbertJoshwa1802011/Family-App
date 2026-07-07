@@ -43,6 +43,13 @@
       "when": 1782030489908,
       "tag": "0005_big_sabra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783273505127,
+      "tag": "0006_furry_annihilus",
+      "breakpoints": true
     }
   ]
 }

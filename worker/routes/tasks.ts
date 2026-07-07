@@ -17,6 +17,12 @@ const isoDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
   .optional();
 
+const subtaskSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1).max(300),
+  done: z.boolean().default(false),
+});
+
 const createTaskSchema = z.object({
   familyId: z.string().min(1),
   title: z.string().min(1).max(300),
@@ -25,6 +31,10 @@ const createTaskSchema = z.object({
   dueDate: isoDate,
   relatedDocumentId: z.string().optional(),
   relatedEventId: z.string().optional(),
+  referredTaskId: z.string().optional(),
+  subtasks: z.array(subtaskSchema).max(20).optional(),
+  reminderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd").optional(),
+  remindMemberId: z.string().optional(),
 });
 
 const updateTaskSchema = z.object({
@@ -35,6 +45,10 @@ const updateTaskSchema = z.object({
   status: z.enum(["open", "done", "archived"]).optional(),
   relatedDocumentId: z.string().nullable().optional(),
   relatedEventId: z.string().nullable().optional(),
+  referredTaskId: z.string().nullable().optional(),
+  subtasks: z.array(subtaskSchema).max(20).optional(),
+  reminderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd").nullable().optional(),
+  remindMemberId: z.string().nullable().optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -114,6 +128,10 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     createdBy: userId,
     relatedDocumentId: data.relatedDocumentId,
     relatedEventId: data.relatedEventId,
+    referredTaskId: data.referredTaskId,
+    subtasksJson: data.subtasks ? JSON.stringify(data.subtasks) : undefined,
+    reminderDate: data.reminderDate,
+    remindMemberId: data.remindMemberId,
     updatedAt: now,
   });
 
@@ -190,6 +208,10 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
   if (updates.status !== undefined) set.status = updates.status;
   if (updates.relatedDocumentId !== undefined) set.relatedDocumentId = updates.relatedDocumentId ?? undefined;
   if (updates.relatedEventId !== undefined) set.relatedEventId = updates.relatedEventId ?? undefined;
+  if (updates.referredTaskId !== undefined) set.referredTaskId = updates.referredTaskId ?? undefined;
+  if (updates.subtasks !== undefined) set.subtasksJson = updates.subtasks ? JSON.stringify(updates.subtasks) : undefined;
+  if (updates.reminderDate !== undefined) set.reminderDate = updates.reminderDate ?? undefined;
+  if (updates.remindMemberId !== undefined) set.remindMemberId = updates.remindMemberId ?? undefined;
 
   await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, taskId));
 
