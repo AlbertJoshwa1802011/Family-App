@@ -94,6 +94,26 @@ body::before {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Bottom sheet (see components/ui/Sheet.tsx). Both animations are disabled by
+   the prefers-reduced-motion block above. */
+@keyframes sheet-up {
+  from {
+    transform: translateY(12%);
+    opacity: 0.6;
+  }
+}
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+.sheet-panel {
+  animation: sheet-up 0.22s var(--ease-out);
+}
+.sheet-backdrop {
+  animation: sheet-fade 0.18s var(--ease-out);
+}
+
 /* Skeleton shimmer */
 @keyframes shimmer {
   100% {

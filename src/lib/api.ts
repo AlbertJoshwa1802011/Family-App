@@ -35,6 +35,24 @@ const ERROR_MESSAGES: Record<string, string> = {
   drive_error: "Google Drive had a hiccup — please try again in a moment.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   cannot_modify_owner: "The family owner's role can't be changed.",
+  invalid_parent_category: "That parent category isn't part of this family.",
+  max_category_depth:
+    "Subcategories can't have their own subcategories — pick a top-level category.",
+  parent_archived:
+    "That category is archived. Restore it first, then try again.",
+  category_has_children:
+    "Archive or remove the subcategories first, then delete this category.",
+  category_in_use:
+    "This category has expenses recorded against it — archive it instead so that history stays intact.",
+  cannot_delete_system_category:
+    "Built-in categories can't be deleted — archive it instead.",
+  invalid_category_ids: "Those categories aren't part of this family.",
+  payment_method_in_use:
+    "Expenses were paid with this method — archive it instead so that history stays intact.",
+  cannot_delete_system_payment_method:
+    "Built-in payment methods can't be deleted — archive it instead.",
+  invalid_payment_method_ids:
+    "Those payment methods aren't part of this family.",
   internal_error: "Something went wrong on our side — please try again.",
 };
 

@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Bell, CalendarPlus, Check, Copy, Info, LogOut, Mail } from "lucide-react";
+import {
+  Bell,
+  CalendarPlus,
+  Check,
+  Copy,
+  Info,
+  LogOut,
+  Mail,
+  Wallet,
+} from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -233,6 +242,20 @@ export function Settings() {
               leading={<Bell className="size-5 text-fg-muted" />}
               title="Notification center"
               subtitle="View reminders & updates"
+            />
+          </Card>
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            Expenses
+          </h3>
+          <Card className="divide-y divide-line overflow-hidden">
+            <ListItem
+              to="/expenses/settings"
+              leading={<Wallet className="size-5 text-fg-muted" />}
+              title="Expense settings"
+              subtitle="Currency, categories & payment methods"
             />
           </Card>
         </section>

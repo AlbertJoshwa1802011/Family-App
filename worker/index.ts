@@ -14,6 +14,9 @@ import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { calendarRoutes } from "./routes/calendar";
 import { chatRoutes } from "./routes/chat";
+import { expenseCategoryRoutes } from "./routes/expenseCategories";
+import { expensePaymentMethodRoutes } from "./routes/expensePaymentMethods";
+import { expenseSettingsRoutes } from "./routes/expenseSettings";
 import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
 import { runWeeklyDigest } from "./lib/digest";
@@ -60,6 +63,9 @@ api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
 api.route("/calendar", calendarRoutes);
 api.route("/chat", chatRoutes);
+api.route("/expense-categories", expenseCategoryRoutes);
+api.route("/expense-payment-methods", expensePaymentMethodRoutes);
+api.route("/expense-settings", expenseSettingsRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

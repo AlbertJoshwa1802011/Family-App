@@ -251,6 +251,7 @@ export function seedExpense(
     spentOn?: string;
     merchant?: string | null;
     merchantKey?: string | null;
+    paymentMethodId?: string | null;
     payerMemberId?: string | null;
     visibility?: "family" | "private";
     status?: "active" | "trashed";
@@ -263,9 +264,9 @@ export function seedExpense(
     .prepare(
       `INSERT INTO expenses
          (id, family_id, created_by_user_id, payer_member_id, amount_minor, currency,
-          spent_on, category_id, subcategory_id, merchant, merchant_key,
+          spent_on, category_id, subcategory_id, merchant, merchant_key, payment_method_id,
           visibility, status, source, external_id, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())`,
     )
     .run(
       id,
@@ -279,6 +280,7 @@ export function seedExpense(
       opts.subcategoryId ?? null,
       opts.merchant ?? null,
       opts.merchantKey ?? null,
+      opts.paymentMethodId ?? null,
       opts.visibility ?? "family",
       opts.status ?? "active",
       opts.source ?? "manual",

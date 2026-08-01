@@ -19,6 +19,9 @@ import { Tasks } from "./pages/Tasks";
 import { Contacts } from "./pages/Contacts";
 import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
+import { ExpenseSettingsPage } from "./pages/expenses/ExpenseSettings";
+import { CategoryManager } from "./pages/expenses/CategoryManager";
+import { PaymentMethodManager } from "./pages/expenses/PaymentMethodManager";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
 
@@ -87,6 +90,15 @@ export default function App() {
           <Route path="/family/members/:id" element={<MemberProfile />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/expenses/settings" element={<ExpenseSettingsPage />} />
+          <Route
+            path="/expenses/settings/categories"
+            element={<CategoryManager />}
+          />
+          <Route
+            path="/expenses/settings/payment-methods"
+            element={<PaymentMethodManager />}
+          />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
