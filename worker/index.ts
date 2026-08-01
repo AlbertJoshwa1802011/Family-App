@@ -14,6 +14,7 @@ import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { calendarRoutes } from "./routes/calendar";
 import { chatRoutes } from "./routes/chat";
+import { aiRoutes } from "./routes/ai";
 import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
 import { runWeeklyDigest } from "./lib/digest";
@@ -60,6 +61,7 @@ api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
 api.route("/calendar", calendarRoutes);
 api.route("/chat", chatRoutes);
+api.route("/ai", aiRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

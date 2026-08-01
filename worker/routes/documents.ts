@@ -85,7 +85,7 @@ function zv<T extends z.ZodType>(s: T) {
  * SECURITY: members can only see family-visible docs or their own private docs.
  * Owners and admins see everything.
  */
-function visibilityWhere(
+export function visibilityWhere(
   familyId: string,
   userId: string,
   role: string,

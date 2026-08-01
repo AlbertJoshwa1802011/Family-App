@@ -34,6 +34,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     "File storage isn't connected yet — ask the family owner to finish Google Drive setup.",
   drive_error: "Google Drive had a hiccup — please try again in a moment.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
+  ai_unavailable: "The AI Assistant isn't set up on this server yet.",
+  ai_provider_error: "The AI Assistant had a hiccup — please try again in a moment.",
   cannot_modify_owner: "The family owner's role can't be changed.",
   internal_error: "Something went wrong on our side — please try again.",
 };
