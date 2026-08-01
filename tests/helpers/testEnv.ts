@@ -239,6 +239,33 @@ export function seedExpenseCategory(
   return { id };
 }
 
+export function seedPaymentMethod(
+  sqlite: DatabaseSync,
+  opts: {
+    familyId: string;
+    slug: string;
+    name?: string;
+    kind?: "cash" | "card" | "bank" | "upi" | "wallet" | "other";
+    status?: "active" | "archived";
+  },
+): { id: string } {
+  const id = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO expense_payment_methods (id, family_id, name, slug, kind, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      opts.familyId,
+      opts.name ?? opts.slug,
+      opts.slug,
+      opts.kind ?? "other",
+      opts.status ?? "active",
+    );
+  return { id };
+}
+
 export function seedExpense(
   sqlite: DatabaseSync,
   opts: {

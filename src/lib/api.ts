@@ -53,6 +53,13 @@ const ERROR_MESSAGES: Record<string, string> = {
     "Built-in payment methods can't be deleted — archive it instead.",
   invalid_payment_method_ids:
     "Those payment methods aren't part of this family.",
+  invalid_amount: "That amount doesn't look right — please check and try again.",
+  category_archived: "This category is no longer available — please choose another.",
+  invalid_subcategory: "That subcategory doesn't belong to the selected category.",
+  subcategory_archived: "This subcategory is no longer available — please choose another.",
+  invalid_payment_method: "That payment method isn't part of this family.",
+  payment_method_archived: "This payment method is no longer available — please choose another.",
+  not_trashed: "That expense isn't deleted, so there's nothing to restore.",
   internal_error: "Something went wrong on our side — please try again.",
 };
 

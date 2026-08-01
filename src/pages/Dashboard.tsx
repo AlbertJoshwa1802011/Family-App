@@ -7,6 +7,8 @@ import {
   FileText,
   ListTodo,
   Plus,
+  Receipt,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -24,6 +26,8 @@ import { api } from "../lib/api";
 import type { EventSummary } from "./Calendar";
 import { eventTypeColor, formatEventTime } from "../lib/eventTime";
 import { expiryStatus } from "../lib/expiry";
+import { todayIsoLocal, useExpenseSummary } from "../lib/expenses";
+import { formatMoney } from "../../shared/money";
 
 interface DocumentSummary {
   id: string;
@@ -137,6 +141,40 @@ function UpcomingEventsWidget({ familyId }: { familyId: string }) {
   );
 }
 
+/**
+ * "This month" expense stat — a single SUM(), not a chart or breakdown (that's
+ * Phase F). Money-handling rule: never silently combine currencies, so a
+ * family that's used more than one shows "Mixed" rather than a wrong number.
+ */
+function MonthSpendWidget({ familyId }: { familyId: string }) {
+  const [today] = useState(() => todayIsoLocal());
+  const from = `${today.slice(0, 7)}-01`;
+
+  const { data } = useExpenseSummary(familyId, { from, to: today });
+
+  return (
+    <Link to="/expenses">
+      <Card className="flex items-center gap-3 p-4 transition-colors hover:bg-white/5">
+        <span className="flex size-11 items-center justify-center rounded-xl bg-vault-500/15 text-vault-300">
+          <TrendingUp className="size-5" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs text-fg-muted">Spent this month</div>
+          <div className="mt-0.5 text-xl font-bold tabular-nums text-white">
+            {!data
+              ? "—"
+              : data.mixed
+                ? "Mixed currencies"
+                : data.singleCurrency
+                  ? formatMoney(data.singleCurrency.totalMinor, data.singleCurrency.currency)
+                  : formatMoney(0)}
+          </div>
+        </div>
+      </Card>
+    </Link>
+  );
+}
+
 export function Dashboard() {
   const { user, activeFamily } = useAuth();
   const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -207,6 +245,8 @@ export function Dashboard() {
           />
         </div>
 
+        {activeFamily && <MonthSpendWidget familyId={activeFamily.id} />}
+
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-fg-muted">
             Upcoming expiries
@@ -247,6 +287,15 @@ export function Dashboard() {
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
           <div className="grid grid-cols-2 gap-3">
+            <Link
+              to="/expenses"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+                <Receipt className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Expenses</span>
+            </Link>
             <Link
               to="/calendar"
               className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"

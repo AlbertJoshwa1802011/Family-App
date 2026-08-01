@@ -59,3 +59,55 @@ export async function eventInFamily(
     .get();
   return Boolean(row);
 }
+
+/**
+ * Looks up an expense category, scoped to the family, and returns just enough
+ * to validate it: whether it's a top-level category or a subcategory
+ * (`parentId`), and whether it's still selectable (`status`). Returns the row
+ * (not a boolean) because callers need `parentId`/`status`, not just existence
+ * — see worker/lib/expenses/queries.ts for how the category/subcategory/depth
+ * invariants are built on top of this.
+ */
+export async function expenseCategoryInFamily(
+  db: Db,
+  familyId: string,
+  categoryId: string,
+): Promise<{ id: string; parentId: string | null; status: string } | null> {
+  const row = await db
+    .select({
+      id: schema.expenseCategories.id,
+      parentId: schema.expenseCategories.parentId,
+      status: schema.expenseCategories.status,
+    })
+    .from(schema.expenseCategories)
+    .where(
+      and(
+        eq(schema.expenseCategories.id, categoryId),
+        eq(schema.expenseCategories.familyId, familyId),
+      ),
+    )
+    .get();
+  return row ?? null;
+}
+
+/** Same idea for payment methods — family-scoped lookup with its archive status. */
+export async function paymentMethodInFamily(
+  db: Db,
+  familyId: string,
+  paymentMethodId: string,
+): Promise<{ id: string; status: string } | null> {
+  const row = await db
+    .select({
+      id: schema.expensePaymentMethods.id,
+      status: schema.expensePaymentMethods.status,
+    })
+    .from(schema.expensePaymentMethods)
+    .where(
+      and(
+        eq(schema.expensePaymentMethods.id, paymentMethodId),
+        eq(schema.expensePaymentMethods.familyId, familyId),
+      ),
+    )
+    .get();
+  return row ?? null;
+}

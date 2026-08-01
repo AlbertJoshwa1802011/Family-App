@@ -22,6 +22,8 @@ import { Settings } from "./pages/Settings";
 import { ExpenseSettingsPage } from "./pages/expenses/ExpenseSettings";
 import { CategoryManager } from "./pages/expenses/CategoryManager";
 import { PaymentMethodManager } from "./pages/expenses/PaymentMethodManager";
+import { ExpenseList } from "./pages/expenses/ExpenseList";
+import { ExpenseDetail } from "./pages/expenses/ExpenseDetail";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
 
@@ -90,6 +92,8 @@ export default function App() {
           <Route path="/family/members/:id" element={<MemberProfile />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/expenses" element={<ExpenseList />} />
+          <Route path="/expenses/:id" element={<ExpenseDetail />} />
           <Route path="/expenses/settings" element={<ExpenseSettingsPage />} />
           <Route
             path="/expenses/settings/categories"

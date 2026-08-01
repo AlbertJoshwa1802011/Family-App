@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "./api";
 
 /** Shapes returned by the expense config endpoints. */
@@ -140,4 +145,248 @@ export function useEnsureExpenseSetup(
   }, [familyId, needsSetup, run]);
 
   return { isSettingUp: bootstrap.isPending };
+}
+
+// ── Expenses ─────────────────────────────────────────────────────────────────
+
+/** The enriched row shape GET /expenses and GET /expenses/:id return. */
+export interface Expense {
+  id: string;
+  familyId: string;
+  createdByUserId: string;
+  payerMemberId: string | null;
+  amountMinor: number;
+  currency: string;
+  spentOn: string; // ISO yyyy-mm-dd
+  spentTime: string | null; // "HH:MM"
+  merchant: string | null;
+  merchantKey: string | null;
+  notes: string | null;
+  visibility: "family" | "private";
+  status: "active" | "trashed";
+  source: string;
+  createdAt: number;
+  updatedAt: number;
+  categoryId: string | null;
+  categoryName: string | null;
+  categorySlug: string | null;
+  categoryEmoji: string | null;
+  categoryColor: string | null;
+  subcategoryId: string | null;
+  subcategoryName: string | null;
+  subcategorySlug: string | null;
+  subcategoryEmoji: string | null;
+  paymentMethodId: string | null;
+  paymentMethodName: string | null;
+  paymentMethodEmoji: string | null;
+  paymentMethodKind: PaymentKind | null;
+}
+
+/** Extra fields only GET /expenses/:id includes (payer + creator display info). */
+export interface ExpenseDetail extends Expense {
+  payerDisplayName: string | null;
+  payerMemberType: "user" | "dependent" | null;
+  payerName: string | null;
+  creatorName: string | null;
+  creatorEmail: string | null;
+}
+
+export interface ExpenseListFilters {
+  from?: string;
+  to?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  merchant?: string;
+  paymentMethodId?: string;
+  memberId?: string;
+  minAmount?: string;
+  maxAmount?: string;
+  q?: string;
+}
+
+function filtersToQuery(filters: ExpenseListFilters): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  const qs = params.toString();
+  return qs ? `&${qs}` : "";
+}
+
+/** Keyset-paginated expense history. `fetchNextPage()` follows the server's
+ * opaque cursor — never offset-based, so it stays correct/fast at any scale. */
+export function useExpenseList(familyId: string | undefined, filters: ExpenseListFilters) {
+  return useInfiniteQuery({
+    queryKey: ["expenses", familyId, filters],
+    queryFn: ({ pageParam }) =>
+      api<{ expenses: Expense[]; hasMore: boolean; nextCursor: string | null }>(
+        `/expenses?familyId=${familyId}${filtersToQuery(filters)}${
+          pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""
+        }`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: Boolean(familyId),
+  });
+}
+
+export function useExpense(id: string | undefined) {
+  return useQuery({
+    queryKey: ["expense", id],
+    queryFn: () => api<{ expense: ExpenseDetail }>(`/expenses/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export interface RecentCategorySuggestion {
+  categoryId: string;
+  categoryName: string;
+  categoryEmoji: string | null;
+  categoryColor: string | null;
+  subcategoryId: string | null;
+  subcategoryName: string | null;
+  subcategoryEmoji: string | null;
+  lastUsedAt: number;
+}
+
+export interface FrequentMerchantSuggestion {
+  merchant: string;
+  merchantKey: string;
+  uses: number;
+  lastUsedAt: number;
+}
+
+export function useExpenseSuggestions(familyId: string | undefined) {
+  return useQuery({
+    queryKey: ["expense-suggestions", familyId],
+    queryFn: () =>
+      api<{
+        recentCategories: RecentCategorySuggestion[];
+        frequentMerchants: FrequentMerchantSuggestion[];
+      }>(`/expenses/suggestions?familyId=${familyId}`),
+    enabled: Boolean(familyId),
+  });
+}
+
+export interface ExpenseSummary {
+  byCurrency: { currency: string; totalMinor: number; count: number }[];
+  mixed: boolean;
+  singleCurrency: { currency: string; totalMinor: number; count: number } | null;
+}
+
+export function useExpenseSummary(
+  familyId: string | undefined,
+  range: { from: string; to: string },
+) {
+  return useQuery({
+    queryKey: ["expense-summary", familyId, range.from, range.to],
+    queryFn: () =>
+      api<ExpenseSummary>(`/expenses/summary?familyId=${familyId}&from=${range.from}&to=${range.to}`),
+    enabled: Boolean(familyId),
+  });
+}
+
+/** Everything the Add-Expense sheet can submit. Only amount/categoryId/spentOn
+ * are actually required server-side; the rest may be omitted entirely. */
+export interface ExpenseDraft {
+  familyId: string;
+  amount: string;
+  categoryId: string;
+  subcategoryId?: string;
+  merchant?: string;
+  paymentMethodId?: string;
+  spentOn?: string;
+  spentTime?: string;
+  notes?: string;
+  visibility?: "family" | "private";
+}
+
+function invalidateExpenseQueries(qc: ReturnType<typeof useQueryClient>, familyId?: string) {
+  void qc.invalidateQueries({ queryKey: ["expenses", familyId] });
+  void qc.invalidateQueries({ queryKey: ["expense-suggestions", familyId] });
+  void qc.invalidateQueries({ queryKey: ["expense-summary", familyId] });
+}
+
+export function useCreateExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (draft: ExpenseDraft) =>
+      api<{ expense: ExpenseDetail }>("/expenses", {
+        method: "POST",
+        body: JSON.stringify(draft),
+      }),
+    onSuccess: (_res, draft) => invalidateExpenseQueries(qc, draft.familyId),
+  });
+}
+
+export function useUpdateExpense(familyId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
+      api<{ expense: ExpenseDetail }>(`/expenses/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: (res) => {
+      qc.setQueryData(["expense", res.expense.id], res);
+      invalidateExpenseQueries(qc, familyId);
+    },
+  });
+}
+
+export function useDeleteExpense(familyId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/expenses/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateExpenseQueries(qc, familyId),
+  });
+}
+
+export function useRestoreExpense(familyId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<{ expense: ExpenseDetail }>(`/expenses/${id}/restore`, { method: "POST" }),
+    onSuccess: (res) => {
+      qc.setQueryData(["expense", res.expense.id], res);
+      invalidateExpenseQueries(qc, familyId);
+    },
+  });
+}
+
+// ── Date helpers (local calendar day — what the user means by "today") ──────
+
+/** The user's LOCAL calendar date, not UTC — this is what "Today" means when
+ * picking a date for something that already happened. The server's own
+ * fallback (todayIsoUtc) only matters if a client omits spentOn entirely. */
+export function todayIsoLocal(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function yesterdayIsoLocal(date = new Date()): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() - 1);
+  return todayIsoLocal(d);
+}
+
+/** "Today" / "Yesterday" / a short localized date — for list-day headers and
+ * the date chip's label. Compares calendar days, not 24h windows. */
+export function relativeDayLabel(isoDate: string, now = new Date()): string {
+  const today = todayIsoLocal(now);
+  const yesterday = yesterdayIsoLocal(now);
+  if (isoDate === today) return "Today";
+  if (isoDate === yesterday) return "Yesterday";
+
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: sameYear ? undefined : "numeric",
+  }).format(date);
 }
