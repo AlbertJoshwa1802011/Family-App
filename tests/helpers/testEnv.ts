@@ -212,6 +212,81 @@ export function seedActor(
   return { userId: user.id, memberId: member.id, cookie, email: user.email };
 }
 
+export function seedExpenseCategory(
+  sqlite: DatabaseSync,
+  opts: {
+    familyId: string;
+    slug: string;
+    name?: string;
+    parentId?: string | null;
+    status?: "active" | "archived";
+  },
+): { id: string } {
+  const id = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO expense_categories (id, family_id, parent_id, name, slug, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      opts.familyId,
+      opts.parentId ?? null,
+      opts.name ?? opts.slug,
+      opts.slug,
+      opts.status ?? "active",
+    );
+  return { id };
+}
+
+export function seedExpense(
+  sqlite: DatabaseSync,
+  opts: {
+    familyId: string;
+    createdByUserId: string;
+    categoryId: string;
+    subcategoryId?: string | null;
+    amountMinor?: number;
+    currency?: string;
+    spentOn?: string;
+    merchant?: string | null;
+    merchantKey?: string | null;
+    payerMemberId?: string | null;
+    visibility?: "family" | "private";
+    status?: "active" | "trashed";
+    source?: string;
+    externalId?: string | null;
+  },
+): { id: string } {
+  const id = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO expenses
+         (id, family_id, created_by_user_id, payer_member_id, amount_minor, currency,
+          spent_on, category_id, subcategory_id, merchant, merchant_key,
+          visibility, status, source, external_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())`,
+    )
+    .run(
+      id,
+      opts.familyId,
+      opts.createdByUserId,
+      opts.payerMemberId ?? null,
+      opts.amountMinor ?? 10000,
+      opts.currency ?? "INR",
+      opts.spentOn ?? "2026-08-01",
+      opts.categoryId,
+      opts.subcategoryId ?? null,
+      opts.merchant ?? null,
+      opts.merchantKey ?? null,
+      opts.visibility ?? "family",
+      opts.status ?? "active",
+      opts.source ?? "manual",
+      opts.externalId ?? null,
+    );
+  return { id };
+}
+
 export function seedDocument(
   sqlite: DatabaseSync,
   opts: {

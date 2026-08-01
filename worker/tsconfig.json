@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["."]
+  "include": [".", "../shared"]
 }

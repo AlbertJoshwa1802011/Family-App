@@ -43,6 +43,12 @@ export default tseslint.config(
       ],
     },
   },
+  // Shared (runs in both the browser and the Worker — no platform globals)
+  {
+    files: ["shared/**/*.ts"],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: { ecmaVersion: 2022 },
+  },
   // Config files
   {
     files: ["*.config.{ts,js}"],

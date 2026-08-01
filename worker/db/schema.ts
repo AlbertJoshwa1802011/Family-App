@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -14,6 +15,7 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 const now = sql`(unixepoch())`;
 
@@ -487,3 +489,211 @@ export const digestLog = sqliteTable(
   },
   (t) => [uniqueIndex("uq_digest_user_period").on(t.userId, t.periodKey)],
 );
+
+// ── Expense Intelligence ─────────────────────────────────────────────────────
+// See docs/EXPENSES_ARCHITECTURE.md. Four tables in V1; tags, accounts, budgets,
+// recurring expenses and the raw-transaction staging layer attach later as new
+// tables or nullable columns, never as a rewrite of these.
+
+/**
+ * Categories AND subcategories live in one self-referencing table, capped at
+ * depth 2 (a row with a parent_id may not itself be a parent — enforced in app
+ * code + tested). One table because both levels carry identical fields and
+ * identical CRUD; drill-down analytics is a self-join.
+ *
+ * Rows are seeded per family (see worker/lib/expenses/defaults.ts) so every
+ * category is fully user-editable — no global/system rows leaking across
+ * families and no `family_id IS NULL` special case in every query.
+ *
+ * Categories are ARCHIVED, never deleted: historical expenses must stay
+ * analyzable. `expenses.category_id` therefore has no ON DELETE action.
+ */
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // NULL = top-level category; set = subcategory of that category.
+    parentId: text("parent_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+      { onDelete: "cascade" },
+    ),
+    name: text("name").notNull(),
+    // Stable key used for idempotent seeding and for "reset to defaults".
+    // Child slugs are parent-prefixed (e.g. "food-groceries") so one namespace
+    // per family is collision-free.
+    slug: text("slug").notNull(),
+    emoji: text("emoji"),
+    // Palette slug (e.g. "amber"), NOT a raw hex — the frontend maps it to
+    // static Tailwind classes so the theme stays coherent. NULL on a
+    // subcategory means "inherit the parent's colour".
+    color: text("color"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Seeded row: may be renamed/re-emoji'd/archived, but never hard-deleted.
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expcat_family_slug").on(t.familyId, t.slug),
+    index("idx_expcat_family_parent").on(t.familyId, t.parentId, t.sortOrder),
+    index("idx_expcat_family_status").on(t.familyId, t.status),
+  ],
+);
+
+/**
+ * Payment methods are data-driven so a family can add "PhonePe" without a code
+ * change. `kind` is the coarse, stable dimension analytics groups by — never
+ * match on `name`. Accounts (e.g. "HDFC Credit Card ••1234") are a later table;
+ * this stays the payment *type*.
+ */
+export const expensePaymentMethods = sqliteTable(
+  "expense_payment_methods",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    kind: text("kind", {
+      enum: ["cash", "card", "bank", "upi", "wallet", "other"],
+    })
+      .notNull()
+      .default("other"),
+    emoji: text("emoji"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_exppm_family_slug").on(t.familyId, t.slug),
+    index("idx_exppm_family_status").on(t.familyId, t.sortOrder),
+  ],
+);
+
+/**
+ * A classified unit of SPENDING — deliberately not a general financial ledger.
+ * A future bank/card sync stores raw transactions in their own table and only
+ * materializes an `expenses` row for the kinds that actually represent spending
+ * (see worker/lib/expenses/types.ts). Transfers between the family's own
+ * accounts and credit-card bill payments must never land here, or they would
+ * double-count against the purchases already imported.
+ *
+ * MONEY: `amount_minor` is an INTEGER in the currency's minor units (paise,
+ * cents). Never store money as REAL — SQLite float sums drift and D1 has no
+ * DECIMAL. Every aggregation is an integer SUM() grouped BY currency; V1 does
+ * no conversion and never silently mixes currencies.
+ *
+ * V1 keeps amounts strictly positive (CHECK). Refunds/reversals are NOT
+ * negative expenses — they get their own adjustment model later so that a
+ * ₹2,000 purchase + ₹500 refund nets to ₹1,500 without corrupting the category
+ * totals the purchase already contributed to.
+ */
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // Who recorded it — always derived from the session, never from the client.
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Who actually paid — deliberately separate from created_by_user_id (a
+    // parent records a dependent's expense) and from visibility. Nullable:
+    // attribution is optional. Points at family_members so dependents (who have
+    // no user account) can be attributed too.
+    payerMemberId: text("payer_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("INR"), // ISO-4217
+    // The CALENDAR date the money was spent — never assume this equals
+    // created_at (historical entries and imports backdate freely).
+    spentOn: text("spent_on").notNull(), // ISO yyyy-mm-dd
+    spentTime: text("spent_time"), // optional "HH:MM", local wall-clock
+    // Denormalized parent + child so GROUP BY stays index-friendly. Invariant:
+    // subcategory_id's parent_id must equal category_id (enforced server-side).
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => expenseCategories.id),
+    subcategoryId: text("subcategory_id").references(
+      () => expenseCategories.id,
+    ),
+    merchant: text("merchant"), // as typed by the user
+    // Normalized merchant handle ("AMZN Mktp*IN" → "amzn mktp in"). The join
+    // seam for merchant analytics today and for merchant aliases/rules later.
+    merchantKey: text("merchant_key"),
+    paymentMethodId: text("payment_method_id").references(
+      () => expensePaymentMethods.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes"),
+    // 'private' means CREATOR-ONLY — owners and admins do NOT see other
+    // members' private expenses. This deliberately DIVERGES from documents
+    // (where owner/admin see everything): financial privacy expectations differ
+    // from document custodianship. Do not "fix" this for consistency; it is
+    // pinned by tests/expenses-visibility.test.ts.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("family"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    // Provenance. Analytics must never assume manual entry.
+    source: text("source", {
+      enum: ["manual", "csv_import", "bank_sync", "api", "system"],
+    })
+      .notNull()
+      .default("manual"),
+    externalId: text("external_id"), // provider transaction id
+    externalAccount: text("external_account"), // provider account handle
+    importBatchId: text("import_batch_id"), // reserved for the importer
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    // Every range query starts here.
+    index("idx_exp_family_date").on(t.familyId, t.spentOn),
+    // List + soft-delete filtering.
+    index("idx_exp_family_status_date").on(t.familyId, t.status, t.spentOn),
+    // Category breakdowns and drill-down.
+    index("idx_exp_family_cat_date").on(t.familyId, t.categoryId, t.spentOn),
+    // Merchant ranking + "what did this family last use for this merchant".
+    index("idx_exp_family_merchant").on(t.familyId, t.merchantKey),
+    // Import de-duplication, enforced by the database before the importer that
+    // needs it exists. PARTIAL: manual rows (external_id NULL) are unaffected.
+    uniqueIndex("uq_exp_external")
+      .on(t.familyId, t.source, t.externalId)
+      .where(sql`${t.externalId} is not null`),
+    // V1 invariant: expenses are strictly positive. See the table comment.
+    check("ck_exp_amount_positive", sql`${t.amountMinor} > 0`),
+  ],
+);
+
+/** Per-family expense preferences. */
+export const expenseSettings = sqliteTable("expense_settings", {
+  familyId: text("family_id")
+    .primaryKey()
+    .references(() => families.id, { onDelete: "cascade" }),
+  // Default for new expenses. Configurable — INR is the default, not a
+  // hard-coded assumption.
+  defaultCurrency: text("default_currency").notNull().default("INR"),
+  weekStartsOn: integer("week_starts_on").notNull().default(1), // 0=Sun … 1=Mon
+  // Supports salary-cycle periods later (1–28 to stay valid in every month).
+  monthStartDay: integer("month_start_day").notNull().default(1),
+  createdAt: integer("created_at").notNull().default(now),
+  updatedAt: integer("updated_at").notNull().default(now),
+});

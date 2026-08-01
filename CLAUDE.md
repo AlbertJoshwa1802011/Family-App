@@ -82,6 +82,17 @@ notification delivery), `release` (commit → PR → merge-deploys → remote mi
    (e.g. removing a family), write **explicit multi-statement deletes in app code** + a test.
    Do not rely on DB-level `ON DELETE` for correctness.
 
+9. **Money is always an integer in minor units** (`amount_minor` + `currency`). Never store or
+   sum money as a float — SQLite has no DECIMAL and REAL sums drift. Parse/format only at the
+   edges via `shared/money.ts`. Analytics **never** adds different currencies together: group by
+   currency and report `mixed` (V1 does no conversion).
+
+10. **A private EXPENSE is creator-only — owners and admins do NOT see it.** This deliberately
+    diverges from documents (§2.7), where owner/admin see everything. Financial privacy and
+    document custodianship are different promises. `worker/lib/expenses/visibility.ts` takes no
+    `role` argument by design, and `tests/expenses-visibility.test.ts` pins the behaviour. Do
+    not "make it consistent with documents".
+
 ---
 
 ## 3. Conventions
@@ -228,8 +239,9 @@ worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
   cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
-  db/schema.ts          ★ single source of truth for all 21 tables
+  db/schema.ts          ★ single source of truth for all 25 tables
   lib/                   crypto, session, audit, drive, reminders (pure windowing), email (Resend), notify
+  lib/expenses/          defaults (seed tree), money rules, merchant keys, visibility, ingest contract
   routes/               auth, families, documents, notifications, events, tasks, contacts
 src/
   App.tsx               routes + Protected wrapper
@@ -239,9 +251,11 @@ src/
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
                          Tasks, Contacts, Family, Settings, Login, NotFound
-migrations/             generated SQL (0000–0003) + meta/ snapshots
+shared/                 money.ts — the ONE module the SPA and Worker both import
+migrations/             generated SQL (0000–0005) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
-docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
+docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT,
+                        EXPENSES_ARCHITECTURE (expense module design + phase plan)
 public/_headers         CSP + security headers for static assets
 wrangler.jsonc          Worker config (no assets.directory!)
 vite.config.ts          plugin chain + PWA config

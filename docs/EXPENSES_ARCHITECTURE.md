@@ -1,8 +1,34 @@
 # Expense Intelligence — Architectural Assessment & Proposal
 
-> **Status: PROPOSAL — awaiting approval. No implementation code has been written.**
-> This document is the Phase 0/1 output for adding an Expense Tracking module to Family Vault.
-> Read alongside `CLAUDE.md` (rules), `docs/ARCHITECTURE.md` (why), `docs/FEATURES.md` (what).
+> **Status: APPROVED. Phase A (schema + migration + seed + money) is IMPLEMENTED.**
+> Phases B–H below are not started. Read alongside `CLAUDE.md` (rules),
+> `docs/ARCHITECTURE.md` (why), `docs/FEATURES.md` (what).
+
+## Approved decisions (locked)
+
+| # | Decision |
+|---|---|
+| D1 | A **private expense is creator-only**. Owners and admins do **not** see other members' private expenses. Family-visible expenses follow normal membership rules. Pinned by `tests/expenses-visibility.test.ts`; `worker/lib/expenses/visibility.ts` takes no `role` argument so privilege has no path to widen visibility. |
+| D2 | Default currency **INR**, stored **per expense**, as **integer minor units**. **No conversion in V1.** Analytics never silently combines currencies — results are split per currency or flagged `mixed` (`totalByCurrency` in `shared/money.ts`). |
+| D3 | **BottomNav unchanged.** Entry via the Dashboard quick-access / month-spend widget; module-local nav Overview / Expenses / Insights; persistent Add-Expense FAB. |
+| D4 | V1 scope exactly as scoped below — no tags, accounts, budgets, recurring, CSV, bank sync, receipts/OCR, AI categorisation or NL search. |
+
+### Additional architectural constraints folded into Phase A
+
+- **Transaction semantics.** `TransactionKind` (`expense · income · transfer · refund · reversal ·
+  fee · unknown`) and `TRANSACTION_KIND_TREATMENT` in `worker/lib/expenses/types.ts` fix the
+  future boundary now. Transfers and income are `never_expense`, so "HDFC → SBI ₹20,000" and a
+  credit-card bill payment can never surface as spending or double-count already-imported
+  purchases. Nothing in V1 assumes an incoming financial event is an expense.
+- **Refund semantics.** V1 amounts are strictly positive (DB CHECK `ck_exp_amount_positive`).
+  Refunds/reversals are `adjusts_expense`, not negative rows; the documented model nets
+  ₹2,000 − ₹500 = ₹1,500 via a future `expense_adjustments` table without disturbing the
+  purchase's category, merchant or date.
+- **Attribution.** `created_by_user_id` (who recorded it), `payer_member_id` (who actually paid,
+  dependents included) and `visibility` are three independent columns.
+- **Categories.** Self-referencing, depth ≤ 2, fully data-driven. Seed data carries no business
+  meaning — nothing branches on a name or slug; analytics groups by id.
+- **Analytics philosophy.** Every planned visualization answers a stated user question (see §12).
 
 ---
 
