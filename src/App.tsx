@@ -16,6 +16,9 @@ import { CalendarPage } from "./pages/Calendar";
 import { EventDetailPage } from "./pages/EventDetail";
 import { EventForm } from "./pages/EventForm";
 import { Tasks } from "./pages/Tasks";
+import { Expenses } from "./pages/Expenses";
+import { ExpenseForm } from "./pages/ExpenseForm";
+import { ExpenseDetail } from "./pages/ExpenseDetail";
 import { Contacts } from "./pages/Contacts";
 import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
@@ -81,6 +84,10 @@ export default function App() {
           <Route path="/calendar/events/:id" element={<EventDetailPage />} />
           <Route path="/calendar/events/:id/edit" element={<EventForm />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/expenses" element={<Expenses />} />
+          <Route path="/expenses/new" element={<ExpenseForm />} />
+          <Route path="/expenses/:id" element={<ExpenseDetail />} />
+          <Route path="/expenses/:id/edit" element={<ExpenseForm />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/family" element={<FamilyPage />} />

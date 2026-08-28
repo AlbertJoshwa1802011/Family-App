@@ -19,6 +19,10 @@ export interface Family {
   id: string;
   name: string;
   role: "owner" | "admin" | "member";
+  /** Current user's family_members.id — used as default paidBy for expenses. */
+  memberId: string;
+  /** ISO 4217; single currency per family (Expense Tracker §8). */
+  defaultCurrency: string;
 }
 
 interface MeResponse {

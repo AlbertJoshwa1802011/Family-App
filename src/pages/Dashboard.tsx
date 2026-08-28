@@ -8,6 +8,7 @@ import {
   ListTodo,
   Plus,
   Users,
+  Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
@@ -21,6 +22,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ListItem } from "../components/ui/ListItem";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
+import { formatMoney, monthRange, todayIsoDate } from "../lib/money";
 import type { EventSummary } from "./Calendar";
 import { eventTypeColor, formatEventTime } from "../lib/eventTime";
 import { expiryStatus } from "../lib/expiry";
@@ -137,6 +139,46 @@ function UpcomingEventsWidget({ familyId }: { familyId: string }) {
   );
 }
 
+
+function MonthSpendWidget({ familyId, currency }: { familyId: string; currency: string }) {
+  const [today] = useState(() => todayIsoDate());
+  const { from, to } = monthRange(today);
+  const { data } = useQuery({
+    queryKey: ["expenses", familyId, "month-widget", from, to],
+    queryFn: () =>
+      api<{ totalMinor: number; expenses: unknown[] }>(
+        `/expenses?familyId=${familyId}&from=${from}&to=${to}&scope=personal`,
+      ),
+  });
+  const total = data?.totalMinor ?? 0;
+  const count = data?.expenses.length ?? 0;
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-fg-muted">This month</h3>
+        <Link to="/expenses" className="text-xs text-vault-400 hover:text-vault-300">
+          See all
+        </Link>
+      </div>
+      <Link to="/expenses">
+        <Card className="flex items-center justify-between gap-3 p-4 transition-colors hover:bg-white/5">
+          <div>
+            <div className="text-2xl font-bold tabular-nums text-fg">
+              {formatMoney(total, currency)}
+            </div>
+            <div className="mt-0.5 text-xs text-fg-subtle">
+              {count} personal expense{count === 1 ? "" : "s"}
+            </div>
+          </div>
+          <span className="flex size-10 items-center justify-center rounded-xl bg-success/15 text-success">
+            <Wallet className="size-5" aria-hidden="true" />
+          </span>
+        </Card>
+      </Link>
+    </section>
+  );
+}
+
 export function Dashboard() {
   const { user, activeFamily } = useAuth();
   const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -244,6 +286,13 @@ export function Dashboard() {
 
         {activeFamily && <UpcomingEventsWidget familyId={activeFamily.id} />}
 
+        {activeFamily && (
+          <MonthSpendWidget
+            familyId={activeFamily.id}
+            currency={activeFamily.defaultCurrency ?? "USD"}
+          />
+        )}
+
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
           <div className="grid grid-cols-2 gap-3">
@@ -273,6 +322,15 @@ export function Dashboard() {
                 <Contact className="size-5" />
               </span>
               <span className="text-sm font-medium text-fg">Contacts</span>
+            </Link>
+            <Link
+              to="/expenses"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-success/15 text-success">
+                <Wallet className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Expenses</span>
             </Link>
           </div>
         </section>
