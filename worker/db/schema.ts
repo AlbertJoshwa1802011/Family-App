@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -34,6 +35,8 @@ export const families = sqliteTable("families", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   driveFolderId: text("drive_folder_id"),
+  // ISO 4217; one currency per family (Expense Tracker §8). Additive, default-safe.
+  defaultCurrency: text("default_currency").notNull().default("USD"),
   createdAt: integer("created_at").notNull().default(now),
 });
 
@@ -486,4 +489,244 @@ export const digestLog = sqliteTable(
     sentAt: integer("sent_at").notNull().default(now),
   },
   (t) => [uniqueIndex("uq_digest_user_period").on(t.userId, t.periodKey)],
+);
+
+// ── Expense Tracker (E0 schema only — no routes yet) ─────────────────────────
+// Spec: docs/EXPENSE_TRACKER_SPEC.md §15. Financial writes use money.ts +
+// financialActors.ts; pool/common-fund is a future actor kind, not a memberType.
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    // NULL = global built-in category shared across families.
+    familyId: text("family_id").references(() => families.id, {
+      onDelete: "cascade",
+    }),
+    parentCategoryId: text("parent_category_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+    ),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    color: text("color"),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expense_category_name").on(t.familyId, t.parentCategoryId, t.name),
+    index("idx_expense_category_family_archived").on(t.familyId, t.archived),
+  ],
+);
+
+export const recurringExpenses = sqliteTable(
+  "recurring_expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    paidByMemberId: text("paid_by_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    paymentMethod: text("payment_method"),
+    splitTemplateJson: text("split_template_json")
+      .notNull()
+      .default('{"splitType":"none","participants":[]}'),
+    cadence: text("cadence", {
+      enum: ["weekly", "monthly", "custom_days"],
+    }).notNull(),
+    dayOfWeek: integer("day_of_week"),
+    dayOfMonth: integer("day_of_month"),
+    intervalDays: integer("interval_days"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    nextRunDate: text("next_run_date").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_recurring_expense_due").on(t.familyId, t.active, t.nextRunDate),
+  ],
+);
+
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // memberType='user' enforced in app via financialActors — never dependents.
+    paidByMemberId: text("paid_by_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    // Attribution only (any memberType); zero balance effect (§4.3).
+    subjectMemberId: text("subject_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    expenseDate: text("expense_date").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    paymentMethod: text("payment_method"),
+    splitType: text("split_type", {
+      enum: ["none", "equal", "exact", "percentage"],
+    })
+      .notNull()
+      .default("none"),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    recurringExpenseId: text("recurring_expense_id").references(
+      () => recurringExpenses.id,
+      { onDelete: "set null" },
+    ),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientRequestId: text("client_request_id"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expense_client_request").on(
+      t.familyId,
+      t.createdByUserId,
+      t.clientRequestId,
+    ),
+    index("idx_expense_family_date").on(t.familyId, t.expenseDate),
+    index("idx_expense_family_status").on(t.familyId, t.status),
+    index("idx_expense_paid_by").on(t.paidByMemberId),
+    index("idx_expense_category").on(t.categoryId),
+  ],
+);
+
+export const expenseParticipants = sqliteTable(
+  "expense_participants",
+  {
+    expenseId: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    shareMinor: integer("share_minor").notNull(),
+    sharePercentBp: integer("share_percent_bp"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.expenseId, t.memberId] }),
+    index("idx_expense_participant_member").on(t.memberId),
+  ],
+);
+
+export const expenseTags = sqliteTable(
+  "expense_tags",
+  {
+    expenseId: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.expenseId, t.tagId] }),
+    index("idx_expense_tag_tag").on(t.tagId),
+  ],
+);
+
+export const expenseReceipts = sqliteTable(
+  "expense_receipts",
+  {
+    id: text("id").primaryKey(),
+    expenseId: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    driveFileId: text("drive_file_id").notNull(),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    status: text("status", { enum: ["active", "deleted"] })
+      .notNull()
+      .default("active"),
+    deletedAt: integer("deleted_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_expense_receipt_expense_status").on(t.expenseId, t.status)],
+);
+
+export const settlements = sqliteTable(
+  "settlements",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    fromMemberId: text("from_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    toMemberId: text("to_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    settledAt: integer("settled_at").notNull(),
+    note: text("note"),
+    reversesSettlementId: text("reverses_settlement_id").references(
+      (): AnySQLiteColumn => settlements.id,
+    ),
+    recordedByUserId: text("recorded_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientRequestId: text("client_request_id"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_settlement_client_request").on(
+      t.familyId,
+      t.recordedByUserId,
+      t.clientRequestId,
+    ),
+    index("idx_settlement_from").on(t.familyId, t.fromMemberId),
+    index("idx_settlement_to").on(t.familyId, t.toMemberId),
+    index("idx_settlement_reverses").on(t.reversesSettlementId),
+  ],
+);
+
+export const recurringExpenseLog = sqliteTable(
+  "recurring_expense_log",
+  {
+    id: text("id").primaryKey(),
+    recurringExpenseId: text("recurring_expense_id")
+      .notNull()
+      .references(() => recurringExpenses.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(),
+    generatedExpenseId: text("generated_expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_recurring_expense_period").on(t.recurringExpenseId, t.periodKey),
+  ],
 );

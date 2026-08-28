@@ -37,8 +37,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | Table | Purpose | Migration |
 |---|---|---|
 | `users` | Google-authenticated accounts | 0000 |
-| `families` | Family group with Drive folder | 0000 |
-| `family_members` | Membership + role (owner/admin/member) + status | 0000 |
+| `families` | Family group; `owner_user_id` = Drive credential holder (not kept in lockstep with membership `role`); `default_currency` (ISO 4217, default USD) | 0000 + 0005 |
+| `family_members` | Membership + role (owner/admin/member) + status. Elevated authz = owner **or** admin; `role=owner` mainly means peer-protected | 0000 |
 | `invites` | Email invites with hashed token (single-use) | 0000 |
 | `sessions` | Opaque session IDs (single source of truth) | 0000 |
 | `documents` | Document metadata with visibility + status | 0000 |
@@ -57,6 +57,16 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `contacts` | Emergency contacts per family | 0002 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
+| `chat_messages` | Family chat (soft-delete) | 0003/0004 |
+| `digest_log` | Weekly digest dedupe | 0003/0004 |
+| `expense_categories` | Built-in (`family_id` NULL) + family custom categories | 0005 |
+| `expenses` | Expense ledger rows (unreachable via API until E1+) | 0005 |
+| `expense_participants` | Per-expense share rows (integer minor units) | 0005 |
+| `expense_tags` | Expense ↔ existing `tags` join | 0005 |
+| `expense_receipts` | Receipt metadata (mirrors `files`; Drive bytes via owner) | 0005 |
+| `settlements` | Append-only settlement ledger + linked reversals | 0005 |
+| `recurring_expenses` | Recurring templates (`split_template_json`) | 0005 |
+| `recurring_expense_log` | Recurring generation dedupe | 0005 |
 
 ### Key Design Decisions
 
