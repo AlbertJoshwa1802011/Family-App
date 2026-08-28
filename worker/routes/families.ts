@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, ne } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -58,8 +58,10 @@ familyRoutes.get("/", requireSession, async (c) => {
       id: schema.families.id,
       name: schema.families.name,
       driveFolderId: schema.families.driveFolderId,
+      defaultCurrency: schema.families.defaultCurrency,
       createdAt: schema.families.createdAt,
       role: schema.familyMembers.role,
+      memberId: sql<string>`${schema.familyMembers.id}`.as("member_id"),
     })
     .from(schema.familyMembers)
     .innerJoin(schema.families, eq(schema.familyMembers.familyId, schema.families.id))

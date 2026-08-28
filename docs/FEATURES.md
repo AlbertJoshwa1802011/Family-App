@@ -19,18 +19,23 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+| Expense E0 | ✅ Complete | Money math, financial actors, expense schema (no API) — PR #7 |
+| Expense E1 | ✅ Complete | Personal expenses CRUD + categories + privacy + fast-entry UI |
 
 See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
 the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
+Expense Tracker: `docs/EXPENSE_TRACKER_SPEC.md`.
 
 ---
 
-## 2. Database Schema (21 tables, 4 migrations)
+## 2. Database Schema (31 tables, migrations through 0005)
 
 Schema source of truth: `worker/db/schema.ts`.  
-Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
-`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents).
+Migrations: `0000`–`0004` (core + chat/digest), `0005` (expense domain + `families.default_currency`).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
+
+Expense Tracker phases: E0 foundation ✅ → E1 personal expenses ✅ → E2–E5 planned
+(`docs/EXPENSE_TRACKER_SPEC.md`).
 
 ### All Tables
 
@@ -59,14 +64,14 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
 | `chat_messages` | Family chat (soft-delete) | 0003/0004 |
 | `digest_log` | Weekly digest dedupe | 0003/0004 |
-| `expense_categories` | Built-in (`family_id` NULL) + family custom categories | 0005 |
-| `expenses` | Expense ledger rows (unreachable via API until E1+) | 0005 |
-| `expense_participants` | Per-expense share rows (integer minor units) | 0005 |
-| `expense_tags` | Expense ↔ existing `tags` join | 0005 |
-| `expense_receipts` | Receipt metadata (mirrors `files`; Drive bytes via owner) | 0005 |
-| `settlements` | Append-only settlement ledger + linked reversals | 0005 |
-| `recurring_expenses` | Recurring templates (`split_template_json`) | 0005 |
-| `recurring_expense_log` | Recurring generation dedupe | 0005 |
+| `expense_categories` | Built-in (`family_id` NULL) + family custom categories; built-ins seeded on first `GET /expenses/categories` | 0005 |
+| `expenses` | Expense ledger rows — personal CRUD via `/api/expenses` (E1); shared splits deferred to E2 | 0005 |
+| `expense_participants` | Per-expense share rows (integer minor units) — API writes deferred to E2 | 0005 |
+| `expense_tags` | Expense ↔ existing `tags` join — deferred to E4 | 0005 |
+| `expense_receipts` | Receipt metadata (mirrors `files`; Drive bytes via owner) — deferred to E4 | 0005 |
+| `settlements` | Append-only settlement ledger + linked reversals — deferred to E3 | 0005 |
+| `recurring_expenses` | Recurring templates (`split_template_json`) — deferred to E5 | 0005 |
+| `recurring_expense_log` | Recurring generation dedupe — deferred to E5 | 0005 |
 
 ### Key Design Decisions
 
@@ -124,6 +129,13 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
 | GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
+| GET | `/expenses/categories?familyId` | list built-in + custom categories; seeds built-ins on first call |
+| POST | `/expenses/categories` | create a custom category |
+| GET | `/expenses?familyId&from&to&categoryId&paidBy&scope&q` | visibility-filtered list + `{ expenses, totalMinor }` |
+| POST | `/expenses` | create personal expense (`splitType: "none"`); optional `clientRequestId` idempotency |
+| GET | `/expenses/:id` | get one (404 if hidden private / missing) |
+| PATCH | `/expenses/:id` | update personal expense (owner or admin) |
+| DELETE | `/expenses/:id` | soft-delete (`status=trashed`) |
 
 ### Zod Validation Rules (Critical Constraints)
 
@@ -155,6 +167,10 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/contacts` | `Contacts` | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
+| `/expenses` | `Expenses` | Yes |
+| `/expenses/new` | `ExpenseForm` | Yes |
+| `/expenses/:id` | `ExpenseDetail` | Yes |
+| `/expenses/:id/edit` | `ExpenseForm` | Yes |
 | `*` | `NotFound` | No |
 
 ### Bottom Navigation (Instagram-style)

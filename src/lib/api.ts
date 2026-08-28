@@ -38,6 +38,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   last_owner_or_admin:
     "A family needs at least one owner or admin. Promote someone else first.",
   internal_error: "Something went wrong on our side — please try again.",
+  not_financial_actor:
+    "That person can't be used for money moves (dependents aren't financial actors).",
+  cannot_archive_builtin: "Built-in categories can't be archived.",
+  conflict: "That request was already processed.",
 };
 
 export function friendlyMessage(code: string, status: number): string {

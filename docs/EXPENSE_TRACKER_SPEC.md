@@ -1064,14 +1064,20 @@ into screens first.
 - **Tests:** the full §19.1–19.2 suite (pure unit + property tests) against `lib/money.ts` in isolation. This is the phase where "±1 cent" bugs get caught, before any real data can be created through the API.
 - **Dependencies:** E-1 approved.
 - **Acceptance criteria:** every row of the §5.2 worked-examples table passes as a test case; the `Σshares === total` property test passes across ≥1,000 randomized inputs for `equal` and `percentage`; migration validates cleanly; `typecheck`/`lint`/`build` green (nothing to run for `test` beyond the new pure-function suite, since no routes exist yet).
-- **Status (implemented):** money + financialActors + migration `0005_strange_joystick.sql` + schema smoke tests. **No expense API/UI.** No pool `memberType`. **STOP — await approval before E1.**
+- **Status (implemented):** money + financialActors + migration `0005_strange_joystick.sql` + schema smoke tests. **No expense API/UI.** No pool `memberType`. Foundation retained by E1.
 
 ### E1 — Personal expenses
 - **Goal:** a family member can log, view, edit, trash, and (optionally) restore a personal expense with a category.
-- **Main changes:** `worker/routes/expenses.ts` (CRUD, `splitType='none'` only), `worker/routes/expenseCategories.ts` (seeded built-ins + family custom + archive); `isExpenseHiddenFrom()`; frontend `Expenses` list + `ExpenseForm` + `ExpenseDetail` built from the existing `ui/` kit; a "This month" widget on `Dashboard.tsx`.
-- **Tests:** contract tests (401/404/headers, mirroring `tests/events.test.ts`); integration CRUD + `isExpenseHiddenFrom` visibility (owner/admin bypass per §9); category archive blocked while referenced.
+- **Main changes:** `worker/routes/expenses.ts` (CRUD, `splitType='none'` only), categories nested under `/expenses/categories` (seeded built-ins + family custom + archive); `isExpenseHiddenFrom()`; frontend `Expenses` list + `ExpenseForm` + `ExpenseDetail` built from the existing `ui/` kit; a "This month" widget on `Dashboard.tsx`.
+- **Tests:** contract + integration CRUD + privacy (owner/admin bypass per §9); idempotent `clientRequestId`; category archive for custom only; shared split payloads rejected (E2).
 - **Dependencies:** E0.
 - **Acceptance criteria:** a member can add/edit/trash a personal expense; it's invisible to a plain other member but visible to owner/admin and the creator; a `family`-visibility personal expense is visible to everyone; categories archive without breaking existing references; full `gate` skill (typecheck/lint/test/build + migration validation) green.
+- **Status (implemented):** personal expense API + UI + Dashboard month widget. Restore deferred. Shared splits still rejected. **STOP before E2 until approved.**
+- **Decisions recorded in E1:**
+  1. Built-in categories are upserted on first categories GET via stable `builtin_*` ids (no extra data migration).
+  2. Display/parse assumes 2 decimal places except a small zero-decimal set (JPY/KRW/VND/CLP) in `src/lib/money.ts`.
+  3. Expense restore endpoint deferred (optional per §11.2); soft-trash only.
+  4. `/auth/me` and `GET /families` now expose `defaultCurrency` + caller's `memberId` (needed for paidBy defaulting).
 
 ### E2 — Shared expenses & splits
 - **Goal:** expenses can be split equal/exact/percentage across ≥2 active user-members.

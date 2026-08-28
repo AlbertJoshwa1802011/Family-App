@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { and, eq } from "drizzle-orm";
+import { and, eq , sql} from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
@@ -42,9 +42,11 @@ authRoutes.get("/me", async (c) => {
   const memberships = await db
     .select({
       familyId: schema.familyMembers.familyId,
+      memberId: sql<string>`${schema.familyMembers.id}`.as("member_id"),
       role: schema.familyMembers.role,
       familyName: schema.families.name,
       driveFolderId: schema.families.driveFolderId,
+      defaultCurrency: schema.families.defaultCurrency,
       familyCreatedAt: schema.families.createdAt,
     })
     .from(schema.familyMembers)
@@ -60,7 +62,9 @@ authRoutes.get("/me", async (c) => {
     id: m.familyId,
     name: m.familyName,
     role: m.role,
+    memberId: m.memberId,
     driveFolderId: m.driveFolderId,
+    defaultCurrency: m.defaultCurrency,
     createdAt: m.familyCreatedAt,
   }));
 
