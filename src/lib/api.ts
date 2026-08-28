@@ -35,6 +35,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   drive_error: "Google Drive had a hiccup — please try again in a moment.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   cannot_modify_owner: "The family owner's role can't be changed.",
+  last_owner_or_admin:
+    "A family needs at least one owner or admin. Promote someone else first.",
   internal_error: "Something went wrong on our side — please try again.",
 };
 

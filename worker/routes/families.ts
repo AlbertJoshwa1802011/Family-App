@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -11,6 +11,11 @@ import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
 import { inviteEmail } from "../lib/emailTemplates";
+
+/** Roles that can administer the family (invites, role changes, private docs). */
+function isOwnerOrAdmin(role: string): boolean {
+  return role === "owner" || role === "admin";
+}
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -370,6 +375,36 @@ familyRoutes.patch(
     const columnUpdates: Partial<Pick<typeof schema.familyMembers.$inferInsert, "role" | "status">> = {};
     if (updates.role !== undefined) columnUpdates.role = updates.role;
     if (updates.status !== undefined) columnUpdates.status = updates.status;
+
+    // Prevent lockout: a family must retain at least one active owner or admin.
+    // Self-demotion / self-removal of the sole privileged member is the main
+    // risk; the same guard also covers an admin removing the last peer when
+    // no owner remains with admin privileges.
+    const nextRole = updates.role ?? target.role;
+    const nextStatus = updates.status ?? target.status;
+    const wasPrivileged =
+      target.status === "active" && isOwnerOrAdmin(target.role);
+    const remainsPrivileged =
+      nextStatus === "active" && isOwnerOrAdmin(nextRole);
+
+    if (wasPrivileged && !remainsPrivileged) {
+      const otherPrivileged = await db
+        .select({ id: schema.familyMembers.id })
+        .from(schema.familyMembers)
+        .where(
+          and(
+            eq(schema.familyMembers.familyId, familyId),
+            eq(schema.familyMembers.status, "active"),
+            inArray(schema.familyMembers.role, ["owner", "admin"]),
+            ne(schema.familyMembers.id, memberId),
+          ),
+        )
+        .all();
+
+      if (otherPrivileged.length === 0) {
+        return c.json({ error: "last_owner_or_admin" }, 409);
+      }
+    }
 
     await db
       .update(schema.familyMembers)
