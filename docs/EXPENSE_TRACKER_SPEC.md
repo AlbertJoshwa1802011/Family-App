@@ -1064,6 +1064,7 @@ into screens first.
 - **Tests:** the full §19.1–19.2 suite (pure unit + property tests) against `lib/money.ts` in isolation. This is the phase where "±1 cent" bugs get caught, before any real data can be created through the API.
 - **Dependencies:** E-1 approved.
 - **Acceptance criteria:** every row of the §5.2 worked-examples table passes as a test case; the `Σshares === total` property test passes across ≥1,000 randomized inputs for `equal` and `percentage`; migration validates cleanly; `typecheck`/`lint`/`build` green (nothing to run for `test` beyond the new pure-function suite, since no routes exist yet).
+- **Status (implemented):** money + financialActors + migration `0005_strange_joystick.sql` + schema smoke tests. **No expense API/UI.** No pool `memberType`. **STOP — await approval before E1.**
 
 ### E1 — Personal expenses
 - **Goal:** a family member can log, view, edit, trash, and (optionally) restore a personal expense with a category.
