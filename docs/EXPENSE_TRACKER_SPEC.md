@@ -909,7 +909,8 @@ codebase already uses — no new testing infrastructure needed.
    `percentage`, not just the hand-picked table above.
 3. **Balance calculations** — multi-expense, multi-member scenarios in real D1, with hand-computed
    expected `netBalance` values; explicit test of the "opposing debts net to one number" case from
-   §7.1; explicit test of Cases A–D from §6.
+   §7.1; explicit test of Cases A–D from §6; explicit test that a removed member with a non-zero
+   obligation remains on the balance board (§7.2) while a removed member at net-zero may be omitted.
 4. **Settlement calculations** — partial vs. full settlement; reversal producing an exact-opposite
    net effect; a reversal-of-a-reversal correctly rejected (409, §16.1).
 5. **Editing after settlement** — the exact ₹10,000/₹5,000/₹8,000 walkthrough from §11.1, scripted
@@ -925,7 +926,8 @@ codebase already uses — no new testing infrastructure needed.
    editing a template after generation leaves past-generated expenses untouched.
 8. **Idempotency** — duplicate `POST /expenses` and `POST /settlements` with the same
    `clientRequestId` return the same row, not a second one; omitted `clientRequestId` behaves
-   exactly as today (no dedupe, no error).
+   exactly as today (no dedupe, no error); a retry after a successful create must not attempt a
+   second participant/tag insert batch (§17).
 9. **Contract tests** — 401/404/security-headers/content-type for every new route, in the exact
    style of `tests/events.test.ts`.
 
@@ -995,11 +997,36 @@ with zero active members in `{owner, admin}` (`409 last_owner_or_admin`). Existi
 preserved: non-owners still cannot modify an owner (`cannot_modify_owner`); multi-admin
 families can still demote/remove peers when another privileged member remains.
 
-**Residual (out of E-1 scope, reported not expanded):** there is still no API to *promote* a
-member to `owner` (invite/update Zod only allow `admin|member`). A sole owner may demote
-themselves to `admin` (still a viable admin under the lockout rule), after which the family has
-no `role='owner'` membership until a future ownership-transfer feature exists.
-`families.ownerUserId` is a separate field and is not rewritten by member-role PATCH today.
+**Which invariant is correct — “≥1 owner/admin” vs “≥1 owner”?**
+The application requires **at least one active owner or admin**, not specifically an active
+`role='owner'` membership:
+
+- Every elevated route uses `requireFamilyMember(..., "admin")` (or treats
+  `role === "owner" || role === "admin"` equivalently). **No route requires `minRole: "owner"`.**
+- Invite / member-update Zod schemas only allow assigning `admin|member` — there is **no**
+  promote-to-owner or ownership-transfer API anywhere in the codebase.
+- The sole behavioral difference of `role='owner'` vs `admin` is peer protection:
+  others cannot PATCH an owner (`cannot_modify_owner`); the owner may still PATCH themselves.
+  That matches PLAN language (“cannot be demoted **by others**”), not “cannot self-demote.”
+
+**`families.ownerUserId` vs `family_members.role='owner'` — intentional divergence allowed:**
+
+| Field | Meaning in this app |
+|---|---|
+| `families.ownerUserId` | **Drive credential pointer** — whose Google refresh token is used for the family's Drive folder (`getDriveAccessToken(env, family.ownerUserId)`). Storage SPOF, not an authz role. |
+| `family_members.role='owner'` | **Membership privilege** — top of `ROLE_RANK`; peer-protected; otherwise equivalent to admin for authorization. |
+
+They are set together on `POST /families`, but member PATCH never rewrites `ownerUserId`, and no
+code path asserts that `ownerUserId` still has an active `role='owner'` row. Sole-owner → admin
+self-demotion therefore leaves `ownerUserId = X` with membership `role='admin'` for X. **That
+does not violate an existing application invariant:** Drive still resolves via `ownerUserId`;
+admin authz still works via membership role. Pre-E-1 review confirmed this; **no code change**
+was made for the divergence (documenting only).
+
+**Residual (not expanded — no transfer feature exists to implement):** without a promote-to-owner
+API, a family can permanently lack any `role='owner'` membership after self-demotion to admin.
+Operational Drive risk if `ownerUserId` later points at a removed/revoked account remains the
+pre-existing refresh-token SPOF (ARCHITECTURE / DEPLOYMENT), independent of membership role.
 
 **D1 `batch()` atomicity — what was tested (E-1):**
 
