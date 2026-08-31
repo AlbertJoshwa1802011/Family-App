@@ -1,7 +1,9 @@
-import { Settings } from "lucide-react";
+import { HardDrive, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { cn } from "../../lib/cn";
+import { useAuth } from "../../context/AuthContext";
+import { BrandLockup } from "../brand/BrandLockup";
 import { NAV_ITEMS } from "./navItems";
 
 // ---------------------------------------------------------------------------
@@ -57,33 +59,8 @@ function MobileBottomTabs() {
 // ---------------------------------------------------------------------------
 // Mobile top header bar
 // ---------------------------------------------------------------------------
-
-function MobileTopBar() {
-  return (
-    <header className="pt-safe sticky top-0 z-20 border-b border-line bg-ink-950/80 backdrop-blur-lg md:hidden">
-      <div className="mx-auto flex h-14 max-w-md items-center gap-2 px-3">
-        <span className="no-select flex-1 truncate text-lg font-semibold text-fg">
-          Family Vault
-        </span>
-        <Link
-          to="/settings"
-          aria-label="Settings"
-          className="flex items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5 active:scale-95"
-          style={{ minWidth: "var(--tap-min)", minHeight: "var(--tap-min)" }}
-        >
-          <Settings className="size-5" aria-hidden="true" />
-        </Link>
-      </div>
-    </header>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Tablet nav rail (icon-only, 64 px wide)
 // ---------------------------------------------------------------------------
-
-import { useAuth } from "../../context/AuthContext";
-import { HardDrive } from "lucide-react";
 
 function NavRail() {
   const { pathname } = useLocation();
@@ -96,9 +73,7 @@ function NavRail() {
     >
       {/* Brand mark */}
       <div className="flex h-16 items-center justify-center border-b border-line">
-        <span className="no-select text-sm font-bold text-vault-500" aria-hidden="true">
-          FV
-        </span>
+        <BrandLockup size="md" markOnly />
       </div>
 
       {/* Nav items */}
@@ -182,14 +157,8 @@ function NavSidebar() {
       className="pt-safe fixed inset-y-0 left-0 z-30 hidden w-[200px] flex-col border-r border-line bg-ink-950/90 backdrop-blur-lg lg:flex"
     >
       {/* Brand */}
-      <div className="flex h-16 items-center gap-3 border-b border-line px-4">
-        <span
-          className="no-select flex size-8 items-center justify-center rounded-lg bg-vault-500/20 text-xs font-bold text-vault-400"
-          aria-hidden="true"
-        >
-          FV
-        </span>
-        <span className="no-select truncate text-sm font-semibold text-fg">Family Vault</span>
+      <div className="flex h-16 items-center border-b border-line px-4">
+        <BrandLockup size="md" />
       </div>
 
       {/* Nav items */}
@@ -274,8 +243,7 @@ export interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   return (
     <div className="min-h-full">
-      {/* Mobile chrome */}
-      <MobileTopBar />
+      {/* Mobile chrome — the page's own AppBar is the header; see ui/AppBar.tsx */}
       <MobileBottomTabs />
 
       {/* Tablet rail */}

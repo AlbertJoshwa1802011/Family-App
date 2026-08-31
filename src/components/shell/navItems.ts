@@ -1,4 +1,4 @@
-import { Calendar, FileText, Home, Shield, Users } from "lucide-react";
+import { FileText, Home, Shield, Users, Wallet } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface NavItem {
@@ -11,12 +11,15 @@ export interface NavItem {
 
 /**
  * Single source of truth for primary navigation destinations.
- * Settings is reached via a gear icon in the header/rail, not a main tab.
+ *
+ * Five tabs is the mobile ceiling. Calendar, Tasks, Contacts, Notifications and
+ * Settings are reached from the account menu (see components/AccountMenu.tsx),
+ * which keeps the tab bar to the destinations used daily.
  */
 export const NAV_ITEMS: NavItem[] = [
   { path: "/", label: "Home", icon: Home },
   { path: "/vault", label: "Vault", icon: Shield, matchPrefix: "/vault" },
   { path: "/documents", label: "Docs", icon: FileText, matchPrefix: "/documents" },
-  { path: "/calendar", label: "Calendar", icon: Calendar, matchPrefix: "/calendar" },
+  { path: "/expenses", label: "Expenses", icon: Wallet, matchPrefix: "/expenses" },
   { path: "/family", label: "Family", icon: Users, matchPrefix: "/family" },
 ];

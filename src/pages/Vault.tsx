@@ -352,6 +352,38 @@ function VaultUnlockForm({ familyId }: { familyId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// No access — the family has a vault, but this member holds no wrapped key
+// ---------------------------------------------------------------------------
+
+function VaultNoAccess() {
+  return (
+    <div className="flex flex-col items-center py-12 text-center gap-6">
+      <div className="flex size-20 items-center justify-center rounded-3xl bg-warning/15">
+        <Lock className="size-10 text-warning" />
+      </div>
+      <div className="space-y-2 max-w-sm">
+        <h2 className="text-xl font-bold text-fg">You don't have vault access yet</h2>
+        <p className="text-sm text-fg-muted leading-relaxed">
+          Your family's vault was set up by someone else. Because it is encrypted on
+          the device, no passphrase of yours can open it until an existing member
+          grants you a key from their unlocked vault.
+        </p>
+      </div>
+      <Card className="w-full max-w-sm text-left p-4">
+        <p className="text-sm font-semibold text-fg">How to get in</p>
+        <p className="mt-1 text-xs text-fg-muted leading-relaxed">
+          Ask a family member who can already open the vault to go to Family →
+          Vault access and grant it to you. They'll need their own passphrase to do it.
+        </p>
+      </Card>
+      <Button variant="secondary" onClick={() => window.location.reload()}>
+        I've been granted access — check again
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Unlocked vault — item list + search
 // ---------------------------------------------------------------------------
 
@@ -458,28 +490,42 @@ function UnlockedVault({ familyId }: { familyId: string }) {
 // ---------------------------------------------------------------------------
 
 export function Vault() {
-  const { families } = useAuth();
-  const activeFamilyId = families[0]?.id;
+  const { activeFamilyId } = useAuth();
   const { state, setVaultState } = useVault();
   const navigate = useNavigate();
+  const [statusError, setStatusError] = useState<string | null>(null);
 
-  // Check vault initialization status on mount
+  // Check vault status on mount. Three distinct outcomes, and none of them may
+  // fall back to "locked": prompting for a passphrase the user never set (or
+  // cannot have) is a dead end with no way forward.
   useEffect(() => {
     if (!activeFamilyId || state === "unlocked") return;
 
-    api<{ initialized: boolean; vaultId?: string }>(
+    let cancelled = false;
+    api<{ initialized: boolean; hasKey: boolean; vaultId?: string }>(
       `/vault/status?familyId=${encodeURIComponent(activeFamilyId)}`,
     )
       .then((res) => {
-        if (res.initialized) {
+        if (cancelled) return;
+        setStatusError(null);
+        if (!res.initialized) {
+          setVaultState("not_initialized");
+        } else if (res.hasKey) {
           setVaultState("locked", res.vaultId);
         } else {
-          setVaultState("not_initialized");
+          setVaultState("no_access", res.vaultId);
         }
       })
-      .catch(() => {
-        setVaultState("locked");
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setStatusError(
+          e instanceof Error ? e.message : "Could not reach the vault service.",
+        );
+        setVaultState("error");
       });
+    return () => {
+      cancelled = true;
+    };
   }, [activeFamilyId, state, setVaultState]);
 
   if (!activeFamilyId) {
@@ -522,6 +568,14 @@ export function Vault() {
         )}
         {state === "locked" && (
           <VaultUnlockForm familyId={activeFamilyId} />
+        )}
+        {state === "no_access" && <VaultNoAccess />}
+        {state === "error" && (
+          <EmptyState
+            icon={Shield}
+            title="Couldn't open the vault"
+            description={statusError ?? "Something went wrong. Please try again."}
+          />
         )}
         {state === "unlocked" && (
           <UnlockedVault familyId={activeFamilyId} />

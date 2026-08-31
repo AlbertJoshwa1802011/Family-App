@@ -8,6 +8,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -21,12 +22,33 @@ import {
   wrapKey,
 } from "../lib/vaultCrypto";
 import { api } from "../lib/api";
+import {
+  clearVaultSession,
+  loadVaultSession,
+  saveVaultSession,
+} from "../lib/vaultSessionStore";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type VaultState = "unchecked" | "not_initialized" | "locked" | "unlocked";
+/**
+ * - unchecked        → status not yet fetched
+ * - not_initialized  → no vault for this family; offer the setup wizard
+ * - locked           → vault exists AND this member has a key; offer unlock
+ * - no_access        → vault exists but this member has NO key; another member
+ *                      must grant access. Prompting for a passphrase here is
+ *                      unanswerable, so we must not.
+ * - unlocked         → key in memory
+ * - error            → status could not be determined; show why, don't guess
+ */
+export type VaultState =
+  | "unchecked"
+  | "not_initialized"
+  | "locked"
+  | "no_access"
+  | "unlocked"
+  | "error";
 
 interface VaultContextValue {
   state: VaultState;
@@ -65,6 +87,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
+
+  // Rehydrate this tab's unlocked key so a reload doesn't force the passphrase
+  // again. Runs once; if there's nothing stored the page falls through to the
+  // normal status check.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await loadVaultSession();
+      if (!stored || cancelled) return;
+      try {
+        const vs = await VaultSession.create(stored.vdk);
+        if (cancelled) return;
+        setSession(vs);
+        setVaultId(stored.vaultId);
+        setState("unlocked");
+      } catch {
+        // Stored key is unusable — drop it and fall back to the passphrase.
+        await clearVaultSession();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Initialize vault for the first time.
@@ -110,6 +156,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setSession(vs);
       setVaultId(newVaultId);
       setState("unlocked");
+      await saveVaultSession(vdk, newVaultId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Vault initialization failed";
       setError(msg);
@@ -156,6 +203,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const vs = await VaultSession.create(vdk);
       setSession(vs);
       setState("unlocked");
+      await saveVaultSession(vdk, vaultId);
     } catch (e) {
       // Distinguish crypto errors (wrong passphrase) from network errors
       const msg =
@@ -169,12 +217,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsWorking(false);
     }
-  }, []);
+  }, [vaultId]);
 
   const lock = useCallback(() => {
     setSession(null);
     setState("locked");
     setError(null);
+    void clearVaultSession();
   }, []);
 
   const value = useMemo<VaultContextValue>(

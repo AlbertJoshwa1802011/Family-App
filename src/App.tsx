@@ -20,6 +20,9 @@ import { ContactForm } from "./pages/ContactForm";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { AdminStorage } from "./pages/admin/Storage";
+import { Expenses } from "./pages/Expenses";
+import { ExpenseForm } from "./pages/ExpenseForm";
+import { ExpenseDetail } from "./pages/ExpenseDetail";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
@@ -59,6 +62,12 @@ export default function App() {
           <Route path="/vault/new" element={<VaultItemForm />} />
           <Route path="/vault/:id" element={<VaultItemDetail />} />
           <Route path="/vault/:id/edit" element={<VaultItemForm />} />
+
+          {/* Expenses */}
+          <Route path="/expenses" element={<Expenses />} />
+          <Route path="/expenses/new" element={<ExpenseForm />} />
+          <Route path="/expenses/:id" element={<ExpenseDetail />} />
+          <Route path="/expenses/:id/edit" element={<ExpenseForm />} />
 
           {/* Documents */}
           <Route path="/documents" element={<Documents />} />

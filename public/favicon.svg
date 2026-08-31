@@ -1,6 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0f766e" />
-  <rect x="14" y="14" width="36" height="36" rx="8" fill="#f0fdfa" />
-  <circle cx="32" cy="32" r="9" fill="#0b1220" />
-  <circle cx="32" cy="32" r="3" fill="#f0fdfa" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Family Vault mark — keep in sync with src/components/brand/VaultMark.tsx -->
+  <defs>
+    <linearGradient id="fv-shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5eead4" />
+      <stop offset="55%" stop-color="#14b8a6" />
+      <stop offset="100%" stop-color="#0f766e" />
+    </linearGradient>
+  </defs>
+  <path d="M16 2.2 27 6.6v8.7c0 7.1-4.6 12.6-11 14.6-6.4-2-11-7.5-11-14.6V6.6Z" fill="url(#fv-shield)" stroke-linejoin="round" />
+  <g stroke="#06231f" stroke-linecap="round" fill="none">
+    <circle cx="16" cy="15.4" r="5.3" stroke-width="2.1" />
+    <path d="M16 7.6v2.5M16 20.7v2.5M8.2 15.4h2.5M21.3 15.4h2.5" stroke-width="1.9" />
+  </g>
+  <circle cx="16" cy="15.4" r="1.9" fill="#06231f" />
 </svg>

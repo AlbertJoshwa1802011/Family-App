@@ -1,6 +1,9 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -30,9 +33,24 @@ interface AuthValue {
   families: Family[];
   isLoading: boolean;
   isAuthenticated: boolean;
+  /** The family every family-scoped query should target. Null until /auth/me resolves. */
+  activeFamily: Family | null;
+  activeFamilyId: string | null;
+  setActiveFamilyId: (id: string) => void;
 }
 
 const AuthContext = createContext<AuthValue | undefined>(undefined);
+
+const ACTIVE_FAMILY_KEY = "fv:activeFamilyId";
+
+function readStoredFamilyId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_FAMILY_KEY);
+  } catch {
+    // Private mode / storage disabled — fall back to the first family.
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { data, isLoading } = useQuery({
@@ -42,11 +60,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
+  const families = useMemo(() => data?.families ?? [], [data?.families]);
+  const [storedId, setStoredId] = useState<string | null>(readStoredFamilyId);
+
+  const setActiveFamilyId = useCallback((id: string) => {
+    setStoredId(id);
+    try {
+      localStorage.setItem(ACTIVE_FAMILY_KEY, id);
+    } catch {
+      // Non-fatal: selection just won't survive a reload.
+    }
+  }, []);
+
+  // Resolve the stored id against the memberships we actually have. A stale id
+  // (family left or deleted) must not strand the user on a family they can't
+  // read, so fall back to the first membership. The stored value is only a
+  // preference — it is written when the user actually picks a family, never
+  // healed from an effect.
+  const activeFamily =
+    families.find((f) => f.id === storedId) ?? families[0] ?? null;
+
   const value: AuthValue = {
     user: data?.user ?? null,
-    families: data?.families ?? [],
+    families,
     isLoading,
     isAuthenticated: Boolean(data?.user),
+    activeFamily,
+    activeFamilyId: activeFamily?.id ?? null,
+    setActiveFamilyId,
   };
 
   return <AuthContext value={value}>{children}</AuthContext>;

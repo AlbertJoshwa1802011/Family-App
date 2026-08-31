@@ -1,17 +1,35 @@
 #!/usr/bin/env python3
-"""Generate placeholder PWA icons (no external deps).
+"""Generate the PWA icons from the Family Vault brand mark (no external deps).
 
-Draws a teal rounded-square "vault" mark with a lighter dial. These are intentionally
-simple placeholders for Phase 0 — replace with designed assets later.
+Draws the same symbol as src/components/brand/VaultMark.tsx — a teal shield
+enclosing a vault dial — on the app's ink background, so the installed icon,
+the favicon and the in-app header all read as one brand.
+
+Geometry is expressed in the mark's 32x32 design space and scaled to the target
+size. Edges are 4x4 supersampled, since this rasterizer is hand-rolled.
 """
 import os
 import struct
 import zlib
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "public", "icons")
-BG = (15, 118, 110)        # vault-700
-FG = (240, 253, 250)       # vault-50
-INK = (11, 18, 32)         # ink-900
+
+BG = (11, 18, 32)          # ink-900 — matches the app background
+DIAL = (6, 35, 31)         # deep teal-ink, same as the SVG mark
+GRAD_TOP = (94, 234, 212)  # vault-300
+GRAD_MID = (20, 184, 166)  # vault-500
+GRAD_BOT = (15, 118, 110)  # vault-700
+
+SS = 4  # supersampling factor per axis
+
+# ── Mark geometry, in the 32x32 design space ────────────────────────────────
+APEX_Y, SHOULDER_Y = 2.2, 6.6
+WAIST_Y, TIP_Y = 15.3, 29.8
+HALF_W = 11.0
+CX = 16.0
+DIAL_CY, DIAL_R, DIAL_SW = 15.4, 5.3, 2.1
+HUB_R = 1.9
+SPOKE_HW = 0.95
 
 
 def _png(width, height, pixels):
@@ -30,41 +48,79 @@ def _png(width, height, pixels):
     return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
 
 
+def in_shield(x, y):
+    """Point-in-shield test in design space."""
+    if y < APEX_Y or y > TIP_Y:
+        return False
+    hx = abs(x - CX)
+    if y < SHOULDER_Y:
+        # Sloped shoulders rising to the apex.
+        return hx <= HALF_W * (y - APEX_Y) / (SHOULDER_Y - APEX_Y)
+    if y <= WAIST_Y:
+        return hx <= HALF_W
+    # Lower body tapering to the tip.
+    t = (y - WAIST_Y) / (TIP_Y - WAIST_Y)
+    return hx <= HALF_W * max(0.0, 1.0 - t ** 2.2) ** 0.62
+
+
+def in_dial(x, y):
+    """Ring, four spokes and hub — the parts drawn in ink over the shield."""
+    dx, dy = x - CX, y - DIAL_CY
+    d = (dx * dx + dy * dy) ** 0.5
+    if abs(d - DIAL_R) <= DIAL_SW / 2:      # ring
+        return True
+    if d <= HUB_R:                           # hub
+        return True
+    # Spokes: two vertical (above/below), two horizontal (left/right).
+    if abs(dx) <= SPOKE_HW and 7.6 <= y <= 10.1:
+        return True
+    if abs(dx) <= SPOKE_HW and 20.7 <= y <= 23.2:
+        return True
+    if abs(dy) <= SPOKE_HW and 8.2 <= x <= 10.7:
+        return True
+    if abs(dy) <= SPOKE_HW and 21.3 <= x <= 23.8:
+        return True
+    return False
+
+
+def shield_color(y):
+    """Vertical teal gradient matching the SVG's linear gradient stops."""
+    t = min(1.0, max(0.0, (y - APEX_Y) / (TIP_Y - APEX_Y)))
+    if t < 0.55:
+        u = t / 0.55
+        a, b = GRAD_TOP, GRAD_MID
+    else:
+        u = (t - 0.55) / 0.45
+        a, b = GRAD_MID, GRAD_BOT
+    return tuple(round(a[i] + (b[i] - a[i]) * u) for i in range(3))
+
+
 def draw(size, padding_ratio):
+    """Render the mark at `size` px, inset by `padding_ratio` on each side."""
     px = [BG] * (size * size)
-    pad = int(size * padding_ratio)
-    inner = size - 2 * pad
-    radius = inner * 0.22
-    cx, cy = size / 2, size / 2
-
-    def rounded(x, y, x0, y0, x1, y1, r):
-        # inside rounded rect [x0,x1]x[y0,y1] with corner radius r
-        if x < x0 or x > x1 or y < y0 or y > y1:
-            return False
-        rx = min(max(x, x0 + r), x1 - r)
-        ry = min(max(y, y0 + r), y1 - r)
-        return (x - rx) ** 2 + (y - ry) ** 2 <= r * r or (x0 + r <= x <= x1 - r) or (y0 + r <= y <= y1 - r)
-
-    x0, y0, x1, y1 = pad, pad, size - pad, size - pad
-    door_pad = inner * 0.16
-    dx0, dy0, dx1, dy1 = x0 + door_pad, y0 + door_pad, x1 - door_pad, y1 - door_pad
-    dial_r = inner * 0.16
-    spoke_r = inner * 0.05
+    inner = size * (1 - 2 * padding_ratio)
+    origin = size * padding_ratio
+    step = 1.0 / SS
 
     for y in range(size):
         for x in range(size):
-            i = y * size + x
-            # vault face (light rounded square)
-            if rounded(x, y, dx0, dy0, dx1, dy1, radius * 0.7):
-                px[i] = FG
-            # dial
-            d2 = (x - cx) ** 2 + (y - cy) ** 2
-            if d2 <= dial_r ** 2:
-                px[i] = INK
-            if (dial_r - spoke_r) ** 2 <= d2 <= dial_r ** 2:
-                px[i] = INK
-            if d2 <= spoke_r ** 2:
-                px[i] = FG
+            acc = [0, 0, 0]
+            for sy in range(SS):
+                for sx in range(SS):
+                    # Pixel-centre sample → design space.
+                    px_x = x + (sx + 0.5) * step
+                    px_y = y + (sy + 0.5) * step
+                    dx = (px_x - origin) / inner * 32.0
+                    dy = (px_y - origin) / inner * 32.0
+                    if in_shield(dx, dy):
+                        c = DIAL if in_dial(dx, dy) else shield_color(dy)
+                    else:
+                        c = BG
+                    acc[0] += c[0]
+                    acc[1] += c[1]
+                    acc[2] += c[2]
+            n = SS * SS
+            px[y * size + x] = (acc[0] // n, acc[1] // n, acc[2] // n)
     return _png(size, size, px)
 
 
@@ -74,7 +130,7 @@ def main():
         f.write(draw(192, 0.10))
     with open(os.path.join(OUT, "icon-512.png"), "wb") as f:
         f.write(draw(512, 0.10))
-    # maskable: extra safe-zone padding so the mark isn't clipped
+    # maskable: extra safe-zone padding so the mark isn't clipped by the launcher
     with open(os.path.join(OUT, "icon-512-maskable.png"), "wb") as f:
         f.write(draw(512, 0.20))
     print("icons written to", os.path.abspath(OUT))

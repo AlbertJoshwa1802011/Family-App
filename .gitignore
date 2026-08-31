@@ -26,3 +26,6 @@ npm-debug.log*
 
 # test / coverage
 coverage/
+
+# Local dev artifacts from the screenshot harness
+screenshots/

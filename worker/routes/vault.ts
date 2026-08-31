@@ -140,8 +140,28 @@ vaultRoutes.get("/status", requireSession, async (c) => {
     .where(eq(schema.vaults.familyId, familyId))
     .get();
 
-  if (!vault) return c.json({ initialized: false });
-  return c.json({ initialized: true, vaultId: vault.id });
+  if (!vault) return c.json({ initialized: false, hasKey: false });
+
+  // Whether the *family* has a vault says nothing about whether THIS member can
+  // open it. Without this per-member check the client showed an unlock prompt to
+  // members who have no wrapped key, asking for a passphrase they never set and
+  // could never satisfy. `hasKey` is what decides setup vs unlock vs no-access.
+  const myKey = await db
+    .select({ id: schema.vaultKeys.id })
+    .from(schema.vaultKeys)
+    .where(
+      and(
+        eq(schema.vaultKeys.vaultId, vault.id),
+        eq(schema.vaultKeys.memberId, membership.id),
+      ),
+    )
+    .get();
+
+  return c.json({
+    initialized: true,
+    hasKey: Boolean(myKey),
+    vaultId: vault.id,
+  });
 });
 
 // ── 3. GET /vault/keys?familyId=xxx ──────────────────────────────────────────

@@ -39,6 +39,8 @@ export const families = sqliteTable("families", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   driveFolderId: text("drive_folder_id"),
+  // ISO 4217; one currency per family. Additive and default-safe.
+  defaultCurrency: text("default_currency").notNull().default("USD"),
   createdAt: integer("created_at").notNull().default(now),
 });
 
@@ -829,3 +831,88 @@ export const storageAccounts = sqliteTable("storage_accounts", {
   createdAt: integer("created_at").notNull().default(now),
   updatedAt: integer("updated_at").notNull().default(now),
 });
+
+// ── Expenses ─────────────────────────────────────────────────────────────────
+// Personal expense tracking. Every expense belongs to the member who recorded
+// it and is `private` by default: only its creator can read it. Marking one
+// `family` opts it in to the shared household view. See worker/lib/expenses/.
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    // NULL = global built-in category shared across families.
+    familyId: text("family_id").references(() => families.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    color: text("color"),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expense_category_name").on(t.familyId, t.name),
+    index("idx_expense_category_family_archived").on(t.familyId, t.archived),
+  ],
+);
+
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // memberType='user' enforced in app code — never a dependent.
+    paidByMemberId: text("paid_by_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    // Attribution only (any member type); no effect on who can see the row.
+    subjectMemberId: text("subject_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    expenseDate: text("expense_date").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    paymentMethod: text("payment_method"),
+    // Reserved for shared splits; personal expenses are always "none".
+    splitType: text("split_type", {
+      enum: ["none", "equal", "exact", "percentage"],
+    })
+      .notNull()
+      .default("none"),
+    // Private by default — the privacy guarantee the feature is built on.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientRequestId: text("client_request_id"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expense_client_request").on(
+      t.familyId,
+      t.createdByUserId,
+      t.clientRequestId,
+    ),
+    index("idx_expense_family_date").on(t.familyId, t.expenseDate),
+    index("idx_expense_family_status").on(t.familyId, t.status),
+    index("idx_expense_created_by").on(t.createdByUserId),
+    index("idx_expense_paid_by").on(t.paidByMemberId),
+    index("idx_expense_category").on(t.categoryId),
+  ],
+);

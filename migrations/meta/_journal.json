@@ -50,6 +50,13 @@
       "when": 1783273505127,
       "tag": "0006_furry_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788199450186,
+      "tag": "0007_easy_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

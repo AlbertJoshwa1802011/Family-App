@@ -67,12 +67,21 @@ export function randomBase64Url(bytes: number): string {
 // KEY IMPORT HELPER
 // ---------------------------------------------------------------------------
 
-async function importAesKey(raw: ArrayBuffer, usages: KeyUsage[]): Promise<CryptoKey> {
+// `extractable` defaults to true because the VDK must be exportable: deriveBlindKey()
+// exports it as HKDF input material, and wrapKey() exports it to re-wrap for another
+// member. Importing the unwrapped VDK as non-extractable made unlock throw
+// InvalidAccessError on every correct passphrase. Pass false only for keys that are
+// never re-derived from.
+async function importAesKey(
+  raw: ArrayBuffer,
+  usages: KeyUsage[],
+  extractable = true,
+): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     'raw',
     raw,
     { name: ALGO, length: VDK_BITS },
-    false,
+    extractable,
     usages,
   )
 }
