@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus,
@@ -323,28 +323,31 @@ export function TaskForm() {
     enabled: isEdit,
   });
 
-  useEffect(() => {
-    if (taskData?.task) {
-      const task = taskData.task;
-      setForm({
-        title: task.title,
-        notes: task.notes ?? "",
-        assignedToMemberId: task.assignedToMemberId ?? "",
-        dueDate: task.dueDate ?? "",
-        referredTaskId: task.referredTaskId ?? "",
-        reminderDate: task.reminderDate ?? "",
-        remindMemberId: task.remindMemberId ?? "",
-      });
-      // Parse subtasks JSON
-      if (task.subtasksJson) {
-        try {
-          setSubtasks(JSON.parse(task.subtasksJson) as Subtask[]);
-        } catch {
-          setSubtasks([]);
-        }
+  // Seed local form state from the loaded task during render (React-recommended
+  // "adjust state when props/query data change" — avoids setState-in-effect).
+  const [seededTaskId, setSeededTaskId] = useState<string | null>(null);
+  const loadedTask = taskData?.task;
+  if (loadedTask && seededTaskId !== loadedTask.id) {
+    setSeededTaskId(loadedTask.id);
+    setForm({
+      title: loadedTask.title,
+      notes: loadedTask.notes ?? "",
+      assignedToMemberId: loadedTask.assignedToMemberId ?? "",
+      dueDate: loadedTask.dueDate ?? "",
+      referredTaskId: loadedTask.referredTaskId ?? "",
+      reminderDate: loadedTask.reminderDate ?? "",
+      remindMemberId: loadedTask.remindMemberId ?? "",
+    });
+    if (loadedTask.subtasksJson) {
+      try {
+        setSubtasks(JSON.parse(loadedTask.subtasksJson) as Subtask[]);
+      } catch {
+        setSubtasks([]);
       }
+    } else {
+      setSubtasks([]);
     }
-  }, [taskData]);
+  }
 
   const mutation = useMutation({
     mutationFn: (payload: object) =>

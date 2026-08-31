@@ -22,6 +22,7 @@ interface Category {
   name: string;
   icon: string | null;
   color: string | null;
+  parentId: string | null;
 }
 
 interface ExpenseDetail {
@@ -197,7 +198,39 @@ function ExpenseFormFields({
     save.mutate();
   }
 
-  const categories = categoriesQ.data?.categories ?? [];
+  const categories = useMemo(
+    () => categoriesQ.data?.categories ?? [],
+    [categoriesQ.data?.categories],
+  );
+  const parents = useMemo(
+    () => categories.filter((c) => !c.parentId),
+    [categories],
+  );
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, Category[]>();
+    for (const c of categories) {
+      if (!c.parentId) continue;
+      const list = map.get(c.parentId) ?? [];
+      list.push(c);
+      map.set(c.parentId, list);
+    }
+    return map;
+  }, [categories]);
+
+  // Which parent group is expanded: the selected leaf's parent, or the
+  // selected parent itself when it has children.
+  const activeParentId = useMemo(() => {
+    if (!categoryId) return null;
+    const selected = categories.find((c) => c.id === categoryId);
+    if (!selected) return null;
+    if (selected.parentId) return selected.parentId;
+    if (childrenByParent.has(selected.id)) return selected.id;
+    return null;
+  }, [categoryId, categories, childrenByParent]);
+
+  const subcategories = activeParentId
+    ? (childrenByParent.get(activeParentId) ?? [])
+    : [];
 
   return (
     <>
@@ -288,45 +321,87 @@ function ExpenseFormFields({
             )}
           </Card>
 
-          {/* Category */}
+          {/* Category — parents first; subcategories appear when a parent with children is active. */}
           <Card className="p-4">
             <p className="text-xs font-medium text-fg-subtle">Category</p>
             {categoriesQ.isLoading ? (
               <Skeleton className="mt-2 h-9 w-full" />
             ) : (
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCategoryId(null)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    categoryId === null
-                      ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                      : "border-line text-fg-muted hover:bg-white/5",
-                  )}
-                >
-                  None
-                </button>
-                {categories.map((cat) => (
+              <div className="mt-2 space-y-3">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    key={cat.id}
                     type="button"
-                    onClick={() => setCategoryId(cat.id)}
+                    onClick={() => setCategoryId(null)}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                      categoryId === cat.id
+                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                      categoryId === null
                         ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
                         : "border-line text-fg-muted hover:bg-white/5",
                     )}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: cat.color ?? "var(--color-fg-subtle)" }}
-                    />
-                    {cat.name}
+                    None
                   </button>
-                ))}
+                  {parents.map((cat) => {
+                    const hasKids = childrenByParent.has(cat.id);
+                    const selected =
+                      categoryId === cat.id ||
+                      (hasKids && activeParentId === cat.id);
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setCategoryId(cat.id)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                          selected
+                            ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                            : "border-line text-fg-muted hover:bg-white/5",
+                        )}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="size-2 rounded-full"
+                          style={{
+                            backgroundColor: cat.color ?? "var(--color-fg-subtle)",
+                          }}
+                        />
+                        {cat.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {subcategories.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-medium text-fg-subtle">
+                      Subcategory
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {subcategories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setCategoryId(cat.id)}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            categoryId === cat.id
+                              ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                              : "border-line text-fg-muted hover:bg-white/5",
+                          )}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="size-2 rounded-full"
+                            style={{
+                              backgroundColor:
+                                cat.color ?? "var(--color-fg-subtle)",
+                            }}
+                          />
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </Card>

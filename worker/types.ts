@@ -23,6 +23,8 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Comma-separated emails bootstrapped as platform admins on first login. */
   PLATFORM_ADMIN_EMAILS?: string;
+  /** Google Gemini API key for /api/ai/chat. Absent → 503 ai_unavailable. */
+  GEMINI_API_KEY?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

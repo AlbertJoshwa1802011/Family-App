@@ -60,3 +60,24 @@ export function expenseSearchWhere(q: string): SQL | null {
     like(schema.expenses.description, pattern),
   )!;
 }
+
+/** Same privacy rule for recurring expenses (no owner/admin bypass). */
+export function isRecurringHiddenFrom(
+  row: ExpenseVisibilityRow,
+  userId: string,
+): boolean {
+  return row.visibility === "private" && row.createdByUserId !== userId;
+}
+
+export function recurringVisibilityWhere(
+  familyId: string,
+  userId: string,
+): SQL | undefined {
+  return and(
+    eq(schema.recurringExpenses.familyId, familyId),
+    or(
+      eq(schema.recurringExpenses.visibility, "family"),
+      eq(schema.recurringExpenses.createdByUserId, userId),
+    ),
+  );
+}

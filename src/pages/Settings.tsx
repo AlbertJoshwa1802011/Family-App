@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, HardDrive, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
@@ -15,26 +16,17 @@ interface ReminderPrefs {
   emailEnabled: boolean;
   pushEnabled: boolean;
   windows: number[];
+  reminderEmail: string | null;
 }
 
 // Lead-time options offered in the UI (days before expiry/event).
 const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+const OWNER_EMAIL_HINT = "albertjoshrock101@gmail.com";
 
 function ReminderPrefsCard() {
-  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["reminder-prefs"],
     queryFn: () => api<{ prefs: ReminderPrefs }>("/notifications/prefs"),
-  });
-
-  const save = useMutation({
-    mutationFn: (patch: Partial<ReminderPrefs>) =>
-      api<{ prefs: ReminderPrefs }>("/notifications/prefs", {
-        method: "PUT",
-        body: JSON.stringify(patch),
-      }),
-    // Optimistically reflect the change, then reconcile with the server.
-    onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
   });
 
   if (isLoading || !data) {
@@ -46,13 +38,42 @@ function ReminderPrefsCard() {
     );
   }
 
-  const prefs = data.prefs;
+  // Remount when the saved email changes so the draft reseeds without an effect.
+  return (
+    <ReminderPrefsFields
+      key={data.prefs.reminderEmail ?? "__null__"}
+      prefs={data.prefs}
+    />
+  );
+}
+
+function ReminderPrefsFields({ prefs }: { prefs: ReminderPrefs }) {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const [emailDraft, setEmailDraft] = useState(() => prefs.reminderEmail ?? "");
+
+  const save = useMutation({
+    mutationFn: (patch: Partial<ReminderPrefs>) =>
+      api<{ prefs: ReminderPrefs }>("/notifications/prefs", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
+  });
 
   const toggleWindow = (w: number) => {
     const next = prefs.windows.includes(w)
       ? prefs.windows.filter((x) => x !== w)
       : [...prefs.windows, w];
     save.mutate({ windows: next.sort((a, b) => b - a) });
+  };
+
+  const commitReminderEmail = () => {
+    const trimmed = emailDraft.trim();
+    const next = trimmed === "" ? null : trimmed;
+    const current = prefs.reminderEmail ?? null;
+    if (next === current) return;
+    save.mutate({ reminderEmail: next });
   };
 
   return (
@@ -82,6 +103,36 @@ function ReminderPrefsCard() {
           </button>
         }
       />
+      <div className="px-4 py-3">
+        <label htmlFor="reminder-email" className="text-sm font-medium text-fg">
+          Send reminders to
+        </label>
+        <input
+          id="reminder-email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          value={emailDraft}
+          placeholder={user?.email ?? "you@example.com"}
+          disabled={save.isPending}
+          onChange={(e) => setEmailDraft(e.target.value)}
+          onBlur={commitReminderEmail}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="mt-2 w-full rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none disabled:opacity-50"
+        />
+        <p className="mt-2 text-xs text-fg-muted">
+          Daily job at 08:00 UTC emails document & event reminders even if you
+          don&apos;t open the app. Leave blank to use your Google account email.
+        </p>
+        <p className="mt-1.5 text-xs text-fg-subtle">
+          Tip for the family owner: you can set {OWNER_EMAIL_HINT}.
+        </p>
+      </div>
       <div className="px-4 py-3">
         <div className="text-sm font-medium text-fg">Lead time</div>
         <div className="mt-0.5 text-xs text-fg-muted">

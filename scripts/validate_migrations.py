@@ -14,7 +14,7 @@ import glob
 import os
 import sys
 
-EXPECTED_MIN_TABLES = 21  # bump when you add tables
+EXPECTED_MIN_TABLES = 41  # bump when you add tables
 
 
 def main() -> int:

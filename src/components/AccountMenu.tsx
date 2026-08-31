@@ -11,6 +11,7 @@ import {
   HardDrive,
   ListTodo,
   LogOut,
+  PiggyBank,
   Settings as SettingsIcon,
   Users,
 } from "lucide-react";
@@ -36,6 +37,10 @@ const LINKS: MenuLink[] = [
   { to: "/contacts", label: "Contacts", icon: Contact },
   { to: "/calendar", label: "Calendar", icon: Calendar },
   { to: "/admin/storage", label: "Platform admin", icon: HardDrive, adminOnly: true },
+];
+
+const EXTRA_LINKS: MenuLink[] = [
+  { to: "/expenses?tab=plan", label: "Money plan", icon: PiggyBank },
 ];
 
 /**
@@ -86,7 +91,9 @@ export function AccountMenu() {
     navigate("/login", { replace: true });
   }
 
-  const visibleLinks = LINKS.filter((l) => !l.adminOnly || user?.isPlatformAdmin);
+  const visibleLinks = [...LINKS, ...EXTRA_LINKS].filter(
+    (l) => !l.adminOnly || user?.isPlatformAdmin,
+  );
 
   return (
     <div className="relative">

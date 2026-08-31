@@ -33,8 +33,18 @@ import {
   expenseVisibilityWhere,
   isExpenseHiddenFrom,
 } from "../lib/expenses/visibility";
+import { isoWeekKey } from "../lib/expenses/isoWeek";
+import {
+  computeBudget,
+  spendAdvice,
+  toMonthlyMinor,
+} from "../lib/expenses/budget";
+import { registerExpenseMoneyRoutes } from "./expensesMoney";
 
 export const expenseRoutes = new Hono<HonoEnv>();
+
+// Money plan / recurring / wishlist — register before /:id catch-all.
+registerExpenseMoneyRoutes(expenseRoutes);
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd");
 const currencyCode = z
@@ -89,6 +99,8 @@ const createCategorySchema = z.object({
   name: z.string().min(1).max(80),
   icon: z.string().max(40).optional().nullable(),
   color: z.string().max(20).optional().nullable(),
+  // Subcategory: must point at a top-level category (parentId null). Depth max 1.
+  parentId: z.string().min(1).optional().nullable(),
 });
 
 type ExpenseRow = typeof schema.expenses.$inferSelect;
@@ -206,7 +218,11 @@ expenseRoutes.get("/categories", requireSession, async (c) => {
     .orderBy(schema.expenseCategories.name);
 
   return c.json({
-    categories: rows.map((r) => ({ ...r, builtin: r.familyId === null })),
+    categories: rows.map((r) => ({
+      ...r,
+      builtin: r.familyId === null,
+      parentId: r.parentId ?? null,
+    })),
   });
 });
 
@@ -220,11 +236,42 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
   const db = getDb(c.env);
   await ensureBuiltinCategories(db);
 
+  const parentId: string | null = data.parentId ?? null;
+  if (parentId) {
+    const parent = await db
+      .select()
+      .from(schema.expenseCategories)
+      .where(eq(schema.expenseCategories.id, parentId))
+      .get();
+    if (
+      !parent ||
+      (parent.familyId !== null && parent.familyId !== data.familyId)
+    ) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (parent.parentId !== null) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["parentId"],
+              message: "subcategories cannot nest deeper than one level",
+            },
+          ],
+        },
+        400,
+      );
+    }
+  }
+
   const id = crypto.randomUUID();
   try {
     await db.insert(schema.expenseCategories).values({
       id,
       familyId: data.familyId,
+      parentId,
       name: data.name.trim(),
       icon: data.icon ?? null,
       color: data.color ?? null,
@@ -559,6 +606,7 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
   let totalMinor = 0;
   const byCategoryMap = new Map<string, { categoryId: string | null; totalMinor: number; count: number }>();
   const byMonthMap = new Map<string, number>();
+  const byWeekMap = new Map<string, number>();
   let privateMinor = 0;
   let sharedMinor = 0;
 
@@ -577,6 +625,9 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
 
     const month = r.expenseDate.slice(0, 7); // yyyy-mm
     byMonthMap.set(month, (byMonthMap.get(month) ?? 0) + r.amountMinor);
+
+    const week = isoWeekKey(r.expenseDate);
+    byWeekMap.set(week, (byWeekMap.get(week) ?? 0) + r.amountMinor);
 
     if (r.visibility === "private") privateMinor += r.amountMinor;
     else sharedMinor += r.amountMinor;
@@ -617,15 +668,88 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
     .map(([month, minor]) => ({ month, totalMinor: minor }))
     .sort((a, b) => (a.month < b.month ? -1 : 1));
 
+  const byWeek = [...byWeekMap.entries()]
+    .map(([week, minor]) => ({ week, totalMinor: minor }))
+    .sort((a, b) => (a.week < b.week ? -1 : 1));
+
+  // Recurring monthly total visible to this user (active only).
+  const recurringRows = await db
+    .select({
+      amountMinor: schema.recurringExpenses.amountMinor,
+      interval: schema.recurringExpenses.interval,
+      visibility: schema.recurringExpenses.visibility,
+      createdByUserId: schema.recurringExpenses.createdByUserId,
+    })
+    .from(schema.recurringExpenses)
+    .where(
+      and(
+        eq(schema.recurringExpenses.familyId, familyId),
+        eq(schema.recurringExpenses.active, true),
+        or(
+          eq(schema.recurringExpenses.visibility, "family"),
+          eq(schema.recurringExpenses.createdByUserId, userId),
+        ),
+      ),
+    );
+
+  // For view=mine, only count the caller's private books + their recurring.
+  const recurringScoped =
+    view === "mine"
+      ? recurringRows.filter((r) => r.createdByUserId === userId)
+      : recurringRows;
+
+  const recurringMonthlyMinor = recurringScoped.reduce(
+    (sum, r) =>
+      sum +
+      toMonthlyMinor(
+        r.amountMinor,
+        r.interval as "monthly" | "weekly" | "yearly",
+      ),
+    0,
+  );
+
+  const plan = await db
+    .select()
+    .from(schema.moneyPlans)
+    .where(
+      and(
+        eq(schema.moneyPlans.familyId, familyId),
+        eq(schema.moneyPlans.userId, userId),
+      ),
+    )
+    .get();
+
+  const currency = family?.defaultCurrency ?? "USD";
+  const budgetBreakdown = computeBudget({
+    monthlyIncomeMinor: plan?.monthlyIncomeMinor ?? 0,
+    tithePercent: plan?.tithePercent ?? 10,
+    childrenGivingMinor: plan?.childrenGivingMinor ?? 0,
+    savingsGoalMinor: plan?.savingsGoalMinor ?? 0,
+    spentMinor: totalMinor,
+    recurringMonthlyMinor,
+  });
+
+  const budget = {
+    incomeMinor: budgetBreakdown.incomeMinor,
+    titheDueMinor: budgetBreakdown.titheDueMinor,
+    childrenGivingMinor: budgetBreakdown.childrenGivingMinor,
+    savingsGoalMinor: budgetBreakdown.savingsGoalMinor,
+    leftoverMinor: budgetBreakdown.leftoverMinor,
+  };
+
   return c.json({
     view,
-    currency: family?.defaultCurrency ?? "USD",
+    currency,
     totalMinor,
     count: rows.length,
     privateMinor,
     sharedMinor,
     byCategory,
     byMonth,
+    byWeek,
+    recurringMonthlyMinor,
+    budget,
+    spendAdvice: spendAdvice(budgetBreakdown, currency),
   });
 });
 

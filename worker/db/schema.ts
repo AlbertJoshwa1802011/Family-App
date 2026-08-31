@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -254,6 +255,8 @@ export const reminderPrefs = sqliteTable("reminder_prefs", {
     .notNull()
     .default(false),
   windowsJson: text("windows_json").notNull().default("[30,7,1]"),
+  // Optional override: when set, cron emails THIS address instead of users.email.
+  reminderEmail: text("reminder_email"),
 });
 
 export const auditLog = sqliteTable(
@@ -845,6 +848,12 @@ export const expenseCategories = sqliteTable(
     familyId: text("family_id").references(() => families.id, {
       onDelete: "cascade",
     }),
+    // Subcategory support: nullable self-FK. Depth max 1 enforced in app code
+    // (a parent must itself have parentId = null).
+    parentId: text("parent_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+      { onDelete: "set null" },
+    ),
     name: text("name").notNull(),
     icon: text("icon"),
     color: text("color"),
@@ -855,6 +864,7 @@ export const expenseCategories = sqliteTable(
   (t) => [
     unique("uq_expense_category_name").on(t.familyId, t.name),
     index("idx_expense_category_family_archived").on(t.familyId, t.archived),
+    index("idx_expense_category_parent").on(t.parentId),
   ],
 );
 
@@ -914,5 +924,139 @@ export const expenses = sqliteTable(
     index("idx_expense_created_by").on(t.createdByUserId),
     index("idx_expense_paid_by").on(t.paidByMemberId),
     index("idx_expense_category").on(t.categoryId),
+  ],
+);
+
+// ── Money plans (per-user household budget inputs) ────────────────────────────
+
+export const moneyPlans = sqliteTable(
+  "money_plans",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    monthlyIncomeMinor: integer("monthly_income_minor").notNull().default(0),
+    currency: text("currency").notNull().default("USD"),
+    tithePercent: integer("tithe_percent").notNull().default(10),
+    childrenGivingMinor: integer("children_giving_minor").notNull().default(0),
+    savingsGoalMinor: integer("savings_goal_minor").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_money_plan_family_user").on(t.familyId, t.userId),
+    index("idx_money_plan_family").on(t.familyId),
+  ],
+);
+
+// ── Recurring expenses (EMI / insurance / subscriptions / tithe …) ───────────
+
+export const recurringExpenses = sqliteTable(
+  "recurring_expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    kind: text("kind", {
+      enum: [
+        "emi",
+        "insurance",
+        "investment",
+        "subscription",
+        "tithe",
+        "children",
+        "other",
+      ],
+    })
+      .notNull()
+      .default("other"),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    interval: text("interval", { enum: ["monthly", "weekly", "yearly"] })
+      .notNull()
+      .default("monthly"),
+    startDate: text("start_date").notNull(), // ISO yyyy-mm-dd
+    endDate: text("end_date"), // nullable
+    dayOfMonth: integer("day_of_month"), // 1-28 for monthly
+    notes: text("notes"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_recurring_family_active").on(t.familyId, t.active),
+    index("idx_recurring_created_by").on(t.createdByUserId),
+  ],
+);
+
+// Deduplicate recurring-expense due reminders (periodKey = yyyy-mm / yyyy-Www / yyyy).
+export const recurringRemindersLog = sqliteTable(
+  "recurring_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    recurringId: text("recurring_id")
+      .notNull()
+      .references(() => recurringExpenses.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_recurring_reminder").on(
+      t.recurringId,
+      t.userId,
+      t.periodKey,
+      t.channel,
+    ),
+  ],
+);
+
+// ── Wishlist ─────────────────────────────────────────────────────────────────
+
+export const wishlistItems = sqliteTable(
+  "wishlist_items",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    estimatedMinor: integer("estimated_minor"),
+    currency: text("currency").notNull().default("USD"),
+    priority: text("priority", { enum: ["must", "should", "want"] })
+      .notNull()
+      .default("want"),
+    url: text("url"),
+    notes: text("notes"),
+    status: text("status", { enum: ["open", "bought", "dropped"] })
+      .notNull()
+      .default("open"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_wishlist_family_status").on(t.familyId, t.status),
+    index("idx_wishlist_created_by").on(t.createdByUserId),
   ],
 );

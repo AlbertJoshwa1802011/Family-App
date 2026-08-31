@@ -16,6 +16,8 @@ const prefsSchema = z.object({
   pushEnabled: z.boolean().optional(),
   // Lead-time windows in days; sanitized server-side before storage.
   windows: z.array(z.number().int().positive().max(365)).max(10).optional(),
+  // Optional override mailbox; null clears back to the account email.
+  reminderEmail: z.string().email().nullable().optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -111,6 +113,7 @@ notificationRoutes.get("/prefs", requireSession, async (c) => {
       emailEnabled: row?.emailEnabled ?? true,
       pushEnabled: row?.pushEnabled ?? false,
       windows: parseWindows(row?.windowsJson),
+      reminderEmail: row?.reminderEmail ?? null,
     },
   });
 });
@@ -135,19 +138,28 @@ notificationRoutes.put("/prefs", requireSession, zv(prefsSchema), async (c) => {
 
   const emailEnabled = updates.emailEnabled ?? existing?.emailEnabled ?? true;
   const pushEnabled = updates.pushEnabled ?? existing?.pushEnabled ?? false;
+  const reminderEmail =
+    updates.reminderEmail !== undefined
+      ? updates.reminderEmail
+      : (existing?.reminderEmail ?? null);
 
   if (existing) {
     await db
       .update(schema.reminderPrefs)
-      .set({ emailEnabled, pushEnabled, windowsJson })
+      .set({ emailEnabled, pushEnabled, windowsJson, reminderEmail })
       .where(eq(schema.reminderPrefs.userId, userId));
   } else {
     await db
       .insert(schema.reminderPrefs)
-      .values({ userId, emailEnabled, pushEnabled, windowsJson });
+      .values({ userId, emailEnabled, pushEnabled, windowsJson, reminderEmail });
   }
 
   return c.json({
-    prefs: { emailEnabled, pushEnabled, windows: parseWindows(windowsJson) },
+    prefs: {
+      emailEnabled,
+      pushEnabled,
+      windows: parseWindows(windowsJson),
+      reminderEmail,
+    },
   });
 });
