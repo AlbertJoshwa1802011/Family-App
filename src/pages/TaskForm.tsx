@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus,
@@ -279,24 +279,62 @@ function CollapsibleSection({
 
 /* ── Main Form ───────────────────────────────────────────────────────────────── */
 
+/**
+ * Loader shell: resolves the task being edited, then mounts the fields with
+ * their initial values already known. Seeding state from props (rather than
+ * syncing it in an effect) keeps a single render pass.
+ */
 export function TaskForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+
+  const { data: taskData, isLoading: isLoadingTask } = useQuery({
+    queryKey: ["task", id],
+    queryFn: () => api<{ task: TaskDetail }>(`/tasks/${id}`),
+    enabled: isEdit,
+  });
+
+  if (isEdit && isLoadingTask) {
+    return (
+      <>
+        <AppBar title="Edit task" back />
+        <Page className="space-y-4 py-6">
+          <Skeleton className="h-20 rounded-3xl" />
+          <Skeleton className="h-14 rounded-3xl" />
+          <Skeleton className="h-14 rounded-3xl" />
+          <Skeleton className="h-32 rounded-3xl" />
+        </Page>
+      </>
+    );
+  }
+
+  const task = taskData?.task ?? null;
+  return <TaskFormFields key={task?.id ?? "new"} id={id} task={task} />;
+}
+
+function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) {
+  const isEdit = Boolean(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { families } = useAuth();
-  const activeFamilyId = families[0]?.id;
+  const { activeFamilyId } = useAuth();
 
-  const [form, setForm] = useState<FormState>({
-    title: "",
-    notes: "",
-    assignedToMemberId: "",
-    dueDate: "",
-    referredTaskId: "",
-    reminderDate: "",
-    remindMemberId: "",
+  const [form, setForm] = useState<FormState>(() => ({
+    title: task?.title ?? "",
+    notes: task?.notes ?? "",
+    assignedToMemberId: task?.assignedToMemberId ?? "",
+    dueDate: task?.dueDate ?? "",
+    referredTaskId: task?.referredTaskId ?? "",
+    reminderDate: task?.reminderDate ?? "",
+    remindMemberId: task?.remindMemberId ?? "",
+  }));
+  const [subtasks, setSubtasks] = useState<Subtask[]>(() => {
+    if (!task?.subtasksJson) return [];
+    try {
+      return JSON.parse(task.subtasksJson) as Subtask[];
+    } catch {
+      return [];
+    }
   });
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Fetch family members for assignee / reminder-member pickers
@@ -315,36 +353,6 @@ export function TaskForm() {
       ),
   });
   const allTasks = (tasksData?.tasks ?? []).filter((t) => t.id !== id);
-
-  // Fetch task if editing
-  const { data: taskData, isLoading: isLoadingTask } = useQuery({
-    queryKey: ["task", id],
-    queryFn: () => api<{ task: TaskDetail }>(`/tasks/${id}`),
-    enabled: isEdit,
-  });
-
-  useEffect(() => {
-    if (taskData?.task) {
-      const task = taskData.task;
-      setForm({
-        title: task.title,
-        notes: task.notes ?? "",
-        assignedToMemberId: task.assignedToMemberId ?? "",
-        dueDate: task.dueDate ?? "",
-        referredTaskId: task.referredTaskId ?? "",
-        reminderDate: task.reminderDate ?? "",
-        remindMemberId: task.remindMemberId ?? "",
-      });
-      // Parse subtasks JSON
-      if (task.subtasksJson) {
-        try {
-          setSubtasks(JSON.parse(task.subtasksJson) as Subtask[]);
-        } catch {
-          setSubtasks([]);
-        }
-      }
-    }
-  }, [taskData]);
 
   const mutation = useMutation({
     mutationFn: (payload: object) =>
@@ -385,7 +393,7 @@ export function TaskForm() {
     e.preventDefault();
     if (!validate()) return;
 
-    const targetFamilyId = activeFamilyId || families[0]?.id;
+    const targetFamilyId = activeFamilyId;
     if (!targetFamilyId && !isEdit) {
       setErrors((prev) => ({ ...prev, title: "No active family found." }));
       return;
@@ -412,22 +420,6 @@ export function TaskForm() {
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) setErrors((e) => ({ ...e, [key]: "" }));
-  }
-
-  /* ── Loading State ─────────────────────────────────────────────────────────── */
-
-  if (isEdit && isLoadingTask) {
-    return (
-      <>
-        <AppBar title="Edit task" back />
-        <Page className="space-y-4 py-6">
-          <Skeleton className="h-20 rounded-3xl" />
-          <Skeleton className="h-14 rounded-3xl" />
-          <Skeleton className="h-14 rounded-3xl" />
-          <Skeleton className="h-32 rounded-3xl" />
-        </Page>
-      </>
-    );
   }
 
   /* ── Render ────────────────────────────────────────────────────────────────── */

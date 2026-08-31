@@ -87,6 +87,7 @@ const updateExpenseSchema = z.object({
 const createCategorySchema = z.object({
   familyId: z.string().min(1),
   name: z.string().min(1).max(80),
+  parentCategoryId: z.string().min(1).nullable().optional(),
   icon: z.string().max(40).optional().nullable(),
   color: z.string().max(20).optional().nullable(),
 });
@@ -205,8 +206,21 @@ expenseRoutes.get("/categories", requireSession, async (c) => {
     )
     .orderBy(schema.expenseCategories.name);
 
+  const decorated = rows.map((r) => ({ ...r, builtin: r.familyId === null }));
+  const roots = decorated.filter((r) => !r.parentCategoryId);
+  const childrenOf = new Map<string, typeof decorated>();
+  for (const r of decorated) {
+    if (!r.parentCategoryId) continue;
+    const list = childrenOf.get(r.parentCategoryId) ?? [];
+    list.push(r);
+    childrenOf.set(r.parentCategoryId, list);
+  }
+
   return c.json({
-    categories: rows.map((r) => ({ ...r, builtin: r.familyId === null })),
+    // Flat list for pickers that just need every option...
+    categories: decorated,
+    // ...and the tree for grouped display and grouped stats.
+    tree: roots.map((r) => ({ ...r, children: childrenOf.get(r.id) ?? [] })),
   });
 });
 
@@ -220,11 +234,41 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
   const db = getDb(c.env);
   await ensureBuiltinCategories(db);
 
+  if (data.parentCategoryId) {
+    const parent = await db
+      .select()
+      .from(schema.expenseCategories)
+      .where(eq(schema.expenseCategories.id, data.parentCategoryId))
+      .get();
+    // A parent must exist, be visible to this family (own or built-in), and be
+    // a root itself — nesting stops at one level so stats stay groupable.
+    const parentOk =
+      parent &&
+      (parent.familyId === null || parent.familyId === data.familyId) &&
+      parent.parentCategoryId === null;
+    if (!parentOk) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["parentCategoryId"],
+              message: "parent must be an existing top-level category in this family",
+            },
+          ],
+        },
+        400,
+      );
+    }
+  }
+
   const id = crypto.randomUUID();
   try {
     await db.insert(schema.expenseCategories).values({
       id,
       familyId: data.familyId,
+      parentCategoryId: data.parentCategoryId ?? null,
       name: data.name.trim(),
       icon: data.icon ?? null,
       color: data.color ?? null,

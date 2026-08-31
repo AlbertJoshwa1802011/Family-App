@@ -15,6 +15,7 @@ import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Fab } from "../components/ui/Fab";
 import { EmptyState } from "../components/ui/EmptyState";
+import { MoneySubNav } from "../components/money/MoneySubNav";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
@@ -274,8 +275,9 @@ export function Expenses() {
 
   return (
     <>
-      <AppBar title="Expenses" />
+      <AppBar title="Spending" />
       <Page width="list" className="space-y-4 pb-24">
+        <MoneySubNav />
         {/* Month navigation */}
         <div className="flex items-center justify-between gap-2">
           <button
@@ -404,7 +406,7 @@ export function Expenses() {
                     <button
                       key={e.id}
                       type="button"
-                      onClick={() => navigate(`/expenses/${e.id}`)}
+                      onClick={() => navigate(`/money/expenses/${e.id}`)}
                       className="flex w-full min-h-14 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5 active:bg-white/[0.07]"
                     >
                       <span
@@ -446,7 +448,7 @@ export function Expenses() {
         )}
       </Page>
 
-      <Fab icon={Plus} label="Add expense" onClick={() => navigate("/expenses/new")} />
+      <Fab icon={Plus} label="Add expense" onClick={() => navigate("/money/expenses/new")} />
     </>
   );
 }

@@ -16,6 +16,10 @@ const prefsSchema = z.object({
   pushEnabled: z.boolean().optional(),
   // Lead-time windows in days; sanitized server-side before storage.
   windows: z.array(z.number().int().positive().max(365)).max(10).optional(),
+  // Where reminders are delivered. Empty string or null clears the override and
+  // falls back to the account's sign-in address.
+  reminderEmail: z.union([z.string().email().max(320), z.literal(""), z.null()]).optional(),
+  digestEnabled: z.boolean().optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -111,6 +115,8 @@ notificationRoutes.get("/prefs", requireSession, async (c) => {
       emailEnabled: row?.emailEnabled ?? true,
       pushEnabled: row?.pushEnabled ?? false,
       windows: parseWindows(row?.windowsJson),
+      reminderEmail: row?.reminderEmail ?? null,
+      digestEnabled: row?.digestEnabled ?? true,
     },
   });
 });
@@ -135,19 +141,33 @@ notificationRoutes.put("/prefs", requireSession, zv(prefsSchema), async (c) => {
 
   const emailEnabled = updates.emailEnabled ?? existing?.emailEnabled ?? true;
   const pushEnabled = updates.pushEnabled ?? existing?.pushEnabled ?? false;
+  const digestEnabled = updates.digestEnabled ?? existing?.digestEnabled ?? true;
+  // "" is an explicit clear; undefined means "leave as is".
+  const reminderEmail =
+    updates.reminderEmail === undefined
+      ? (existing?.reminderEmail ?? null)
+      : updates.reminderEmail === "" || updates.reminderEmail === null
+        ? null
+        : updates.reminderEmail.trim().toLowerCase();
 
   if (existing) {
     await db
       .update(schema.reminderPrefs)
-      .set({ emailEnabled, pushEnabled, windowsJson })
+      .set({ emailEnabled, pushEnabled, windowsJson, reminderEmail, digestEnabled })
       .where(eq(schema.reminderPrefs.userId, userId));
   } else {
     await db
       .insert(schema.reminderPrefs)
-      .values({ userId, emailEnabled, pushEnabled, windowsJson });
+      .values({ userId, emailEnabled, pushEnabled, windowsJson, reminderEmail, digestEnabled });
   }
 
   return c.json({
-    prefs: { emailEnabled, pushEnabled, windows: parseWindows(windowsJson) },
+    prefs: {
+      emailEnabled,
+      pushEnabled,
+      windows: parseWindows(windowsJson),
+      reminderEmail,
+      digestEnabled,
+    },
   });
 });

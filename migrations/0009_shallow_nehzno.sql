@@ -1,0 +1,1 @@
+ALTER TABLE `commitment_payments` ADD `reminded_at` integer;

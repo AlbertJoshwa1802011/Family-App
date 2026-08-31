@@ -22,6 +22,7 @@ function isoDaysAhead(nowMs: number, daysAhead: number): string {
 /** A family member who is a real, notifiable user. */
 interface Recipient {
   userId: string;
+  /** Where mail actually goes: the reminder override if set, else the login address. */
   email: string;
   windows: number[];
   emailEnabled: boolean;
@@ -40,6 +41,7 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
       email: schema.users.email,
       windowsJson: schema.reminderPrefs.windowsJson,
       emailEnabled: schema.reminderPrefs.emailEnabled,
+      reminderEmail: schema.reminderPrefs.reminderEmail,
     })
     .from(schema.familyMembers)
     .innerJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
@@ -54,7 +56,9 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
 
   return rows.map((r) => ({
     userId: r.userId,
-    email: r.email,
+    // Deliver to the configured inbox when the member set one; the Google
+    // sign-in address is only the fallback.
+    email: r.reminderEmail ?? r.email,
     windows: parseWindows(r.windowsJson),
     // No prefs row → email defaults ON (matches reminder_prefs.emailEnabled default).
     emailEnabled: r.emailEnabled ?? true,

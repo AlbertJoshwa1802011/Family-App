@@ -23,6 +23,12 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Comma-separated emails bootstrapped as platform admins on first login. */
   PLATFORM_ADMIN_EMAILS?: string;
+  /** Google Gemini API key. Without it the assistant returns 501. */
+  GEMINI_API_KEY?: string;
+  /** Gemini model id. Overridable so the model can be changed without a deploy. */
+  GEMINI_MODEL?: string;
+  /** From-address for outbound mail. Must be on a domain verified with Resend. */
+  EMAIL_FROM?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

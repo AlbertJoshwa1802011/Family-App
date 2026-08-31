@@ -12,6 +12,7 @@ import {
   sqliteTable,
   text,
   unique,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 const now = sql`(unixepoch())`;
@@ -254,6 +255,13 @@ export const reminderPrefs = sqliteTable("reminder_prefs", {
     .notNull()
     .default(false),
   windowsJson: text("windows_json").notNull().default("[30,7,1]"),
+  // Where reminders are delivered. NULL = the account's sign-in address.
+  // Set this to route reminders to a different inbox than the Google login.
+  reminderEmail: text("reminder_email"),
+  // Monday morning digest of the week's money + expiries.
+  digestEnabled: integer("digest_enabled", { mode: "boolean" })
+    .notNull()
+    .default(true),
 });
 
 export const auditLog = sqliteTable(
@@ -845,6 +853,12 @@ export const expenseCategories = sqliteTable(
     familyId: text("family_id").references(() => families.id, {
       onDelete: "cascade",
     }),
+    // One level of nesting only: a child's parent must itself be a root.
+    // Enforced in app code (SQLite can't express it as a constraint).
+    parentCategoryId: text("parent_category_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+      { onDelete: "cascade" },
+    ),
     name: text("name").notNull(),
     icon: text("icon"),
     color: text("color"),
@@ -853,7 +867,7 @@ export const expenseCategories = sqliteTable(
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [
-    unique("uq_expense_category_name").on(t.familyId, t.name),
+    unique("uq_expense_category_name").on(t.familyId, t.parentCategoryId, t.name),
     index("idx_expense_category_family_archived").on(t.familyId, t.archived),
   ],
 );
@@ -914,5 +928,234 @@ export const expenses = sqliteTable(
     index("idx_expense_created_by").on(t.createdByUserId),
     index("idx_expense_paid_by").on(t.paidByMemberId),
     index("idx_expense_category").on(t.categoryId),
+  ],
+);
+
+// ── Financial plan ───────────────────────────────────────────────────────────
+// The money model behind the overview: what comes in (incomes), what is already
+// committed every period (commitments — EMIs, insurance, SIPs, giving), what is
+// being saved for (wishlist), and the targets that turn those into a spendable
+// allowance. Everything here follows the same privacy rule as expenses: owned by
+// the member who created it, private unless explicitly shared, no role bypass.
+
+export const incomes = sqliteTable(
+  "incomes",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    cadence: text("cadence", {
+      enum: ["monthly", "weekly", "biweekly", "yearly", "one_off"],
+    })
+      .notNull()
+      .default("monthly"),
+    // Which day the money lands — drives the "since payday" window.
+    dayOfMonth: integer("day_of_month"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_income_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_income_active").on(t.familyId, t.active),
+  ],
+);
+
+export const commitments = sqliteTable(
+  "commitments",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: [
+        "emi",
+        "loan",
+        "insurance",
+        "investment",
+        "subscription",
+        "giving",
+        "rent",
+        "utility",
+        "other",
+      ],
+    }).notNull(),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    // Giving (tithe, sponsorship) is usually a share of income rather than a
+    // fixed sum, so the amount can be expressed either way.
+    amountKind: text("amount_kind", { enum: ["fixed", "percent_of_income"] })
+      .notNull()
+      .default("fixed"),
+    amountMinor: integer("amount_minor"),
+    percentBp: integer("percent_bp"),
+    currency: text("currency").notNull(),
+    cadence: text("cadence", {
+      enum: ["weekly", "monthly", "quarterly", "yearly"],
+    })
+      .notNull()
+      .default("monthly"),
+    dayOfMonth: integer("day_of_month"),
+    dayOfWeek: integer("day_of_week"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    // For EMIs / fixed-term policies: the term length. Remaining installments
+    // are derived from this plus startDate, never stored (it can't drift).
+    totalInstallments: integer("total_installments"),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    // When true the cron records the expense automatically on the due date.
+    autoLog: integer("auto_log", { mode: "boolean" }).notNull().default(false),
+    remindDaysBefore: integer("remind_days_before").notNull().default(3),
+    status: text("status", { enum: ["active", "paused", "completed"] })
+      .notNull()
+      .default("active"),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_commitment_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_commitment_status").on(t.familyId, t.status),
+    index("idx_commitment_kind").on(t.familyId, t.kind),
+  ],
+);
+
+// One row per commitment per period. Doubles as the cron's dedupe key (so a
+// re-run can't double-log) and as the paid/unpaid ledger the UI reads.
+export const commitmentPayments = sqliteTable(
+  "commitment_payments",
+  {
+    id: text("id").primaryKey(),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    // yyyy-mm for monthly, yyyy-Www for weekly, yyyy-Qn / yyyy for the rest.
+    periodKey: text("period_key").notNull(),
+    dueDate: text("due_date").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    paid: integer("paid", { mode: "boolean" }).notNull().default(false),
+    paidAt: integer("paid_at"),
+    // Set when the due-date reminder went out. Doubles as the cron's dedupe
+    // flag, so a re-run on the same day can't re-notify.
+    remindedAt: integer("reminded_at"),
+    expenseId: text("expense_id").references(() => expenses.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_commitment_period").on(t.commitmentId, t.periodKey),
+    index("idx_commitment_payment_due").on(t.dueDate, t.paid),
+  ],
+);
+
+// Per-user planning knobs. Composite key: settings are per member per family.
+export const financialSettings = sqliteTable(
+  "financial_settings",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // How the savings goal is expressed.
+    savingsTargetKind: text("savings_target_kind", {
+      enum: ["none", "amount", "percent"],
+    })
+      .notNull()
+      .default("none"),
+    savingsTargetMinor: integer("savings_target_minor"),
+    savingsTargetPercentBp: integer("savings_target_percent_bp"),
+    // The day the monthly cycle restarts — usually payday, not the 1st.
+    paydayDayOfMonth: integer("payday_day_of_month").notNull().default(1),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.familyId] })],
+);
+
+export const categoryBudgets = sqliteTable(
+  "category_budgets",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => expenseCategories.id, { onDelete: "cascade" }),
+    monthlyLimitMinor: integer("monthly_limit_minor").notNull(),
+    currency: text("currency").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [unique("uq_category_budget").on(t.userId, t.categoryId)],
+);
+
+export const wishlistItems = sqliteTable(
+  "wishlist_items",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    url: text("url"),
+    estimatedCostMinor: integer("estimated_cost_minor").notNull(),
+    currency: text("currency").notNull(),
+    // 1 = highest. A small fixed scale keeps sorting meaningful.
+    priority: integer("priority").notNull().default(3),
+    targetDate: text("target_date"),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    status: text("status", {
+      enum: ["wanted", "saving", "purchased", "dropped"],
+    })
+      .notNull()
+      .default("wanted"),
+    purchasedExpenseId: text("purchased_expense_id").references(
+      () => expenses.id,
+      { onDelete: "set null" },
+    ),
+    purchasedAt: integer("purchased_at"),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_wishlist_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_wishlist_status_priority").on(t.familyId, t.status, t.priority),
   ],
 );

@@ -17,7 +17,11 @@ import { adminRoutes } from "./routes/admin";
 import { vaultRoutes } from "./routes/vault";
 import { itemsRoutes } from "./routes/items";
 import { expenseRoutes } from "./routes/expenses";
+import { financeRoutes } from "./routes/finance";
+import { wishlistRoutes } from "./routes/wishlist";
+import { assistantRoutes } from "./routes/assistant";
 import { runExpiryReminders } from "./cron";
+import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
 
@@ -61,6 +65,9 @@ api.route("/admin", adminRoutes);
 api.route("/vault", vaultRoutes);
 api.route("/items", itemsRoutes);
 api.route("/expenses", expenseRoutes);
+api.route("/finance", financeRoutes);
+api.route("/wishlist", wishlistRoutes);
+api.route("/assistant", assistantRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
@@ -86,13 +93,16 @@ export default {
   fetch: app.fetch,
 
   // Daily maintenance cron (see wrangler.jsonc triggers.crons):
-  // expiry/event reminders + expired-session purge.
+  // expiry/event reminders, commitment due dates, and the session purge.
+  // This is the only thing that makes reminders independent of app usage —
+  // it runs on Cloudflare's schedule whether or not anyone visits the site.
   async scheduled(
     _event: ScheduledController,
     env: HonoEnv["Bindings"],
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(runExpiryReminders(env));
+    ctx.waitUntil(runCommitmentReminders(env));
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;

@@ -20,6 +20,6 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/", label: "Home", icon: Home },
   { path: "/vault", label: "Vault", icon: Shield, matchPrefix: "/vault" },
   { path: "/documents", label: "Docs", icon: FileText, matchPrefix: "/documents" },
-  { path: "/expenses", label: "Expenses", icon: Wallet, matchPrefix: "/expenses" },
+  { path: "/money", label: "Money", icon: Wallet, matchPrefix: "/money" },
   { path: "/family", label: "Family", icon: Users, matchPrefix: "/family" },
 ];

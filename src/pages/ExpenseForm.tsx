@@ -180,7 +180,7 @@ function ExpenseFormFields({
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["expenses"] });
-      navigate("/expenses", { replace: true });
+      navigate("/money/expenses", { replace: true });
     },
     onError: (e: unknown) => {
       setFormError(

@@ -57,7 +57,7 @@ export function ExpenseDetail() {
     mutationFn: () => api(`/expenses/${id}`, { method: "DELETE" }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["expenses"] });
-      navigate("/expenses", { replace: true });
+      navigate("/money/expenses", { replace: true });
     },
   });
 
@@ -163,7 +163,7 @@ export function ExpenseDetail() {
               variant="secondary"
               fullWidth
               leadingIcon={<Pencil className="size-4" />}
-              onClick={() => navigate(`/expenses/${e.id}/edit`)}
+              onClick={() => navigate(`/money/expenses/${e.id}/edit`)}
             >
               Edit
             </Button>

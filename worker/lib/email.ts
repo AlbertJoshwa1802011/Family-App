@@ -11,8 +11,19 @@ import type { Env } from "../types";
 
 const RESEND_API = "https://api.resend.com/emails";
 
-/** From-address for all Family Vault mail. */
-const FROM = "Family Vault <reminders@familyvault.app>";
+/**
+ * From-address for all Family Vault mail.
+ *
+ * This CANNOT be an arbitrary personal address (a Gmail account, say): Resend
+ * only accepts a From on a domain you have verified with them via DNS. Set
+ * EMAIL_FROM to an address on your verified domain; the default is a
+ * placeholder and will be rejected until that domain is verified.
+ */
+const DEFAULT_FROM = "Family Vault <reminders@familyvault.app>";
+
+function fromAddress(env: Env): string {
+  return env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+}
 
 export function isEmailConfigured(env: Env): boolean {
   return Boolean(env.RESEND_API_KEY);
@@ -42,7 +53,7 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: FROM,
+        from: fromAddress(env),
         to: msg.to,
         subject: msg.subject,
         html: msg.html,

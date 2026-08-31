@@ -74,11 +74,42 @@ If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` 
    (e.g. removing a family), write **explicit multi-statement deletes in app code** + a test.
    Do not rely on DB-level `ON DELETE` for correctness.
 
-9. **Every new route or feature must have corresponding test cases and updated `.md` documentation files.** Never deploy or complete a change without:
+9. **Money is private to its owner, with NO owner/admin bypass.** Documents let owners and
+   admins see private rows; expenses, income, commitments and wishlist items do **not**.
+   Personal finances are the one place a family role must not unlock, so
+   `worker/lib/expenses/visibility.ts` and the finance routes check `createdByUserId` /
+   `ownerUserId` only. Hidden rows return **404, never 403**. Tests pin this — do not
+   "align" it with the documents rule.
+
+10. **Committed money is counted once.** `commitment_payments.expense_id` links an
+   auto-logged expense back to its commitment, and `buildPlan()` excludes those ids from
+   discretionary spend. Skipping that double-counts every EMI.
+
+11. **Every new route or feature must have corresponding test cases and updated `.md` documentation files.** Never deploy or complete a change without:
    - Adding or extending contract, security, and validation tests in the test suite (e.g., in `tests/vault.test.ts` or `tests/worker-extended.test.ts`).
    - Documenting the new feature's design, roadmap, or architectural decisions in the relevant markdown files (e.g., `docs/PLAN.md`, `docs/ARCHITECTURE.md`, or `CLAUDE.md` itself) so future agents have full context.
 
 ---
+
+## 2.5 The money model (Phase 7)
+
+`worker/lib/finance/` is pure and DB-free so the arithmetic can be tested hard:
+
+- **`periods.ts`** — pay cycles, week slicing, due-date schedules. All ISO `yyyy-mm-dd`
+  compared at **UTC midnight**. `addMonths` clamps (Jan 31 + 1mo = Feb 28), and a
+  cycle is named for the month it *starts* in, so with payday=25 the 25 Aug–24 Sep
+  window is `2026-08`.
+- **`plan.ts`** — the identity everything else derives from:
+
+      spendable = income − committed − savingsTarget
+      remaining = spendable − discretionary spend
+
+  `percent_of_income` commitments (tithe, sponsorship) resolve against that cycle's
+  income, so giving scales with what was actually earned.
+- **`commitmentCron.ts`** — the daily sweep. Idempotent via the unique
+  `(commitment_id, period_key)` index; `reminded_at` prevents re-notifying.
+
+Reminders run from `scheduled()` on Cloudflare's cron, **never** on app open.
 
 ## 3. Conventions
 
@@ -178,7 +209,10 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **182 tests across 10 files**, all green.
+same depth. Current baseline: **403+ tests across 23 files**, all green. `tests/helpers/testEnv.ts`
+runs the real generated migrations against in-memory `node:sqlite` behind a D1-compatible
+adapter, so route tests exercise the actual routes → drizzle → SQL path. Prefer it over
+mocks for anything touching authorization or money arithmetic.
 
 Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
 timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
@@ -218,17 +252,21 @@ worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
   cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
-  db/schema.ts          ★ single source of truth for all 34 tables (21 original + 13 v2: vault×8, items×2, ops×3)
+  db/schema.ts          ★ single source of truth for all 43 tables
+  lib/finance/          periods.ts (cycle/schedule maths), plan.ts (the money model),
+                        commitmentCron.ts (daily due-date sweep + auto-log)
+  lib/ai/gemini.ts      Gemini function-calling client (tools execute server-side)
   lib/                   crypto, session, audit (ACTIONS map + audit() helper), drive, reminders, email (Resend), notify
-  routes/               auth, families, documents, notifications, events, tasks, contacts, activity
+  routes/               auth, families, documents, notifications, events, tasks, contacts,
+                        activity, expenses, finance, wishlist, assistant
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
   components/ui/         Button, Card, Badge, ListItem, AppBar, Fab, EmptyState, Skeleton, Avatar...
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
-  pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
-                         Tasks, Contacts, Family, Settings, Login, NotFound
+  pages/                 Dashboard, Documents, Calendar, Tasks, Contacts, Family, Settings, Vault,
+                         Expenses (the ledger), money/ (Overview, Commitments, Wishlist, MoneySettings)
 migrations/             generated SQL (0000–0004) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
 docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT, SHIPPING

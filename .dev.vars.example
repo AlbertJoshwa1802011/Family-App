@@ -12,5 +12,16 @@ GOOGLE_OWNER_REFRESH_TOKEN=""
 # Resend API key for transactional / reminder emails.
 RESEND_API_KEY=""
 
+# From-address for outbound mail. MUST be on a domain you have verified with
+# Resend — you cannot send "from" a personal Gmail/Outlook address. The
+# recipient is configured per user in the app (Money settings → Reminder emails).
+EMAIL_FROM="Family Vault <reminders@yourverifieddomain.com>"
+
+# Google Gemini API key for the in-app money assistant.
+# Without this the assistant is hidden in the UI and /api/assistant/chat returns 501.
+GEMINI_API_KEY=""
+# Optional: pin a specific Gemini model. Defaults to gemini-2.0-flash.
+GEMINI_MODEL=""
+
 # Secret used to sign sessions and hash invite tokens (use a long random value).
 SESSION_SECRET=""

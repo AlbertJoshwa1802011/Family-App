@@ -57,6 +57,20 @@
       "when": 1788199450186,
       "tag": "0007_easy_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788200740657,
+      "tag": "0008_even_skaar",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788201176213,
+      "tag": "0009_shallow_nehzno",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,11 @@ import { AdminStorage } from "./pages/admin/Storage";
 import { Expenses } from "./pages/Expenses";
 import { ExpenseForm } from "./pages/ExpenseForm";
 import { ExpenseDetail } from "./pages/ExpenseDetail";
+import { MoneyOverview } from "./pages/money/Overview";
+import { Commitments } from "./pages/money/Commitments";
+import { CommitmentForm } from "./pages/money/CommitmentForm";
+import { Wishlist } from "./pages/money/Wishlist";
+import { MoneySettings } from "./pages/money/MoneySettings";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
@@ -63,11 +68,21 @@ export default function App() {
           <Route path="/vault/:id" element={<VaultItemDetail />} />
           <Route path="/vault/:id/edit" element={<VaultItemForm />} />
 
-          {/* Expenses */}
-          <Route path="/expenses" element={<Expenses />} />
-          <Route path="/expenses/new" element={<ExpenseForm />} />
-          <Route path="/expenses/:id" element={<ExpenseDetail />} />
-          <Route path="/expenses/:id/edit" element={<ExpenseForm />} />
+          {/* Money — one section: the plan, the ledger, commitments, wishlist */}
+          <Route path="/money" element={<MoneyOverview />} />
+          <Route path="/money/settings" element={<MoneySettings />} />
+          <Route path="/money/expenses" element={<Expenses />} />
+          <Route path="/money/expenses/new" element={<ExpenseForm />} />
+          <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
+          <Route path="/money/expenses/:id/edit" element={<ExpenseForm />} />
+          <Route path="/money/commitments" element={<Commitments />} />
+          <Route path="/money/commitments/new" element={<CommitmentForm />} />
+          <Route path="/money/commitments/:id/edit" element={<CommitmentForm />} />
+          <Route path="/money/wishlist" element={<Wishlist />} />
+
+          {/* Legacy expense paths, kept so existing links and bookmarks work. */}
+          <Route path="/expenses" element={<Navigate to="/money/expenses" replace />} />
+          <Route path="/expenses/new" element={<Navigate to="/money/expenses/new" replace />} />
 
           {/* Documents */}
           <Route path="/documents" element={<Documents />} />
