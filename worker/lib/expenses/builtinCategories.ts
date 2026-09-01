@@ -5,13 +5,15 @@
  * upserted idempotently on first read without a data migration. Custom
  * family categories are created via the categories API (admin+).
  *
- * Decision (E1): seed 18 household-oriented built-ins covering the fast-entry
- * grocery/rent/utilities cases in the product brief. Icons are lucide names
- * for the SPA; color is an optional accent hint. Built-ins cannot be archived
- * in V1 (no per-family hide table — deferred §25).
+ * Decision (E1): seed household-oriented built-ins covering the fast-entry
+ * grocery/rent/utilities cases in the product brief, plus giving / EMI /
+ * investments. Icons are lucide names for the SPA; color is an optional accent
+ * hint. Built-ins cannot be archived in V1 (no per-family hide table —
+ * deferred §25). One level of nesting is supported via parentCategoryId
+ * (e.g. Fuel under Transport).
  */
 
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { schema } from "../../db/client";
 
@@ -20,13 +22,21 @@ export type BuiltinCategoryDef = {
   name: string;
   icon: string;
   color: string;
+  /** Optional parent among the builtins (one level of nesting only). */
+  parentCategoryId?: string | null;
 };
 
 export const BUILTIN_EXPENSE_CATEGORIES: readonly BuiltinCategoryDef[] = [
   { id: "builtin_groceries", name: "Groceries", icon: "ShoppingCart", color: "#16a34a" },
   { id: "builtin_dining", name: "Dining out", icon: "Utensils", color: "#ea580c" },
   { id: "builtin_transport", name: "Transport", icon: "Bus", color: "#2563eb" },
-  { id: "builtin_fuel", name: "Fuel", icon: "Fuel", color: "#ca8a04" },
+  {
+    id: "builtin_fuel",
+    name: "Fuel",
+    icon: "Fuel",
+    color: "#ca8a04",
+    parentCategoryId: "builtin_transport",
+  },
   { id: "builtin_housing", name: "Housing", icon: "Home", color: "#7c3aed" },
   { id: "builtin_utilities", name: "Utilities", icon: "Zap", color: "#0891b2" },
   { id: "builtin_internet", name: "Internet & phone", icon: "Wifi", color: "#4f46e5" },
@@ -39,6 +49,20 @@ export const BUILTIN_EXPENSE_CATEGORIES: readonly BuiltinCategoryDef[] = [
   { id: "builtin_travel", name: "Travel", icon: "Plane", color: "#0284c7" },
   { id: "builtin_personal_care", name: "Personal care", icon: "Sparkles", color: "#d97706" },
   { id: "builtin_gifts", name: "Gifts & donations", icon: "Gift", color: "#e11d48" },
+  { id: "builtin_tithe", name: "Tithe", icon: "HeartHandshake", color: "#be123c" },
+  {
+    id: "builtin_children",
+    name: "Children & family help",
+    icon: "Users",
+    color: "#db2777",
+  },
+  {
+    id: "builtin_investments",
+    name: "Investments",
+    icon: "TrendingUp",
+    color: "#059669",
+  },
+  { id: "builtin_emi", name: "EMI & loans", icon: "Landmark", color: "#b45309" },
   { id: "builtin_fees", name: "Fees & charges", icon: "Receipt", color: "#57534e" },
   { id: "builtin_other", name: "Other", icon: "CircleDot", color: "#64748b" },
 ] as const;
@@ -47,6 +71,8 @@ export const BUILTIN_EXPENSE_CATEGORIES: readonly BuiltinCategoryDef[] = [
  * Ensure all built-in categories exist. Idempotent — safe to call on every
  * categories list/create. Uses stable primary keys; does not update names of
  * rows that already exist (avoids silently renaming user-visible labels).
+ * Parent links for known nesting (e.g. Fuel → Transport) are backfilled when
+ * still null so already-seeded DBs pick up the hierarchy.
  */
 export async function ensureBuiltinCategories(db: Db): Promise<void> {
   const ids = BUILTIN_EXPENSE_CATEGORIES.map((c) => c.id);
@@ -56,16 +82,32 @@ export async function ensureBuiltinCategories(db: Db): Promise<void> {
     .where(inArray(schema.expenseCategories.id, ids));
   const have = new Set(existing.map((r) => r.id));
   const missing = BUILTIN_EXPENSE_CATEGORIES.filter((c) => !have.has(c.id));
-  if (missing.length === 0) return;
 
-  await db.insert(schema.expenseCategories).values(
-    missing.map((c) => ({
-      id: c.id,
-      familyId: null,
-      name: c.name,
-      icon: c.icon,
-      color: c.color,
-      archived: false,
-    })),
-  );
+  if (missing.length > 0) {
+    await db.insert(schema.expenseCategories).values(
+      missing.map((c) => ({
+        id: c.id,
+        familyId: null,
+        parentCategoryId: c.parentCategoryId ?? null,
+        name: c.name,
+        icon: c.icon,
+        color: c.color,
+        archived: false,
+      })),
+    );
+  }
+
+  // Backfill parent links on already-seeded rows that predate nesting.
+  for (const c of BUILTIN_EXPENSE_CATEGORIES) {
+    if (!c.parentCategoryId) continue;
+    await db
+      .update(schema.expenseCategories)
+      .set({ parentCategoryId: c.parentCategoryId })
+      .where(
+        and(
+          eq(schema.expenseCategories.id, c.id),
+          isNull(schema.expenseCategories.parentCategoryId),
+        ),
+      );
+  }
 }

@@ -13,6 +13,7 @@ import {
   LogOut,
   Settings as SettingsIcon,
   Users,
+  Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar } from "./ui/Avatar";
@@ -30,6 +31,7 @@ interface MenuLink {
 
 // Destinations that aren't primary nav tabs live here, so the tab bar stays at five.
 const LINKS: MenuLink[] = [
+  { to: "/money", label: "Money", icon: Wallet },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/tasks", label: "Tasks", icon: ListTodo },
