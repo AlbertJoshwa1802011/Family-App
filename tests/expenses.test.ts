@@ -123,15 +123,29 @@ describe("expenses: creation", () => {
     expect(body.error).toBe("validation_error");
   });
 
-  it("rejects a non-positive amount", async () => {
+  it("rejects a negative amount", async () => {
     const { env, familyId, alice } = setup();
     const res = await post(
       env,
       "/api/expenses",
       alice.cookie,
-      expensePayload(familyId, alice.memberId, { amountMinor: 0 }),
+      expensePayload(familyId, alice.memberId, { amountMinor: -1 }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("allows a zero amount for container parents", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 0,
+        merchant: "Google Pay",
+      }),
+    );
+    expect(res.status).toBe(201);
   });
 
   it("rejects a malformed date", async () => {
@@ -385,4 +399,150 @@ describe("expenses: auth", () => {
       expect(res.status).toBe(401);
     });
   }
+});
+
+describe("expenses: nesting", () => {
+  it("creates a child under a parent and rolls up on list/detail", async () => {
+    const { env, familyId, alice } = setup();
+    const parent = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 0,
+          merchant: "Google Pay",
+        }),
+      )
+    ).json()) as ExpenseBody & {
+      expense: { id: string; nestDepth: number; childCount: number };
+    };
+    expect(parent.expense.nestDepth).toBe(0);
+
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 400,
+        merchant: "Coffee",
+        parentExpenseId: parent.expense.id,
+      }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 600,
+        merchant: "Lunch",
+        parentExpenseId: parent.expense.id,
+      }),
+    );
+
+    const list = (await (
+      await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)
+    ).json()) as {
+      expenses: {
+        id: string;
+        childCount: number;
+        childrenTotalMinor: number;
+        merchant: string | null;
+      }[];
+      totalMinor: number;
+    };
+    // Roots only — the two children are hidden from the default list.
+    expect(list.expenses).toHaveLength(1);
+    expect(list.expenses[0].id).toBe(parent.expense.id);
+    expect(list.expenses[0].childCount).toBe(2);
+    expect(list.expenses[0].childrenTotalMinor).toBe(1000);
+    // Leaf-only total (children), not double-counting the 0 parent.
+    expect(list.totalMinor).toBe(1000);
+
+    const detail = (await (
+      await get(env, `/api/expenses/${parent.expense.id}`, alice.cookie)
+    ).json()) as {
+      expense: { childCount: number; childrenTotalMinor: number };
+      children: { merchant: string | null }[];
+    };
+    expect(detail.expense.childCount).toBe(2);
+    expect(detail.expense.childrenTotalMinor).toBe(1000);
+    expect(detail.children.map((c) => c.merchant).sort()).toEqual(["Coffee", "Lunch"]);
+  });
+
+  it("refuses nesting deeper than grandchild (depth 2)", async () => {
+    const { env, familyId, alice } = setup();
+    const root = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, { amountMinor: 0, merchant: "Root" }),
+      )
+    ).json()) as ExpenseBody;
+    const child = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 0,
+          merchant: "Child",
+          parentExpenseId: root.expense.id,
+        }),
+      )
+    ).json()) as ExpenseBody;
+    const grand = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 100,
+          merchant: "Grand",
+          parentExpenseId: child.expense.id,
+        }),
+      )
+    ).json()) as ExpenseBody & { expense: { nestDepth: number } };
+    expect(grand.expense.nestDepth).toBe(2);
+
+    const tooDeep = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 50,
+        parentExpenseId: grand.expense.id,
+      }),
+    );
+    expect(tooDeep.status).toBe(400);
+  });
+});
+
+describe("expenses: categories", () => {
+  it("GET categories returns non-empty builtins", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      categories: { id: string; name: string }[];
+      tree: { id: string; children: unknown[] }[];
+    };
+    expect(body.categories.length).toBeGreaterThan(5);
+    expect(body.categories.some((c) => c.id.startsWith("builtin_"))).toBe(true);
+    const groceries = body.tree.find((t) => t.id === "builtin_groceries");
+    expect(groceries?.children.length).toBeGreaterThan(0);
+  });
+
+  it("lets a non-admin member create a family category", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(env, "/api/expenses/categories", alice.cookie, {
+      familyId,
+      name: "School lunch",
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { category: { name: string; builtin: boolean } };
+    expect(body.category.name).toBe("School lunch");
+    expect(body.category.builtin).toBe(false);
+  });
 });

@@ -926,6 +926,15 @@ export const expenses = sqliteTable(
     categoryId: text("category_id").references(() => expenseCategories.id, {
       onDelete: "set null",
     }),
+    // Nested expenses: Google Pay (root) → individual spends (children).
+    // Depths 0 (root), 1 (child), 2 (grandchild). Enforced in app code —
+    // parent.nestDepth must be < 2 when attaching. Cascade delete removes
+    // the whole subtree when a parent is hard-deleted (soft-trash is app-level).
+    parentExpenseId: text("parent_expense_id").references(
+      (): AnySQLiteColumn => expenses.id,
+      { onDelete: "cascade" },
+    ),
+    nestDepth: integer("nest_depth").notNull().default(0),
     amountMinor: integer("amount_minor").notNull(),
     currency: text("currency").notNull(),
     expenseDate: text("expense_date").notNull(),
@@ -964,6 +973,7 @@ export const expenses = sqliteTable(
     index("idx_expense_created_by").on(t.createdByUserId),
     index("idx_expense_paid_by").on(t.paidByMemberId),
     index("idx_expense_category").on(t.categoryId),
+    index("idx_expense_parent").on(t.parentExpenseId),
   ],
 );
 
@@ -1193,5 +1203,144 @@ export const wishlistItems = sqliteTable(
   (t) => [
     index("idx_wishlist_family_owner").on(t.familyId, t.ownerUserId),
     index("idx_wishlist_status_priority").on(t.familyId, t.status, t.priority),
+  ],
+);
+
+// ── Church / collection funds (manual audit ledger) ──────────────────────────
+// Sensitive shared pots (e.g. Razorpay offerings): contributions land in a
+// member's bank; spends happen during the month; month-start settle reconciles.
+// All amounts are amountMinor; payer names are free-text for now (optional
+// member link). Settlements snapshot a period and refuse duplicates.
+
+export const fundAccounts = sqliteTable(
+  "fund_accounts",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    currency: text("currency").notNull(),
+    notes: text("notes"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_accounts_family_status").on(t.familyId, t.status),
+  ],
+);
+
+export const fundContributions = sqliteTable(
+  "fund_contributions",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // Free-text payer for church collections; optional member link when known.
+    payerName: text("payer_name").notNull(),
+    payerMemberId: text("payer_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    paidAt: integer("paid_at").notNull(),
+    note: text("note"),
+    externalRef: text("external_ref"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_contrib_fund_paid").on(t.fundId, t.paidAt),
+    index("idx_fund_contrib_family").on(t.familyId),
+  ],
+);
+
+export const fundSpends = sqliteTable(
+  "fund_spends",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    spendDate: text("spend_date").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_spends_fund_date").on(t.fundId, t.spendDate),
+    index("idx_fund_spends_family").on(t.familyId),
+  ],
+);
+
+export const fundSettlements = sqliteTable(
+  "fund_settlements",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // yyyy-mm — one settlement snapshot per fund per calendar month.
+    periodKey: text("period_key").notNull(),
+    contributionsMinor: integer("contributions_minor").notNull(),
+    spendsMinor: integer("spends_minor").notNull(),
+    remainingMinor: integer("remaining_minor").notNull(),
+    settledAt: integer("settled_at").notNull(),
+    settledByUserId: text("settled_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_fund_settlement_period").on(t.fundId, t.periodKey),
+    index("idx_fund_settlements_family").on(t.familyId),
+  ],
+);
+
+export const fundActivity = sqliteTable(
+  "fund_activity",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    metaJson: text("meta_json"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_activity_fund_created").on(t.fundId, t.createdAt),
   ],
 );

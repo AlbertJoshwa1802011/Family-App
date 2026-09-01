@@ -617,12 +617,13 @@ financeRoutes.get("/overview", requireSession, async (c) => {
   const windowFrom = cycles[0].from;
   const windowTo = cycle.to;
 
-  const expenseRows = await db
+  const expenseRowsRaw = await db
     .select({
       id: schema.expenses.id,
       amountMinor: schema.expenses.amountMinor,
       expenseDate: schema.expenses.expenseDate,
       categoryId: schema.expenses.categoryId,
+      parentExpenseId: schema.expenses.parentExpenseId,
     })
     .from(schema.expenses)
     .where(
@@ -637,6 +638,21 @@ financeRoutes.get("/overview", requireSession, async (c) => {
         lte(schema.expenses.expenseDate, windowTo),
       ),
     );
+
+  // Nested containers (parents with children) must not inflate spend totals.
+  const expenseParentIds = new Set(
+    expenseRowsRaw
+      .map((r) => r.parentExpenseId)
+      .filter((v): v is string => v !== null),
+  );
+  const expenseRows = expenseRowsRaw
+    .filter((r) => !expenseParentIds.has(r.id))
+    .map(({ id, amountMinor, expenseDate, categoryId }) => ({
+      id,
+      amountMinor,
+      expenseDate,
+      categoryId,
+    }));
 
   // Expenses the cron already logged for a commitment — excluded from
   // discretionary spend so committed money is never counted twice.

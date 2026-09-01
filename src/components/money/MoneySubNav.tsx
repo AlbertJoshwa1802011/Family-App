@@ -4,13 +4,14 @@ import { cn } from "../../lib/cn";
 /**
  * Section nav for the Money area.
  *
- * Money is one destination with four views rather than four tabs, which keeps
- * the bottom bar at five and keeps the plan, the ledger, the commitments and
- * the wishlist feeling like one thing.
+ * Money is one destination with several views rather than many tabs, which
+ * keeps the bottom bar at five and keeps the plan, the ledger, funds,
+ * commitments and the wishlist feeling like one thing.
  */
 const LINKS = [
   { to: "/money", label: "Overview", end: true },
   { to: "/money/expenses", label: "Spending" },
+  { to: "/money/funds", label: "Funds" },
   { to: "/money/commitments", label: "Committed" },
   { to: "/money/wishlist", label: "Wishlist" },
 ];

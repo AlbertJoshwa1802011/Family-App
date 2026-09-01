@@ -1,18 +1,39 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Lock, Pencil, Trash2, Users, Wallet } from "lucide-react";
+import {
+  CalendarDays,
+  Lock,
+  Pencil,
+  Plus,
+  Trash2,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { Fab } from "../components/ui/Fab";
 import { Modal } from "../components/ui/Modal";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError } from "../lib/api";
 import { formatMoney } from "../lib/money";
+
+interface ExpenseChild {
+  id: string;
+  amountMinor: number;
+  currency: string;
+  expenseDate: string;
+  merchant: string | null;
+  description: string | null;
+  childCount: number;
+  childrenTotalMinor: number;
+  category: { id: string; name: string; color: string | null } | null;
+}
 
 interface ExpenseDetailResponse {
   expense: {
@@ -26,8 +47,12 @@ interface ExpenseDetailResponse {
     visibility: "family" | "private";
     createdByUserId: string;
     createdAt: number;
+    nestDepth: number;
+    childCount: number;
+    childrenTotalMinor: number;
     category: { id: string; name: string; color: string | null } | null;
   };
+  children: ExpenseChild[];
 }
 
 function fullDate(iso: string): string {
@@ -38,6 +63,17 @@ function fullDate(iso: string): string {
     month: "long",
     year: "numeric",
   }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+function displayAmount(e: {
+  amountMinor: number;
+  childCount: number;
+  childrenTotalMinor: number;
+  currency: string;
+}): string {
+  const minor =
+    e.childCount > 0 ? e.childrenTotalMinor : e.amountMinor;
+  return formatMoney(minor, e.currency);
 }
 
 export function ExpenseDetail() {
@@ -97,16 +133,24 @@ export function ExpenseDetail() {
   }
 
   const e = data.expense;
+  const children = data.children ?? [];
   const isMine = e.createdByUserId === user?.id;
+  const canAddChild = e.nestDepth < 2 && isMine;
 
   return (
     <>
       <AppBar title="Expense" back />
-      <Page className="space-y-4">
+      <Page className="space-y-4 pb-24">
         <Card className="p-5">
           <p className="text-3xl font-bold tabular-nums text-fg">
-            {formatMoney(e.amountMinor, e.currency)}
+            {displayAmount(e)}
           </p>
+          {e.childCount > 0 && e.amountMinor > 0 && e.amountMinor !== e.childrenTotalMinor && (
+            <p className="mt-0.5 text-xs text-fg-subtle">
+              Own amount {formatMoney(e.amountMinor, e.currency)} · rollup from{" "}
+              {e.childCount} sub-expense{e.childCount === 1 ? "" : "s"}
+            </p>
+          )}
           <p className="mt-1 text-sm text-fg-muted">
             {e.merchant || e.description || "Expense"}
           </p>
@@ -157,6 +201,58 @@ export function ExpenseDetail() {
           )}
         </Card>
 
+        {(children.length > 0 || canAddChild) && (
+          <Card className="overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3">
+              <h2 className="text-sm font-semibold text-fg">
+                Sub-expenses
+                {children.length > 0 ? ` (${children.length})` : ""}
+              </h2>
+              {canAddChild && (
+                <Button
+                  variant="secondary"
+                  leadingIcon={<Plus className="size-3.5" />}
+                  onClick={() => navigate(`/money/expenses/new?parentId=${e.id}`)}
+                >
+                  Add
+                </Button>
+              )}
+            </div>
+            {children.length === 0 ? (
+              <p className="border-t border-line px-4 py-3 text-xs text-fg-subtle">
+                No sub-expenses yet. Add spends under this container for a clear rollup.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line border-t border-line">
+                {children.map((child) => (
+                  <li key={child.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/money/expenses/${child.id}`)}
+                      className="flex w-full min-h-12 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-fg">
+                          {child.merchant || child.description || "Sub-expense"}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-fg-subtle">
+                          {child.category?.name ?? "Uncategorized"}
+                          {child.childCount > 0
+                            ? ` · ${child.childCount} nested`
+                            : ""}
+                        </span>
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums text-fg">
+                        {displayAmount(child)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
+
         {isMine ? (
           <div className="flex gap-2">
             <Button
@@ -183,6 +279,14 @@ export function ExpenseDetail() {
         )}
       </Page>
 
+      {canAddChild && (
+        <Fab
+          icon={Plus}
+          label="Add sub-expense"
+          onClick={() => navigate(`/money/expenses/new?parentId=${e.id}`)}
+        />
+      )}
+
       <Modal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
@@ -204,8 +308,11 @@ export function ExpenseDetail() {
         }
       >
         <p className="text-sm text-fg-muted">
-          {formatMoney(e.amountMinor, e.currency)}
+          {displayAmount(e)}
           {e.merchant ? ` at ${e.merchant}` : ""} will be removed from your expenses.
+          {e.childCount > 0
+            ? " Sub-expenses under it will be removed too."
+            : ""}
         </p>
       </Modal>
     </>

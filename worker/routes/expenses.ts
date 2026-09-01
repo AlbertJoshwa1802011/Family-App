@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema, type Db } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -57,7 +57,8 @@ const createExpenseSchema = z.object({
   paidByMemberId: z.string().min(1),
   categoryId: z.string().min(1).optional().nullable(),
   subjectMemberId: z.string().min(1).optional().nullable(),
-  amountMinor: z.number().int().positive().lt(MAX_AMOUNT_MINOR),
+  // 0 allowed for container parents whose money lives on children.
+  amountMinor: z.number().int().nonnegative().lt(MAX_AMOUNT_MINOR),
   currency: currencyCode,
   expenseDate: isoDate,
   merchant: z.string().max(200).optional().nullable(),
@@ -65,6 +66,7 @@ const createExpenseSchema = z.object({
   paymentMethod: z.string().max(100).optional().nullable(),
   splitType: z.literal("none").default("none"),
   visibility: z.enum(["family", "private"]).optional().default("private"),
+  parentExpenseId: z.string().min(1).optional().nullable(),
   clientRequestId: z.string().uuid().optional(),
   participants: z.array(z.unknown()).max(0).optional(),
 });
@@ -73,7 +75,7 @@ const updateExpenseSchema = z.object({
   paidByMemberId: z.string().min(1).optional(),
   categoryId: z.string().min(1).nullable().optional(),
   subjectMemberId: z.string().min(1).nullable().optional(),
-  amountMinor: z.number().int().positive().lt(MAX_AMOUNT_MINOR).optional(),
+  amountMinor: z.number().int().nonnegative().lt(MAX_AMOUNT_MINOR).optional(),
   currency: currencyCode.optional(),
   expenseDate: isoDate.optional(),
   merchant: z.string().max(200).nullable().optional(),
@@ -83,6 +85,9 @@ const updateExpenseSchema = z.object({
   splitType: z.literal("none").optional(),
   participants: z.array(z.unknown()).max(0).optional(),
 });
+
+/** Max nestDepth for a parent when attaching a child (child becomes depth+1 ≤ 2). */
+const MAX_PARENT_NEST_DEPTH = 1;
 
 const createCategorySchema = z.object({
   familyId: z.string().min(1),
@@ -136,26 +141,41 @@ async function assertUsableCategory(
   return null;
 }
 
-async function serializeExpense(db: Db, expense: ExpenseRow) {
-  let category: {
+type SerializedExpense = ExpenseRow & {
+  participants: [];
+  category: {
     id: string;
     name: string;
     icon: string | null;
     color: string | null;
-  } | null = null;
-  if (expense.categoryId) {
-    category =
-      (await db
-        .select({
-          id: schema.expenseCategories.id,
-          name: schema.expenseCategories.name,
-          icon: schema.expenseCategories.icon,
-          color: schema.expenseCategories.color,
-        })
-        .from(schema.expenseCategories)
-        .where(eq(schema.expenseCategories.id, expense.categoryId))
-        .get()) ?? null;
-  }
+  } | null;
+  scope: "personal" | "shared";
+  childCount: number;
+  childrenTotalMinor: number;
+};
+
+async function loadCategoryMeta(db: Db, categoryId: string | null) {
+  if (!categoryId) return null;
+  return (
+    (await db
+      .select({
+        id: schema.expenseCategories.id,
+        name: schema.expenseCategories.name,
+        icon: schema.expenseCategories.icon,
+        color: schema.expenseCategories.color,
+      })
+      .from(schema.expenseCategories)
+      .where(eq(schema.expenseCategories.id, categoryId))
+      .get()) ?? null
+  );
+}
+
+async function serializeExpense(
+  db: Db,
+  expense: ExpenseRow,
+  rollup?: { childCount: number; childrenTotalMinor: number },
+): Promise<SerializedExpense> {
+  const category = await loadCategoryMeta(db, expense.categoryId);
   return {
     ...expense,
     participants: [] as [],
@@ -163,7 +183,61 @@ async function serializeExpense(db: Db, expense: ExpenseRow) {
     scope: (expense.splitType === "none" ? "personal" : "shared") as
       | "personal"
       | "shared",
+    childCount: rollup?.childCount ?? 0,
+    childrenTotalMinor: rollup?.childrenTotalMinor ?? 0,
   };
+}
+
+/**
+ * Build direct-child rollups for a set of expenses already filtered by
+ * visibility. childrenTotalMinor is the leaf-sum under each parent (so a
+ * mid-level container with grandchildren still reports real money).
+ */
+function buildChildRollups(rows: ExpenseRow[]): Map<
+  string,
+  { childCount: number; childrenTotalMinor: number }
+> {
+  const byParent = new Map<string, ExpenseRow[]>();
+  for (const r of rows) {
+    if (!r.parentExpenseId) continue;
+    const list = byParent.get(r.parentExpenseId) ?? [];
+    list.push(r);
+    byParent.set(r.parentExpenseId, list);
+  }
+
+  const cache = new Map<string, number>();
+  function leafSum(id: string): number {
+    const hit = cache.get(id);
+    if (hit !== undefined) return hit;
+    const kids = byParent.get(id);
+    if (!kids || kids.length === 0) {
+      const self = rows.find((r) => r.id === id);
+      const v = self?.amountMinor ?? 0;
+      cache.set(id, v);
+      return v;
+    }
+    const v = kids.reduce((s, k) => s + leafSum(k.id), 0);
+    cache.set(id, v);
+    return v;
+  }
+
+  const out = new Map<string, { childCount: number; childrenTotalMinor: number }>();
+  for (const [parentId, kids] of byParent) {
+    out.set(parentId, {
+      childCount: kids.length,
+      childrenTotalMinor: kids.reduce((s, k) => s + leafSum(k.id), 0),
+    });
+  }
+  return out;
+}
+
+/** Ids that appear as a parent of at least one row — used to sum leaves only. */
+function parentIdsOf(rows: ExpenseRow[]): Set<string> {
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (r.parentExpenseId) ids.add(r.parentExpenseId);
+  }
+  return ids;
 }
 
 function financialActorError(
@@ -228,7 +302,9 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId, "admin");
+  // Any family member may create categories so the expense form can add them
+  // inline. Archive remains admin+ (see /categories/:id/archive).
+  const membership = await requireFamilyMember(c, data.familyId);
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -407,8 +483,24 @@ expenseRoutes.get("/", requireSession, async (c) => {
     .where(where)
     .orderBy(desc(schema.expenses.expenseDate), desc(sql`expenses.rowid`));
 
-  const expenses = await Promise.all(rows.map((r) => serializeExpense(db, r)));
-  const totalMinor = rows.reduce((sum, r) => sum + r.amountMinor, 0);
+  const includeChildren = c.req.query("includeChildren") === "1";
+  const rollups = buildChildRollups(rows);
+  const parents = parentIdsOf(rows);
+
+  // Default list shows roots only; ?includeChildren=1 returns the full tree flat.
+  const visible = includeChildren
+    ? rows
+    : rows.filter((r) => r.parentExpenseId == null);
+
+  const expenses = await Promise.all(
+    visible.map((r) => serializeExpense(db, r, rollups.get(r.id))),
+  );
+
+  // Totals count leaf amounts once — parents with children are containers.
+  const totalMinor = rows
+    .filter((r) => !parents.has(r.id))
+    .reduce((sum, r) => sum + r.amountMinor, 0);
+
   return c.json({ expenses, totalMinor });
 });
 
@@ -582,6 +674,51 @@ expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
     if (catErr) return catErr;
   }
 
+  let nestDepth = 0;
+  let parentExpenseId: string | null = null;
+  if (data.parentExpenseId) {
+    const parent = await loadExpense(db, data.parentExpenseId);
+    if (
+      !parent ||
+      parent.status === "trashed" ||
+      parent.familyId !== data.familyId
+    ) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["parentExpenseId"],
+              message: "parent expense must be an active expense in this family",
+            },
+          ],
+        },
+        400,
+      );
+    }
+    if (isExpenseHiddenFrom(parent, userId)) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (parent.nestDepth > MAX_PARENT_NEST_DEPTH) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["parentExpenseId"],
+              message: "nesting is limited to 3 layers (root → child → grandchild)",
+            },
+          ],
+        },
+        400,
+      );
+    }
+    parentExpenseId = parent.id;
+    nestDepth = parent.nestDepth + 1;
+  }
+
   const expenseId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
@@ -593,6 +730,8 @@ expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
       paidByMemberId: data.paidByMemberId,
       subjectMemberId: data.subjectMemberId ?? null,
       categoryId: data.categoryId ?? null,
+      parentExpenseId,
+      nestDepth,
       amountMinor: data.amountMinor,
       currency: data.currency,
       expenseDate: data.expenseDate,
@@ -639,6 +778,8 @@ expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
       currency: data.currency,
       splitType: "none",
       visibility: data.visibility ?? "private",
+      parentExpenseId,
+      nestDepth,
     },
   });
 
@@ -701,10 +842,12 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
 
   const rows = await db
     .select({
+      id: schema.expenses.id,
       amountMinor: schema.expenses.amountMinor,
       expenseDate: schema.expenses.expenseDate,
       categoryId: schema.expenses.categoryId,
       visibility: schema.expenses.visibility,
+      parentExpenseId: schema.expenses.parentExpenseId,
     })
     .from(schema.expenses)
     .where(where);
@@ -712,13 +855,22 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
   // Aggregate in the Worker rather than SQL: the row counts here are per-family
   // per-period (hundreds, not millions), and this keeps one code path for the
   // category/month/visibility rollups instead of three GROUP BY round-trips.
+  // Leaf-only totals: parents with children are containers (don't double-count).
+  const parentIds = new Set<string>();
+  for (const r of rows) {
+    if (r.parentExpenseId) parentIds.add(r.parentExpenseId);
+  }
+
   let totalMinor = 0;
   const byCategoryMap = new Map<string, { categoryId: string | null; totalMinor: number; count: number }>();
   const byMonthMap = new Map<string, number>();
   let privateMinor = 0;
   let sharedMinor = 0;
+  let leafCount = 0;
 
   for (const r of rows) {
+    if (parentIds.has(r.id)) continue; // skip container parents
+    leafCount += 1;
     totalMinor += r.amountMinor;
 
     const key = r.categoryId ?? "__uncategorized__";
@@ -777,7 +929,7 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
     view,
     currency: family?.defaultCurrency ?? "USD",
     totalMinor,
-    count: rows.length,
+    count: leafCount,
     privateMinor,
     sharedMinor,
     byCategory,
@@ -802,7 +954,37 @@ expenseRoutes.get("/:id", requireSession, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  return c.json({ expense: await serializeExpense(db, expense) });
+  const childRows = await db
+    .select()
+    .from(schema.expenses)
+    .where(
+      and(
+        eq(schema.expenses.parentExpenseId, id),
+        ne(schema.expenses.status, "trashed"),
+        or(
+          eq(schema.expenses.visibility, "family"),
+          eq(schema.expenses.createdByUserId, userId),
+        ),
+      ),
+    )
+    .orderBy(desc(schema.expenses.expenseDate), desc(sql`expenses.rowid`));
+
+  // Rollups need the broader visible set under this family so grandchild
+  // leaf-sums are correct when a child is itself a container.
+  const familyVisible = await db
+    .select()
+    .from(schema.expenses)
+    .where(expenseVisibilityWhere(expense.familyId, userId));
+  const rollups = buildChildRollups(familyVisible);
+
+  const children = await Promise.all(
+    childRows.map((r) => serializeExpense(db, r, rollups.get(r.id))),
+  );
+
+  return c.json({
+    expense: await serializeExpense(db, expense, rollups.get(expense.id)),
+    children,
+  });
 });
 
 expenseRoutes.patch("/:id", requireSession, zv(updateExpenseSchema), async (c) => {
@@ -942,6 +1124,41 @@ expenseRoutes.delete("/:id", requireSession, async (c) => {
     .update(schema.expenses)
     .set({ status: "trashed", trashedAt: now, updatedAt: now })
     .where(eq(schema.expenses.id, id));
+
+  // Soft-trash direct descendants so they don't become unreachable orphans
+  // (list hides non-roots; a trashed parent would otherwise strand them).
+  await db
+    .update(schema.expenses)
+    .set({ status: "trashed", trashedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(schema.expenses.parentExpenseId, id),
+        ne(schema.expenses.status, "trashed"),
+      ),
+    );
+
+  // Grandchildren (depth 2) whose parent was just trashed.
+  const trashedChildren = await db
+    .select({ id: schema.expenses.id })
+    .from(schema.expenses)
+    .where(
+      and(
+        eq(schema.expenses.parentExpenseId, id),
+        eq(schema.expenses.status, "trashed"),
+        eq(schema.expenses.trashedAt, now),
+      ),
+    );
+  for (const child of trashedChildren) {
+    await db
+      .update(schema.expenses)
+      .set({ status: "trashed", trashedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(schema.expenses.parentExpenseId, child.id),
+          ne(schema.expenses.status, "trashed"),
+        ),
+      );
+  }
 
   await insertAuditEvent(db, {
     familyId: expense.familyId,
