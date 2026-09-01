@@ -13,8 +13,22 @@
  */
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
+import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
+import type { Env } from "../worker/types";
 
-// ── 1. /api/events — 401 without session ─────────────────────────────────────
+const ORIGIN = "http://localhost:5173";
+
+function authed(env: Env, method: string, path: string, cookie: string, body?: unknown) {
+  return app.request(
+    path,
+    {
+      method,
+      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: ORIGIN },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    env,
+  );
+}
 
 describe("/api/events: 401 without session", () => {
   const protectedRoutes = [
@@ -145,5 +159,40 @@ describe("/api/tasks and /api/contacts: security headers", () => {
   it("GET /api/contacts has x-content-type-options: nosniff (even on 401)", async () => {
     const res = await app.request("/api/contacts");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+});
+
+// ── Nested attendees on GET /events/:id ───────────────────────────────────────
+
+describe("GET /api/events/:id nested attendees", () => {
+  it("returns attendees nested on event.attendees", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    const bob = seedActor(sqlite, family.id, "member", { name: "Bob" });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Dinner",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+      attendeeMemberIds: [alice.memberId, bob.memberId],
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as { event: { id: string } };
+
+    const get = await authed(env, "GET", `/api/events/${created.event.id}`, alice.cookie);
+    expect(get.status).toBe(200);
+    const body = (await get.json()) as {
+      event: { attendees: { memberId: string; name: string | null }[] };
+      attendees: unknown[];
+    };
+    expect(Array.isArray(body.event.attendees)).toBe(true);
+    expect(body.event.attendees).toHaveLength(2);
+    expect(body.event.attendees.map((a) => a.memberId).sort()).toEqual(
+      [alice.memberId, bob.memberId].sort(),
+    );
+    // Top-level key kept for backward compatibility.
+    expect(Array.isArray(body.attendees)).toBe(true);
   });
 });

@@ -62,6 +62,8 @@ export const familyMembers = sqliteTable(
     // Used when userId is null (dependent). For 'user' members the name comes from users.name.
     displayName: text("display_name"),
     dateOfBirth: text("date_of_birth"), // ISO yyyy-mm-dd, optional (useful for children)
+    // Wedding / relationship anniversary — ISO yyyy-mm-dd, optional.
+    anniversaryDate: text("anniversary_date"),
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
@@ -750,6 +752,40 @@ export const itemRemindersLog = sqliteTable(
     unique("uq_item_reminder").on(
       t.itemId,
       t.userId,
+      t.windowDays,
+      t.channel,
+    ),
+  ],
+);
+
+/**
+ * Dedupe log for birthday / anniversary reminder emails.
+ * Keyed by (memberId, kind, year, windowDays, channel) so each window fires once
+ * per calendar year per member.
+ */
+export const lifeEventRemindersLog = sqliteTable(
+  "life_event_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => familyMembers.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // "birthday" | "anniversary"
+    kind: text("kind").notNull(),
+    // Calendar year of the occurrence we reminded about (e.g. 2026).
+    occurrenceYear: integer("occurrence_year").notNull(),
+    windowDays: integer("window_days").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_life_event_reminder").on(
+      t.memberId,
+      t.kind,
+      t.occurrenceYear,
       t.windowDays,
       t.channel,
     ),

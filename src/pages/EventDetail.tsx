@@ -55,9 +55,17 @@ export function EventDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["events", id],
-    queryFn: () => api<{ event: EventDetail }>(`/events/${id}`),
+    queryFn: async () => {
+      // API may return attendees nested on `event` or as a sibling key.
+      const res = await api<{
+        event: EventDetail & { attendees?: Attendee[] };
+        attendees?: Attendee[];
+      }>(`/events/${id}`);
+      const attendees = res.event.attendees ?? res.attendees ?? [];
+      return { event: { ...res.event, attendees } };
+    },
     enabled: Boolean(id),
   });
 
@@ -92,9 +100,27 @@ export function EventDetailPage() {
   }
 
   const ev = data?.event;
-  if (!ev) return null;
+  if (isError || !ev) {
+    return (
+      <>
+        <AppBar title="Event" back />
+        <Page className="space-y-4">
+          <Card className="space-y-3 p-4">
+            <p className="text-sm font-semibold text-fg">Couldn’t open this event</p>
+            <p className="text-sm text-fg-muted">
+              {error instanceof Error ? error.message : "It may have been deleted, or the link is stale."}
+            </p>
+            <Button variant="secondary" fullWidth onClick={() => navigate("/calendar", { replace: true })}>
+              Back to calendar
+            </Button>
+          </Card>
+        </Page>
+      </>
+    );
+  }
 
   const colors = eventTypeColor(ev.type);
+  const attendees = ev.attendees ?? [];
 
   return (
     <>
@@ -152,15 +178,15 @@ export function EventDetailPage() {
         </Card>
 
         {/* Attendees */}
-        {ev.attendees.length > 0 && (
+        {attendees.length > 0 && (
           <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
               <Users className="size-3.5" />
-              Attendees ({ev.attendees.length})
+              Attendees ({attendees.length})
             </h3>
             <Card className="p-3">
               <div className="flex flex-wrap gap-3">
-                {ev.attendees.map((a) => (
+                {attendees.map((a) => (
                   <div key={a.memberId} className="flex items-center gap-2">
                     <Avatar
                       name={a.name}

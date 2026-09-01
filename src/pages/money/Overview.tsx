@@ -1,13 +1,15 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDownRight,
   ArrowUpRight,
   HandCoins,
   PiggyBank,
+  Plus,
   Repeat,
   Settings2,
+  Sparkles,
   TrendingUp,
   Wallet,
 } from "lucide-react";
@@ -74,8 +76,6 @@ function Figure({
 
 // ---------------------------------------------------------------------------
 // Where the money goes: one bar split into committed / saved / spent / left.
-// A single 100% bar reads faster than four numbers when the question is
-// "what proportion of my pay is already gone".
 // ---------------------------------------------------------------------------
 
 function AllocationBar({ data, currency }: { data: OverviewData; currency: string }) {
@@ -96,7 +96,6 @@ function AllocationBar({ data, currency }: { data: OverviewData; currency: strin
   return (
     <Card className="p-4">
       <h2 className="text-sm font-semibold text-fg">Where this month's money goes</h2>
-      {/* 2px gaps between segments keep the boundaries legible. */}
       <div className="mt-3 flex h-3 gap-0.5 overflow-hidden rounded-full">
         {segments.map((s) => (
           <span
@@ -106,8 +105,6 @@ function AllocationBar({ data, currency }: { data: OverviewData; currency: strin
           />
         ))}
       </div>
-      {/* One row per segment: at phone width a two-column legend clipped the
-          longest label, and a truncated money label is worse than a taller card. */}
       <ul className="mt-3 space-y-1.5">
         {segments.map((s) => (
           <li key={s.key} className="flex items-center justify-between gap-3">
@@ -125,10 +122,6 @@ function AllocationBar({ data, currency }: { data: OverviewData; currency: strin
   );
 }
 
-// ---------------------------------------------------------------------------
-// Weekly spending within the cycle — the "each and every week" view.
-// ---------------------------------------------------------------------------
-
 function WeeklyBars({
   weeks,
   currency,
@@ -136,7 +129,6 @@ function WeeklyBars({
 }: {
   weeks: OverviewData["plan"]["weeks"];
   currency: string;
-  /** Weekly budget line, if there's a plan to compare against. */
   paceMinor: number | null;
 }) {
   const max = Math.max(...weeks.map((w) => w.spentMinor), paceMinor ?? 0, 1);
@@ -193,10 +185,6 @@ function WeeklyBars({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Long-run trend: income vs spend per cycle.
-// ---------------------------------------------------------------------------
-
 function TrendChart({
   trend,
   currency,
@@ -229,7 +217,6 @@ function TrendChart({
           </div>
         ))}
       </div>
-      {/* Two series, so a legend is required — colour alone never carries identity. */}
       <div className="mt-3 flex items-center gap-4">
         <span className="flex items-center gap-1.5 text-[11px] text-fg-muted">
           <span className="size-2 rounded-full bg-vault-500/40" aria-hidden="true" /> Income
@@ -239,6 +226,141 @@ function TrendChart({
         </span>
       </div>
     </Card>
+  );
+}
+
+const glassBubble =
+  "rounded-[28px] border border-white/15 bg-white/8 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl";
+
+interface Suggestion {
+  label: string;
+  merchant: string | null;
+  categoryId: string | null;
+  amountMinor: number;
+}
+
+function LikelyThisWeek({
+  familyId,
+  currency,
+}: {
+  familyId: string;
+  currency: string;
+}) {
+  const navigate = useNavigate();
+  const q = useQuery({
+    queryKey: ["expenses", "suggestions", familyId],
+    queryFn: () =>
+      api<{ suggestions: Suggestion[]; basedOn: string }>(
+        `/expenses/suggestions?familyId=${familyId}`,
+      ),
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className={cn(glassBubble, "p-4")}>
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="mt-3 h-10 w-full" />
+      </div>
+    );
+  }
+
+  const suggestions = q.data?.suggestions ?? [];
+  if (suggestions.length === 0) return null;
+
+  return (
+    <div className={cn(glassBubble, "overflow-hidden")}>
+      <div className="px-4 pt-4 pb-2">
+        <h2 className="text-sm font-semibold text-fg">Likely this week</h2>
+        <p className="text-xs text-fg-muted">Based on your past months</p>
+      </div>
+      <ul className="divide-y divide-white/10">
+        {suggestions.map((s) => {
+          const params = new URLSearchParams();
+          params.set("amount", String(s.amountMinor / 100));
+          if (s.merchant) params.set("merchant", s.merchant);
+          if (s.categoryId) params.set("categoryId", s.categoryId);
+          return (
+            <li key={s.label} className="flex items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-fg">{s.label}</p>
+                <p className="text-xs text-fg-subtle">
+                  {formatMoney(s.amountMinor, currency)}
+                </p>
+              </div>
+              <Button
+                size="md"
+                variant="secondary"
+                onClick={() => navigate(`/money/expenses/new?${params.toString()}`)}
+              >
+                Add
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function PrimaryCtas({
+  thisWeekMinor,
+  currency,
+}: {
+  thisWeekMinor: number | null;
+  currency: string;
+}) {
+  const navigate = useNavigate();
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => navigate("/money/expenses/new")}
+          className={cn(
+            glassBubble,
+            "flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]",
+          )}
+        >
+          <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
+            <Plus className="size-5" aria-hidden="true" />
+          </span>
+          <span className="mt-1 text-base font-semibold text-fg">Add expense</span>
+          <span className="text-[11px] text-fg-muted">Log what you spent</span>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            window.dispatchEvent(new CustomEvent("family-vault:open-assistant"))
+          }
+          className={cn(
+            glassBubble,
+            "flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]",
+          )}
+        >
+          <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
+            <Sparkles className="size-5" aria-hidden="true" />
+          </span>
+          <span className="mt-1 text-base font-semibold text-fg">Ask AI</span>
+          <span className="text-[11px] text-fg-muted">Capture by chat</span>
+        </button>
+      </div>
+
+      {thisWeekMinor !== null && (
+        <Link
+          to="/money/expenses"
+          className={cn(
+            glassBubble,
+            "flex min-h-11 items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/10",
+          )}
+        >
+          <span className="text-sm text-fg-muted">This week</span>
+          <span className="text-sm font-semibold tabular-nums text-fg">
+            {formatMoney(thisWeekMinor, currency)}
+          </span>
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -255,6 +377,21 @@ export function MoneyOverview() {
     enabled: Boolean(activeFamilyId),
   });
 
+  const currency = data?.currency ?? "USD";
+  const plan = data?.plan;
+  const status = plan ? statusMeta(plan.status) : null;
+
+  const paceMinor =
+    plan && plan.spendableMinor > 0 && plan.weeks.length > 0
+      ? Math.round(plan.spendableMinor / plan.weeks.length)
+      : null;
+
+  const thisWeekMinor = useMemo(() => {
+    if (!plan?.weeks?.length) return null;
+    const week = plan.weeks.find((w) => today >= w.from && today <= w.to);
+    return week?.spentMinor ?? plan.weeks[plan.weeks.length - 1]?.spentMinor ?? null;
+  }, [plan, today]);
+
   if (!activeFamilyId) {
     return (
       <>
@@ -265,16 +402,6 @@ export function MoneyOverview() {
       </>
     );
   }
-
-  const currency = data?.currency ?? "USD";
-  const plan = data?.plan;
-  const status = plan ? statusMeta(plan.status) : null;
-
-  // Weekly pace: what's spendable spread evenly over the cycle's weeks.
-  const paceMinor =
-    plan && plan.spendableMinor > 0 && plan.weeks.length > 0
-      ? Math.round(plan.spendableMinor / plan.weeks.length)
-      : null;
 
   return (
     <>
@@ -300,28 +427,31 @@ export function MoneyOverview() {
               <Skeleton className="mt-3 h-9 w-44" />
             </Card>
             <div className="grid grid-cols-2 gap-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="p-4">
-                  <Skeleton className="h-3 w-16" />
-                  <Skeleton className="mt-2 h-6 w-24" />
-                </Card>
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className={cn(glassBubble, "p-4")}>
+                  <Skeleton className="h-10 w-10 rounded-2xl" />
+                  <Skeleton className="mt-3 h-4 w-24" />
+                </div>
               ))}
             </div>
           </>
         ) : plan.incomeMinor === 0 ? (
-          <EmptyState
-            icon={Wallet}
-            title="Add your income to see the plan"
-            description="Once Family Vault knows what comes in, it can show what's committed, what you can spend, and what's left."
-            action={
-              <Button onClick={() => (window.location.href = "/money/settings")}>
-                Set up my money
-              </Button>
-            }
-          />
+          <>
+            <PrimaryCtas thisWeekMinor={thisWeekMinor} currency={currency} />
+            <EmptyState
+              icon={Wallet}
+              title="Add your income to see the plan"
+              description="Once Family Vault knows what comes in, it can show what's committed, what you can spend, and what's left."
+              action={
+                <Button onClick={() => (window.location.href = "/money/settings")}>
+                  Set up my money
+                </Button>
+              }
+            />
+            <LikelyThisWeek familyId={activeFamilyId} currency={currency} />
+          </>
         ) : (
           <>
-            {/* Headline: what's actually left to spend. */}
             <Card className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -360,6 +490,10 @@ export function MoneyOverview() {
                 </div>
               )}
             </Card>
+
+            <PrimaryCtas thisWeekMinor={thisWeekMinor} currency={currency} />
+
+            <LikelyThisWeek familyId={activeFamilyId} currency={currency} />
 
             <div className="grid grid-cols-2 gap-3">
               <Figure label="Income" amountMinor={plan.incomeMinor} currency={currency} icon={ArrowUpRight} tone="positive" />

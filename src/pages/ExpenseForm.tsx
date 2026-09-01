@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, Users } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
@@ -100,21 +100,33 @@ function ExpenseFormFields({
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { activeFamilyId, user } = useAuth();
+  const [searchParams] = useSearchParams();
 
   const [today] = useState(() => todayIsoDate());
   // One id per form instance makes a double-submit idempotent server-side.
   const [clientRequestId] = useState(() => crypto.randomUUID());
 
-  const currency = existing?.currency ?? "USD";
+  const settingsQ = useQuery({
+    queryKey: ["finance", "settings", activeFamilyId],
+    queryFn: () =>
+      api<{ currency: string }>(`/finance/settings?familyId=${activeFamilyId}`),
+    enabled: Boolean(activeFamilyId) && !existing,
+  });
 
-  const [amount, setAmount] = useState(() =>
-    existing ? formatMajorFromMinor(existing.amountMinor, existing.currency) : "",
-  );
+  const currency = existing?.currency ?? settingsQ.data?.currency ?? "USD";
+
+  const [amount, setAmount] = useState(() => {
+    if (existing) return formatMajorFromMinor(existing.amountMinor, existing.currency);
+    const fromQuery = searchParams.get("amount");
+    return fromQuery && /^\d+(\.\d+)?$/.test(fromQuery) ? fromQuery : "";
+  });
   const [expenseDate, setExpenseDate] = useState(() => existing?.expenseDate ?? today);
-  const [merchant, setMerchant] = useState(() => existing?.merchant ?? "");
+  const [merchant, setMerchant] = useState(
+    () => existing?.merchant ?? searchParams.get("merchant") ?? "",
+  );
   const [description, setDescription] = useState(() => existing?.description ?? "");
   const [categoryId, setCategoryId] = useState<string | null>(
-    () => existing?.categoryId ?? null,
+    () => existing?.categoryId ?? searchParams.get("categoryId") ?? null,
   );
   const [visibility, setVisibility] = useState<"family" | "private">(
     () => existing?.visibility ?? "private",

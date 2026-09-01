@@ -13,6 +13,7 @@ import {
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
 import { reminderEmailHtml, sendEmail } from "./lib/email";
+import { upcomingLifeEvents, type LifeEventCandidate } from "./lib/lifeEvents";
 
 /** ISO yyyy-mm-dd `daysAhead` days from the instant `nowMs` (UTC). */
 function isoDaysAhead(nowMs: number, daysAhead: number): string {
@@ -347,4 +348,145 @@ async function unrecordReminder(
         ),
       );
   }
+}
+
+const LIFE_EVENT_WINDOWS = [7, 1, 0];
+const LIFE_EVENT_SCAN_DAYS = 7;
+
+/**
+ * Birthday / anniversary emails for the next 7 days.
+ * One email per (member, kind, year, window, channel) via life_event_reminders_log.
+ */
+export async function runLifeEventReminders(env: Env): Promise<void> {
+  const db = getDb(env);
+  const nowMs = Date.now();
+  const appUrl = env.APP_URL ?? "";
+  let emailsSent = 0;
+
+  const members = await db
+    .select({
+      id: schema.familyMembers.id,
+      familyId: schema.familyMembers.familyId,
+      displayName: schema.familyMembers.displayName,
+      dateOfBirth: schema.familyMembers.dateOfBirth,
+      anniversaryDate: schema.familyMembers.anniversaryDate,
+      userName: schema.users.name,
+      status: schema.familyMembers.status,
+    })
+    .from(schema.familyMembers)
+    .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
+    .where(eq(schema.familyMembers.status, "active"));
+
+  const byFamily = new Map<string, typeof members>();
+  for (const m of members) {
+    const list = byFamily.get(m.familyId) ?? [];
+    list.push(m);
+    byFamily.set(m.familyId, list);
+  }
+
+  for (const [familyId, famMembers] of byFamily) {
+    const candidates = upcomingLifeEvents(
+      famMembers.map((m) => ({
+        id: m.id,
+        name: m.displayName || m.userName || "Family member",
+        dateOfBirth: m.dateOfBirth,
+        anniversaryDate: m.anniversaryDate,
+      })),
+      nowMs,
+      LIFE_EVENT_SCAN_DAYS,
+    );
+    if (candidates.length === 0) continue;
+
+    let recipients: Recipient[];
+    try {
+      recipients = await loadRecipients(db, familyId);
+    } catch (err) {
+      console.error(`[cron] life-event recipients for ${familyId} failed:`, err);
+      continue;
+    }
+
+    for (const ev of candidates) {
+      const window = dueReminderWindow(ev.daysUntil, LIFE_EVENT_WINDOWS);
+      if (window === null) continue;
+
+      for (const r of recipients) {
+        if (!r.emailEnabled) continue;
+        try {
+          const claimed = await recordLifeEventOnce(db, {
+            memberId: ev.memberId,
+            userId: r.userId,
+            kind: ev.kind,
+            occurrenceYear: ev.occurrenceYear,
+            windowDays: window,
+            channel: "email",
+          });
+          if (!claimed) continue;
+
+          const kindLabel = ev.kind === "birthday" ? "birthday" : "anniversary";
+          const when =
+            ev.daysUntil === 0
+              ? "today"
+              : ev.daysUntil === 1
+                ? "tomorrow"
+                : `in ${ev.daysUntil} days`;
+          const ok = await sendEmail(env, {
+            to: r.email,
+            subject: `${ev.name}'s ${kindLabel} is ${when}`,
+            html: reminderEmailHtml({
+              heading: `${ev.name}'s ${kindLabel}`,
+              body: `${ev.name}'s ${kindLabel} is ${when} (${ev.nextDate}). Any gift commitment?`,
+              ctaLabel: "Open Money",
+              ctaUrl: appUrl ? `${appUrl}/money` : "https://familyvault.app/money",
+            }),
+          });
+          if (ok) emailsSent++;
+          else {
+            await db
+              .delete(schema.lifeEventRemindersLog)
+              .where(
+                and(
+                  eq(schema.lifeEventRemindersLog.memberId, ev.memberId),
+                  eq(schema.lifeEventRemindersLog.userId, r.userId),
+                  eq(schema.lifeEventRemindersLog.kind, ev.kind),
+                  eq(schema.lifeEventRemindersLog.occurrenceYear, ev.occurrenceYear),
+                  eq(schema.lifeEventRemindersLog.windowDays, window),
+                  eq(schema.lifeEventRemindersLog.channel, "email"),
+                ),
+              );
+          }
+        } catch (err) {
+          console.error(`[cron] life-event ${ev.memberId} email failed:`, err);
+        }
+      }
+    }
+  }
+
+  console.log(`[cron] life-event reminders done: emails=${emailsSent}`);
+}
+
+async function recordLifeEventOnce(
+  db: Db,
+  log: {
+    memberId: string;
+    userId: string;
+    kind: LifeEventCandidate["kind"];
+    occurrenceYear: number;
+    windowDays: number;
+    channel: "in_app" | "email";
+  },
+): Promise<boolean> {
+  const res = await db
+    .insert(schema.lifeEventRemindersLog)
+    .values({
+      id: crypto.randomUUID(),
+      memberId: log.memberId,
+      userId: log.userId,
+      kind: log.kind,
+      occurrenceYear: log.occurrenceYear,
+      windowDays: log.windowDays,
+      channel: log.channel,
+    })
+    .onConflictDoNothing()
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }

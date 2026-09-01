@@ -9,9 +9,11 @@
  *    → record the file metadata in D1
  */
 import { useCallback, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { CloudUpload, File, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { cn } from "../lib/cn";
+import { useAuth } from "../context/AuthContext";
 
 interface Props {
   documentId: string;
@@ -40,10 +42,12 @@ function formatBytes(bytes: number): string {
 }
 
 export function FileUploadZone({ documentId, onSuccess }: Props) {
+  const { user } = useAuth();
   const [state, setState] = useState<UploadState>("idle");
   const [progress, setProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [storageNotConfigured, setStorageNotConfigured] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -126,9 +130,12 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
       } catch (e) {
         const isStorageErr =
           e instanceof ApiError && e.message === "storage_not_configured";
+        setStorageNotConfigured(isStorageErr);
         setError(
           isStorageErr
-            ? "Google Drive storage is not configured yet. Please contact the family admin."
+            ? user?.isPlatformAdmin
+              ? "Google Drive storage is not configured yet."
+              : "Google Drive storage is not configured yet. Please contact the family admin. Ask them to connect Google Drive under Admin → Storage."
             : e instanceof Error
             ? e.message
             : "Upload failed. Please try again.",
@@ -137,7 +144,7 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
         setProgress(0);
       }
     },
-    [documentId, onSuccess],
+    [documentId, onSuccess, user?.isPlatformAdmin],
   );
 
   function onDrop(e: React.DragEvent) {
@@ -156,6 +163,7 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
     setState("idle");
     setSelectedFile(null);
     setError("");
+    setStorageNotConfigured(false);
     setProgress(0);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -250,9 +258,17 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
           <AlertCircle className="size-4 shrink-0 mt-0.5 text-danger" />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-danger">{error}</p>
+            {storageNotConfigured && user?.isPlatformAdmin && (
+              <Link
+                to="/admin/storage"
+                className="mt-1 inline-block text-xs font-medium text-vault-300 underline hover:text-vault-200"
+              >
+                Open Admin → Storage
+              </Link>
+            )}
             <button
               onClick={reset}
-              className="mt-1 text-xs text-fg-muted underline hover:text-fg"
+              className="mt-1 block text-xs text-fg-muted underline hover:text-fg"
             >
               Try again
             </button>

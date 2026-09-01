@@ -102,6 +102,15 @@ function ReminderPrefsCard() {
     onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
   });
 
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+  const testEmail = useMutation({
+    mutationFn: () =>
+      api<{ ok: true; to: string }>("/notifications/test-email", { method: "POST" }),
+    onSuccess: (res) => setTestMsg(`Sent to ${res.to}`),
+    onError: (e: unknown) =>
+      setTestMsg(e instanceof Error ? e.message : "Could not send test email."),
+  });
+
   if (isLoading || !data) {
     return (
       <Card className="space-y-3 p-4">
@@ -179,6 +188,24 @@ function ReminderPrefsCard() {
             );
           })}
         </div>
+      </div>
+      <div className="space-y-2 px-4 py-3">
+        <Button
+          fullWidth
+          variant="secondary"
+          loading={testEmail.isPending}
+          onClick={() => {
+            setTestMsg(null);
+            testEmail.mutate();
+          }}
+        >
+          Send test email
+        </Button>
+        {testMsg && (
+          <p className="text-xs text-fg-muted" role="status">
+            {testMsg}
+          </p>
+        )}
       </div>
     </Card>
   );
