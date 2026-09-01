@@ -3,7 +3,7 @@
  *
  * Features:
  * - Document metadata display with expiry badges
- * - File upload (FileUploadZone → Drive resumable → record in D1)
+ * - File upload (FileUploadZone → R2 multipart → record in D1)
  * - File version history with download links
  * - Comments (list + add + delete own)
  */

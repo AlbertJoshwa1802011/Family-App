@@ -16,6 +16,13 @@ import {
   STORAGE_ACCOUNT_ID,
   DriveError,
 } from "../lib/drive";
+import {
+  buildR2Key,
+  isR2Configured,
+  putObject,
+  getObject,
+  R2_MAX_BYTES,
+} from "../lib/r2";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -366,8 +373,179 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /documents/:id/files/upload — multipart upload to R2 (primary path).
+// Fields: `file` (required File), optional `contentType` string override.
+// MUST be registered before /:id/files/:fid to avoid route collision.
+documentRoutes.post("/:id/files/upload", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId);
+  if (membership instanceof Response) return membership;
+
+  // Enforce private visibility on upload
+  if (
+    doc.visibility === "private" &&
+    doc.ownerUserId !== userId &&
+    membership.role === "member"
+  ) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  if (!isR2Configured(c.env) || !c.env.FILES) {
+    return c.json(
+      {
+        error: "r2_not_configured",
+        message:
+          "Document cloud storage (R2) is not configured yet. Files cannot be uploaded until the FILES bucket is bound.",
+      },
+      503,
+    );
+  }
+
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json(
+      {
+        error: "validation_error",
+        issues: [{ path: ["file"], message: "Expected multipart form data" }],
+      },
+      400,
+    );
+  }
+
+  const fileField = form.get("file");
+  // Duck-type the multipart part (Workers FormDataEntryValue typing varies).
+  const part = fileField as unknown;
+  const isBlobLike =
+    part !== null &&
+    typeof part === "object" &&
+    typeof (part as { arrayBuffer?: unknown }).arrayBuffer === "function" &&
+    typeof (part as { size?: unknown }).size === "number";
+
+  if (!isBlobLike) {
+    return c.json(
+      {
+        error: "validation_error",
+        issues: [{ path: ["file"], message: "file is required" }],
+      },
+      400,
+    );
+  }
+
+  const blob = part as {
+    arrayBuffer: () => Promise<ArrayBuffer>;
+    size: number;
+    type?: string;
+    name?: string;
+  };
+  const fileName = blob.name && blob.name.length > 0 ? blob.name : "file";
+  const contentTypeOverride = form.get("contentType");
+  const mimeType =
+    (typeof contentTypeOverride === "string" && contentTypeOverride.trim()) ||
+    blob.type ||
+    "application/octet-stream";
+
+  if (blob.size > R2_MAX_BYTES) {
+    return c.json(
+      {
+        error: "validation_error",
+        issues: [
+          {
+            path: ["file"],
+            message: `File too large. Maximum size is ${R2_MAX_BYTES / (1024 * 1024)} MB.`,
+          },
+        ],
+      },
+      400,
+    );
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(schema.files)
+    .set({ isCurrent: false })
+    .where(and(eq(schema.files.documentId, docId), eq(schema.files.isCurrent, true)));
+
+  const prev = await db
+    .select({ version: schema.files.version })
+    .from(schema.files)
+    .where(eq(schema.files.documentId, docId))
+    .orderBy(desc(schema.files.version))
+    .get();
+
+  const version = (prev?.version ?? 0) + 1;
+  const fileId = crypto.randomUUID();
+  const r2Key = buildR2Key({
+    familyId: doc.familyId,
+    documentId: docId,
+    fileId,
+    fileName,
+  });
+
+  const bytes = await blob.arrayBuffer();
+  await putObject(c.env.FILES, r2Key, bytes, {
+    contentType: mimeType,
+    customMetadata: { documentId: docId, fileId, familyId: doc.familyId },
+  });
+
+  await db.insert(schema.files).values({
+    id: fileId,
+    documentId: docId,
+    storageProvider: "r2",
+    r2Key,
+    driveFileId: null,
+    fileName,
+    mimeType,
+    sizeBytes: blob.size,
+    version,
+    isCurrent: true,
+    status: "active",
+  });
+
+  await db
+    .update(schema.documents)
+    .set({ currentFileId: fileId, updatedAt: now })
+    .where(eq(schema.documents.id, docId));
+
+  await insertAuditEvent(db, {
+    familyId: doc.familyId,
+    actorUserId: userId,
+    action: ACTIONS.DOCUMENT_UPLOADED,
+    targetType: "document",
+    targetId: docId,
+    visibility: doc.visibility,
+    meta: {
+      fileName,
+      mimeType,
+      sizeBytes: blob.size,
+      version,
+      storageProvider: "r2",
+    },
+  });
+
+  const file = await db
+    .select()
+    .from(schema.files)
+    .where(eq(schema.files.id, fileId))
+    .get();
+
+  return c.json({ file }, 201);
+});
+
 // POST /documents/:id/files/upload-url — generate a Drive resumable upload URL.
-// The client uploads directly to Drive (Worker never sees file bytes).
+// Legacy / optional path when Drive is connected. Prefer R2 multipart upload.
 // MUST be registered before /:id/files/:fid to avoid route collision.
 documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema), async (c) => {
   const { id: docId } = c.req.param();
@@ -450,6 +628,8 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
   await db.insert(schema.files).values({
     id: fileId,
     documentId: docId,
+    storageProvider: "drive",
+    r2Key: null,
     driveFileId,
     fileName,
     mimeType,
@@ -471,7 +651,7 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
     targetType: "document",
     targetId: docId,
     visibility: doc.visibility,
-    meta: { fileName, mimeType, sizeBytes, version },
+    meta: { fileName, mimeType, sizeBytes, version, storageProvider: "drive" },
   });
 
   const file = await db
@@ -518,7 +698,7 @@ documentRoutes.get("/:id/files", requireSession, async (c) => {
   return c.json({ files });
 });
 
-// GET /documents/:id/files/:fid/download — proxy download from Drive.
+// GET /documents/:id/files/:fid/download — stream from R2 or proxy Drive.
 // Always sets Content-Disposition: attachment to prevent inline execution.
 documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
   const { id: docId, fid: fileId } = c.req.param();
@@ -553,6 +733,49 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
 
   if (!file || file.status === "deleted") return c.json({ error: "not_found" }, 404);
 
+  const dispositionHeaders = {
+    "Content-Type": file.mimeType,
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(file.fileName)}"`,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "private, no-store",
+  } as const;
+
+  // ── R2 path ──────────────────────────────────────────────────────────────
+  if (file.storageProvider === "r2" || (!file.driveFileId && file.r2Key)) {
+    if (!isR2Configured(c.env) || !c.env.FILES || !file.r2Key) {
+      return c.json(
+        {
+          error: "r2_not_configured",
+          message: "Document cloud storage (R2) is not configured.",
+        },
+        503,
+      );
+    }
+
+    const obj = await getObject(c.env.FILES, file.r2Key);
+    if (!obj) return c.json({ error: "not_found" }, 404);
+
+    await insertAuditEvent(db, {
+      familyId: doc.familyId,
+      actorUserId: userId,
+      action: ACTIONS.DOCUMENT_DOWNLOADED,
+      targetType: "document",
+      targetId: docId,
+      visibility: doc.visibility,
+      meta: { fileId, fileName: file.fileName, storageProvider: "r2" },
+    });
+
+    return new Response(obj.body, {
+      status: 200,
+      headers: dispositionHeaders,
+    });
+  }
+
+  // ── Drive path (legacy / optional) ───────────────────────────────────────
+  if (!file.driveFileId) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
   if (!(await isStorageConfigured(c.env))) {
     return c.json({ error: "storage_not_configured" }, 503);
   }
@@ -576,18 +799,12 @@ documentRoutes.get("/:id/files/:fid/download", requireSession, async (c) => {
       targetType: "document",
       targetId: docId,
       visibility: doc.visibility,
-      meta: { fileId, fileName: file.fileName },
+      meta: { fileId, fileName: file.fileName, storageProvider: "drive" },
     });
 
-    // Stream Drive response, adding security headers
     return new Response(driveRes.body, {
       status: driveRes.status,
-      headers: {
-        "Content-Type": file.mimeType,
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(file.fileName)}"`,
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, no-store",
-      },
+      headers: dispositionHeaders,
     });
   } catch (e) {
     if (e instanceof DriveError) {

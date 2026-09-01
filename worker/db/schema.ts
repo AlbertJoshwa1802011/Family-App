@@ -162,7 +162,14 @@ export const files = sqliteTable(
     documentId: text("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
-    driveFileId: text("drive_file_id").notNull(),
+    /** Where bytes live. New uploads default to R2; legacy Drive rows stay `drive`. */
+    storageProvider: text("storage_provider", { enum: ["r2", "drive"] })
+      .notNull()
+      .default("r2"),
+    /** R2 object key when storageProvider = 'r2'. */
+    r2Key: text("r2_key"),
+    /** Google Drive file id when storageProvider = 'drive'. Nullable for R2-only rows. */
+    driveFileId: text("drive_file_id"),
     fileName: text("file_name").notNull(),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull().default(0),

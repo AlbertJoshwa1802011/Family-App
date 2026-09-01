@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, UserPlus, Users, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -10,13 +11,19 @@ import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
+import {
+  SectionSubNav,
+} from "../components/ui/SectionSubNav";
+import { makeTabActive, tabFromSearch } from "../lib/sectionTabs";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
 
 interface FamilyMember {
   id: string;
-  userId: string;
+  userId: string | null;
+  memberType?: "user" | "dependent";
+  displayName?: string | null;
   name: string | null;
   email: string | null;
   picture: string | null;
@@ -38,6 +45,13 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   member: "Member",
 };
+
+const FAMILY_TABS = [
+  { id: "members", label: "Members", to: "/family" },
+  { id: "invites", label: "Invites", to: "/family?tab=invites" },
+  { id: "activity", label: "Activity", to: "/family?tab=activity" },
+  { id: "dependents", label: "Dependents", to: "/family?tab=dependents" },
+] as const;
 
 function MemberSkeleton() {
   return (
@@ -77,10 +91,16 @@ function formatAction(action: string, targetType: string | null): string {
   return labels[action] ?? action;
 }
 
+function memberLabel(m: FamilyMember): string {
+  return m.displayName ?? m.name ?? m.email ?? "Member";
+}
+
 export function FamilyPage() {
   const qc = useQueryClient();
-  const { families } = useAuth();
-  const activeFamilyId = families[0]?.id;
+  const { families, activeFamilyId } = useAuth();
+  const familyId = activeFamilyId ?? families[0]?.id;
+  const [searchParams] = useSearchParams();
+  const tab = tabFromSearch(searchParams.toString(), "members");
 
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -89,18 +109,25 @@ export function FamilyPage() {
   const [inviteSuccess, setInviteSuccess] = useState("");
 
   const { data: membersData, isLoading: membersLoading } = useQuery({
-    queryKey: ["family-members"],
-    queryFn: () => api<{ members: FamilyMember[] }>("/families/me/members"),
+    queryKey: ["family-members", familyId],
+    queryFn: () =>
+      api<{ members: FamilyMember[] }>(
+        familyId
+          ? `/families/${familyId}/members`
+          : "/families/me/members",
+      ),
+    enabled: !!familyId,
   });
 
   const { data: activityData } = useQuery({
     queryKey: ["family-activity"],
     queryFn: () => api<{ activities: ActivityItem[] }>("/families/me/activity"),
+    enabled: tab === "activity",
   });
 
   const inviteMutation = useMutation({
     mutationFn: (payload: { email: string; role: "admin" | "member" }) =>
-      api(`/families/${activeFamilyId}/invites`, {
+      api(`/families/${familyId}/invites`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
@@ -119,8 +146,13 @@ export function FamilyPage() {
 
   const members = membersData?.members ?? [];
   const activities = activityData?.activities ?? [];
-  const activeMembers = members.filter((m) => m.status === "active");
+  const activeMembers = members.filter(
+    (m) => m.status === "active" && (m.memberType ?? "user") === "user",
+  );
   const pendingMembers = members.filter((m) => m.status === "invited");
+  const dependents = members.filter(
+    (m) => (m.memberType ?? "user") === "dependent" && m.status !== "removed",
+  );
 
   function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -149,14 +181,22 @@ export function FamilyPage() {
         }
       />
       <Page className="space-y-6">
-        {/* Success message */}
+        <SectionSubNav
+          ariaLabel="Family views"
+          items={FAMILY_TABS.map((t) => ({
+            to: t.to,
+            label: t.label,
+            end: t.id === "members",
+            isActive: makeTabActive("/family", t.id, "members"),
+          }))}
+        />
+
         {inviteSuccess && (
           <div className="rounded-xl bg-success/15 border border-success/30 p-3 text-sm text-success flex items-center gap-2">
             <span>✓</span> {inviteSuccess}
           </div>
         )}
 
-        {/* Invite Form */}
         {showInviteForm && (
           <Card className="p-4 space-y-4">
             <div className="flex items-center justify-between border-b border-line pb-2.5">
@@ -174,7 +214,7 @@ export function FamilyPage() {
                 <X className="size-4" />
               </button>
             </div>
-            
+
             <form onSubmit={handleInviteSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-fg-muted mb-1.5">
@@ -189,7 +229,7 @@ export function FamilyPage() {
                   className="w-full rounded-xl bg-ink-950 px-3.5 py-2.5 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-xs font-semibold text-fg-muted mb-1.5">
                   Role
@@ -204,7 +244,7 @@ export function FamilyPage() {
                         "flex-1 rounded-xl px-3 py-2 text-xs font-medium transition-all border",
                         inviteRole === r
                           ? "bg-vault-500/15 border-vault-500/40 text-vault-300"
-                          : "bg-transparent border-line text-fg-muted hover:bg-white/5"
+                          : "bg-transparent border-line text-fg-muted hover:bg-white/5",
                       )}
                     >
                       {r === "admin" ? "🛠️ Admin" : "👤 Member"}
@@ -212,11 +252,9 @@ export function FamilyPage() {
                   ))}
                 </div>
               </div>
-              
-              {inviteError && (
-                <p className="text-xs text-danger">{inviteError}</p>
-              )}
-              
+
+              {inviteError && <p className="text-xs text-danger">{inviteError}</p>}
+
               <div className="flex gap-2.5 justify-end">
                 <Button
                   type="button"
@@ -229,11 +267,7 @@ export function FamilyPage() {
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  size="md"
-                  loading={inviteMutation.isPending}
-                >
+                <Button type="submit" size="md" loading={inviteMutation.isPending}>
                   Send Invitation
                 </Button>
               </div>
@@ -241,125 +275,169 @@ export function FamilyPage() {
           </Card>
         )}
 
-        {/* Members section */}
-        <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-            Members
-          </h3>
-          {membersLoading ? (
-            <Card className="divide-y divide-line">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <MemberSkeleton key={i} />
-              ))}
-            </Card>
-          ) : activeMembers.length === 0 ? (
-            <EmptyState
-              icon={Users}
-              title="Build your family circle"
-              description="Invite family members so everyone can access shared documents and stay on top of renewals together."
-              action={
-                <Button
-                  leadingIcon={<UserPlus className="size-4" />}
-                  onClick={() => {
-                    setShowInviteForm(true);
-                    setInviteError("");
-                  }}
-                >
-                  Invite a member
-                </Button>
-              }
-            />
-          ) : (
-            <Card className="divide-y divide-line overflow-hidden">
-              {activeMembers.map((m) => (
-                <ListItem
-                  key={m.id}
-                  leading={
-                    <Avatar
-                      name={m.name}
-                      email={m.email}
-                      src={m.picture}
-                      className="size-10"
-                    />
-                  }
-                  title={m.name ?? m.email ?? "Member"}
-                  subtitle={m.email ?? undefined}
-                  trailing={
-                    <Badge
-                      tone={
-                        m.role === "owner"
-                          ? "vault"
-                          : m.role === "admin"
-                            ? "warning"
-                            : undefined
-                      }
-                    >
-                      {ROLE_LABELS[m.role] ?? m.role}
-                    </Badge>
-                  }
-                />
-              ))}
-            </Card>
-          )}
-        </section>
-
-        {/* Pending invites */}
-        {pendingMembers.length > 0 && (
+        {tab === "members" && (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              Pending invites
-            </h3>
-            <Card className="divide-y divide-line overflow-hidden">
-              {pendingMembers.map((m) => (
-                <ListItem
-                  key={m.id}
-                  leading={
-                    <Avatar
-                      name={m.name}
-                      email={m.email}
-                      src={m.picture}
-                      className="size-10"
-                    />
-                  }
-                  title={m.email ?? "Invited member"}
-                  subtitle="Invite pending"
-                  trailing={<Badge tone="warning">Pending</Badge>}
-                />
-              ))}
-            </Card>
+            {membersLoading ? (
+              <Card className="divide-y divide-line">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <MemberSkeleton key={i} />
+                ))}
+              </Card>
+            ) : activeMembers.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="Build your family circle"
+                description="Invite family members so everyone can access shared documents and stay on top of renewals together."
+                action={
+                  <Button
+                    leadingIcon={<UserPlus className="size-4" />}
+                    onClick={() => {
+                      setShowInviteForm(true);
+                      setInviteError("");
+                    }}
+                  >
+                    Invite a member
+                  </Button>
+                }
+              />
+            ) : (
+              <Card className="divide-y divide-line overflow-hidden">
+                {activeMembers.map((m) => (
+                  <ListItem
+                    key={m.id}
+                    leading={
+                      <Avatar
+                        name={m.name}
+                        email={m.email}
+                        src={m.picture}
+                        className="size-10"
+                      />
+                    }
+                    title={memberLabel(m)}
+                    subtitle={m.email ?? undefined}
+                    trailing={
+                      <Badge
+                        tone={
+                          m.role === "owner"
+                            ? "vault"
+                            : m.role === "admin"
+                              ? "warning"
+                              : undefined
+                        }
+                      >
+                        {ROLE_LABELS[m.role] ?? m.role}
+                      </Badge>
+                    }
+                  />
+                ))}
+              </Card>
+            )}
           </section>
         )}
 
-        {/* Activity feed */}
-        {activities.length > 0 && (
+        {tab === "invites" && (
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              <Activity className="size-3.5" />
-              Recent activity
-            </h3>
-            <Card className="divide-y divide-line overflow-hidden">
-              {activities.slice(0, 10).map((a) => (
-                <div
-                  key={a.id}
-                  className="flex min-h-12 items-start gap-3 px-4 py-3"
-                >
-                  <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-vault-500/10">
-                    <Activity className="size-3.5 text-vault-400" />
+            {pendingMembers.length === 0 ? (
+              <EmptyState
+                icon={UserPlus}
+                title="No pending invites"
+                description="Invitations you send will show up here until they're accepted."
+                action={
+                  <Button
+                    leadingIcon={<UserPlus className="size-4" />}
+                    onClick={() => setShowInviteForm(true)}
+                  >
+                    Invite someone
+                  </Button>
+                }
+              />
+            ) : (
+              <Card className="divide-y divide-line overflow-hidden">
+                {pendingMembers.map((m) => (
+                  <ListItem
+                    key={m.id}
+                    leading={
+                      <Avatar
+                        name={m.name}
+                        email={m.email}
+                        src={m.picture}
+                        className="size-10"
+                      />
+                    }
+                    title={m.email ?? "Invited member"}
+                    subtitle="Invite pending"
+                    trailing={<Badge tone="warning">Pending</Badge>}
+                  />
+                ))}
+              </Card>
+            )}
+          </section>
+        )}
+
+        {tab === "activity" && (
+          <section className="space-y-2">
+            {activities.length === 0 ? (
+              <EmptyState
+                icon={Activity}
+                title="No recent activity"
+                description="Uploads, invites, and other family actions will appear here."
+              />
+            ) : (
+              <Card className="divide-y divide-line overflow-hidden">
+                {activities.slice(0, 30).map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex min-h-12 items-start gap-3 px-4 py-3"
+                  >
+                    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-vault-500/10">
+                      <Activity className="size-3.5 text-vault-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-fg">
+                        <span className="font-medium">
+                          {a.actorName ?? "Someone"}
+                        </span>{" "}
+                        {formatAction(a.action, a.targetType)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-fg-subtle">
+                        {formatRelativeTime(a.createdAt)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-fg">
-                      <span className="font-medium">
-                        {a.actorName ?? "Someone"}
-                      </span>{" "}
-                      {formatAction(a.action, a.targetType)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-fg-subtle">
-                      {formatRelativeTime(a.createdAt)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </Card>
+                ))}
+              </Card>
+            )}
+          </section>
+        )}
+
+        {tab === "dependents" && (
+          <section className="space-y-2">
+            {dependents.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="No dependents yet"
+                description="Children and other family members without their own login can be tracked as dependents."
+              />
+            ) : (
+              <Card className="divide-y divide-line overflow-hidden">
+                {dependents.map((m) => (
+                  <ListItem
+                    key={m.id}
+                    leading={
+                      <Avatar
+                        name={memberLabel(m)}
+                        email={m.email}
+                        src={m.picture}
+                        className="size-10"
+                      />
+                    }
+                    title={memberLabel(m)}
+                    subtitle="Dependent"
+                    trailing={<Badge>Dependent</Badge>}
+                  />
+                ))}
+              </Card>
+            )}
           </section>
         )}
       </Page>

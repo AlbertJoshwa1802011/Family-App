@@ -240,6 +240,11 @@ export function Settings() {
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Reminders
           </h3>
+          <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
+            Google Drive connect &amp; email provider secrets: configure once from a
+            laptop (pending). The app works without them — R2 holds document files;
+            reminder emails stay quiet until Resend is set.
+          </p>
           <ReminderPrefsCard />
         </section>
 
@@ -265,9 +270,13 @@ export function Settings() {
                 to="/admin/storage"
                 leading={<HardDrive className="size-5 text-fg-muted" />}
                 title="Storage account"
-                subtitle="Configure the shared Google Drive backend"
+                subtitle="Optional Google Drive — pending laptop setup"
               />
             </Card>
+            <p className="px-1 text-xs text-fg-subtle">
+              Pending laptop setup: Drive OAuth + Resend secrets. Document files use
+              Cloudflare R2 and do not block the app.
+            </p>
           </section>
         )}
 

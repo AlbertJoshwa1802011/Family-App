@@ -142,6 +142,95 @@ export function createTestEnv(overrides: Partial<Env> = {}): TestEnv {
   return { env, sqlite };
 }
 
+/**
+ * In-memory R2Bucket for tests — no live Cloudflare bucket required.
+ * Implements put/get/delete used by worker/lib/r2.ts.
+ */
+export function createTestR2(): R2Bucket {
+  const store = new Map<
+    string,
+    { body: ArrayBuffer; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }
+  >();
+
+  const bucket = {
+    put: async (
+      key: string,
+      value: ArrayBuffer | ArrayBufferView | string | Blob | ReadableStream | null,
+      options?: R2PutOptions,
+    ) => {
+      let body: ArrayBuffer;
+      if (value == null) {
+        body = new ArrayBuffer(0);
+      } else if (typeof value === "string") {
+        body = new TextEncoder().encode(value).buffer;
+      } else if (value instanceof Blob) {
+        body = await value.arrayBuffer();
+      } else if (value instanceof ReadableStream) {
+        body = await new Response(value).arrayBuffer();
+      } else if (ArrayBuffer.isView(value)) {
+        body = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
+      } else {
+        body = value;
+      }
+      store.set(key, {
+        body,
+        httpMetadata: options?.httpMetadata,
+        customMetadata: options?.customMetadata,
+      });
+      return {
+        key,
+        size: body.byteLength,
+        etag: "test-etag",
+        httpEtag: '"test-etag"',
+        uploaded: new Date(),
+        checksums: {},
+        httpMetadata: options?.httpMetadata,
+        customMetadata: options?.customMetadata,
+      } as R2Object;
+    },
+    get: async (key: string) => {
+      const entry = store.get(key);
+      if (!entry) return null;
+      return {
+        key,
+        size: entry.body.byteLength,
+        etag: "test-etag",
+        httpEtag: '"test-etag"',
+        uploaded: new Date(),
+        checksums: {},
+        httpMetadata: entry.httpMetadata,
+        customMetadata: entry.customMetadata,
+        body: entry.body,
+        arrayBuffer: async () => entry.body,
+        text: async () => new TextDecoder().decode(entry.body),
+        json: async () => JSON.parse(new TextDecoder().decode(entry.body)),
+        blob: async () => new Blob([entry.body]),
+        writeHttpMetadata: () => {},
+      } as unknown as R2ObjectBody;
+    },
+    delete: async (key: string | string[]) => {
+      for (const k of Array.isArray(key) ? key : [key]) store.delete(k);
+    },
+    head: async (key: string) => {
+      const entry = store.get(key);
+      if (!entry) return null;
+      return {
+        key,
+        size: entry.body.byteLength,
+        etag: "test-etag",
+        httpEtag: '"test-etag"',
+        uploaded: new Date(),
+        checksums: {},
+        httpMetadata: entry.httpMetadata,
+        customMetadata: entry.customMetadata,
+      } as R2Object;
+    },
+    list: async () => ({ objects: [], truncated: false, delimitedPrefixes: [] }),
+  } as unknown as R2Bucket;
+
+  return bucket;
+}
+
 // ── Seed helpers ──────────────────────────────────────────────────────────────
 
 let seedCounter = 0;

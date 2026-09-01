@@ -8,6 +8,12 @@ export interface Env {
   DB: D1Database;
   /** KV namespace (cached owner Drive access token, single-flight locks). */
   KV: KVNamespace;
+  /**
+   * R2 bucket for document file bytes (primary storage).
+   * Optional so local/CI tests can run without a live bucket — upload routes
+   * return `r2_not_configured` when missing.
+   */
+  FILES?: R2Bucket;
 
   // ---- vars (wrangler.jsonc [vars]) ----
   APP_URL: string;

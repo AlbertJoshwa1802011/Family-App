@@ -30,6 +30,9 @@ import { purgeExpiredSessions } from "./lib/session";
 // route with its own (larger) streaming limit; this protects every metadata
 // endpoint from a memory-exhaustion DoS via a giant JSON payload.
 const JSON_BODY_LIMIT = 1024 * 1024;
+/** Multipart R2 upload path — must stay under the R2_MAX_BYTES soft cap (+ overhead). */
+const R2_UPLOAD_BODY_LIMIT = 26 * 1024 * 1024;
+const R2_UPLOAD_PATH = /^\/api\/documents\/[^/]+\/files\/upload$/;
 
 const app = new Hono<HonoEnv>();
 
@@ -39,13 +42,20 @@ app.use("/api/*", requestId());
 app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
 // Reject oversized JSON bodies before any handler runs (memory-safety).
-app.use(
-  "/api/*",
-  bodyLimit({
+// Skip the multipart R2 upload route — it has its own larger limit below.
+app.use("/api/*", async (c, next) => {
+  if (c.req.method === "POST" && R2_UPLOAD_PATH.test(new URL(c.req.url).pathname)) {
+    return next();
+  }
+  return bodyLimit({
     maxSize: JSON_BODY_LIMIT,
-    onError: (c) => c.json({ error: "payload_too_large" }, 413),
-  }),
-);
+    onError: (ctx) => ctx.json({ error: "payload_too_large" }, 413),
+  })(c, next);
+});
+app.use("/api/documents/:id/files/upload", bodyLimit({
+  maxSize: R2_UPLOAD_BODY_LIMIT,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}));
 
 // --- API routes (everything else falls through to static assets) ---
 const api = new Hono<HonoEnv>();

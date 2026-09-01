@@ -8,7 +8,7 @@
  *  - unlocked             → item list + search
  */
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ChevronRight,
   Eye,
@@ -40,7 +40,19 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useVault } from "../context/VaultContext";
 import { cn } from "../lib/cn";
+import {
+  SectionSubNav,
+} from "../components/ui/SectionSubNav";
+import { makeTabActive, tabFromSearch } from "../lib/sectionTabs";
 import type { LucideIcon } from "lucide-react";
+
+const VAULT_TABS = [
+  { id: "all", label: "All", to: "/vault" },
+  { id: "login", label: "Logins", to: "/vault?tab=login" },
+  { id: "card", label: "Cards", to: "/vault?tab=card" },
+  { id: "note", label: "Notes", to: "/vault?tab=note" },
+  { id: "wifi", label: "Wi‑Fi", to: "/vault?tab=wifi" },
+] as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -387,7 +399,13 @@ function VaultNoAccess() {
 // Unlocked vault — item list + search
 // ---------------------------------------------------------------------------
 
-function UnlockedVault({ familyId }: { familyId: string }) {
+function UnlockedVault({
+  familyId,
+  typeFilter,
+}: {
+  familyId: string;
+  typeFilter: "all" | VaultItemType;
+}) {
   const { lock } = useVault();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -401,14 +419,20 @@ function UnlockedVault({ familyId }: { familyId: string }) {
 
   const items = data?.items ?? [];
 
+  const typed =
+    typeFilter === "all" ? items : items.filter((it) => it.type === typeFilter);
+
   // Client-side filter on blind fields (they're hashed so we can only do type/visibility filter)
   // Real search goes through /vault/search with computed blind tags
   const filtered = search.trim()
-    ? items.filter((it) =>
-        it.type.toLowerCase().includes(search.toLowerCase()) ||
-        (VAULT_TYPE_META[it.type]?.label ?? "").toLowerCase().includes(search.toLowerCase()),
+    ? typed.filter(
+        (it) =>
+          it.type.toLowerCase().includes(search.toLowerCase()) ||
+          (VAULT_TYPE_META[it.type]?.label ?? "")
+            .toLowerCase()
+            .includes(search.toLowerCase()),
       )
-    : items;
+    : typed;
 
   // Group by type
   const groups = filtered.reduce<Record<string, VaultItem[]>>((acc, item) => {
@@ -464,7 +488,11 @@ function UnlockedVault({ familyId }: { familyId: string }) {
           }
         />
       ) : filtered.length === 0 ? (
-        <p className="py-8 text-center text-sm text-fg-muted">No results for "{search}"</p>
+        <p className="py-8 text-center text-sm text-fg-muted">
+          {search.trim()
+            ? `No results for "${search}"`
+            : "No credentials in this category."}
+        </p>
       ) : (
         <div className="space-y-4">
           {Object.entries(groups).map(([groupLabel, groupItems]) => (
@@ -493,7 +521,17 @@ export function Vault() {
   const { activeFamilyId } = useAuth();
   const { state, setVaultState } = useVault();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  const rawTab = tabFromSearch(searchParams.toString());
+  const typeFilter: "all" | VaultItemType =
+    rawTab === "login" ||
+    rawTab === "card" ||
+    rawTab === "note" ||
+    rawTab === "wifi"
+      ? rawTab
+      : "all";
 
   // Check vault status on mount. Three distinct outcomes, and none of them may
   // fall back to "locked": prompting for a passphrase the user never set (or
@@ -560,15 +598,22 @@ export function Vault() {
         }
       />
       <Page width="list" className="space-y-6">
-        {(state === "unchecked") && (
-          <VaultSkeleton />
+        {state === "unlocked" && (
+          <SectionSubNav
+            ariaLabel="Vault filters"
+            items={VAULT_TABS.map((t) => ({
+              to: t.to,
+              label: t.label,
+              end: t.id === "all",
+              isActive: makeTabActive("/vault", t.id),
+            }))}
+          />
         )}
+        {state === "unchecked" && <VaultSkeleton />}
         {state === "not_initialized" && (
           <VaultSetupWizard familyId={activeFamilyId} />
         )}
-        {state === "locked" && (
-          <VaultUnlockForm familyId={activeFamilyId} />
-        )}
+        {state === "locked" && <VaultUnlockForm familyId={activeFamilyId} />}
         {state === "no_access" && <VaultNoAccess />}
         {state === "error" && (
           <EmptyState
@@ -578,7 +623,7 @@ export function Vault() {
           />
         )}
         {state === "unlocked" && (
-          <UnlockedVault familyId={activeFamilyId} />
+          <UnlockedVault familyId={activeFamilyId} typeFilter={typeFilter} />
         )}
       </Page>
     </>

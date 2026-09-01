@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "64bccb5e-ac97-4dc3-ab30-18809cf3ec25",
-  "prevId": "fd5fb6e7-b040-4b04-b84b-4a90f191c54a",
+  "id": "3adc4245-6468-4576-835d-b9e35b1c59f5",
+  "prevId": "64bccb5e-ac97-4dc3-ab30-18809cf3ec25",
   "tables": {
     "audit_log": {
       "name": "audit_log",
@@ -2087,11 +2087,26 @@
           "notNull": true,
           "autoincrement": false
         },
+        "storage_provider": {
+          "name": "storage_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'r2'"
+        },
+        "r2_key": {
+          "name": "r2_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "drive_file_id": {
           "name": "drive_file_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "file_name": {
