@@ -111,9 +111,9 @@ export function AdminStorage() {
       <AppBar title="Storage account" back />
       <Page className="space-y-6">
         <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
-          Google Drive connect &amp; email provider secrets: configure once from a
-          laptop (pending). Document files store in Family Vault cloud (R2) — Drive
-          is optional and does not block the app.
+          Primary file store is Cloudflare R2 (pending laptop: enable R2 in the
+          Dashboard, create the bucket, uncomment the wrangler binding). Google
+          Drive connect is an optional fallback — also pending laptop setup.
         </p>
         {errorCode && (
           <Card className="border-danger/40 bg-danger/10 p-4 text-sm text-danger">

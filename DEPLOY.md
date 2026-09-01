@@ -11,18 +11,24 @@ production D1, and deploys. You should rarely need to deploy by hand.
 ### a. Cloudflare resources (already provisioned)
 - D1 database `family-vault-db` → `database_id` in `wrangler.jsonc`
 - KV namespace `KV` → `id` in `wrangler.jsonc`
-- R2 bucket `family-vault-files` → binding `FILES` in `wrangler.jsonc` (primary document file store)
+- R2 bucket `family-vault-files` → binding `FILES` in `wrangler.jsonc` (**pending laptop** — see below)
 
 To recreate from scratch:
 ```bash
 npx wrangler d1 create family-vault-db        # paste database_id into wrangler.jsonc
 npx wrangler kv namespace create KV           # paste id into wrangler.jsonc
-npx wrangler r2 bucket create family-vault-files   # required before first deploy if not auto-created
 ```
 
-Document uploads use R2 when the `FILES` binding is present. Without the bucket,
-`POST /api/documents/:id/files/upload` returns `r2_not_configured` (503) — the app
-still runs; Google Drive connect remains optional/legacy (configure from a laptop).
+**R2 (document files) — enable once from a laptop:**
+1. Cloudflare Dashboard → **R2** → enable R2 (requires adding a payment method; free tier still applies).
+2. `npx wrangler r2 bucket create family-vault-files`
+3. Uncomment the `r2_buckets` block in `wrangler.jsonc` and redeploy.
+
+Until then the `FILES` binding is commented out so deploys succeed. Uploads try
+R2 first, then fall back to Google Drive when connected. Without either,
+`POST /api/documents/:id/files/upload` returns `r2_not_configured` and the Drive
+path returns `storage_not_configured` — the rest of the app still runs.
+Drive connect + Resend remain optional/pending laptop setup.
 
 ### b. GitHub Actions secrets (enables the auto-deploy pipeline)
 Repo → **Settings → Secrets and variables → Actions → New repository secret**:
