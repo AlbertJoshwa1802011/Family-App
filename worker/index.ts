@@ -20,7 +20,7 @@ import { expenseRoutes } from "./routes/expenses";
 import { financeRoutes } from "./routes/finance";
 import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
-import { runExpiryReminders } from "./cron";
+import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
@@ -103,6 +103,7 @@ export default {
   ) {
     ctx.waitUntil(runExpiryReminders(env));
     ctx.waitUntil(runCommitmentReminders(env));
+    ctx.waitUntil(runLifeEventReminders(env));
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;

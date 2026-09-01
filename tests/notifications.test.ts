@@ -16,6 +16,7 @@ describe("/api/notifications: 401 without session", () => {
     { method: "POST", path: "/api/notifications/notif-1/read" },
     { method: "GET",  path: "/api/notifications/prefs" },
     { method: "PUT",  path: "/api/notifications/prefs" },
+    { method: "POST", path: "/api/notifications/test-email" },
   ];
 
   for (const { method, path } of protectedRoutes) {

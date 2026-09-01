@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, Users } from "lucide-react";
 import { AppBar } from "../../components/ui/AppBar";
@@ -50,6 +50,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { activeFamilyId } = useAuth();
+  const [searchParams] = useSearchParams();
   const [today] = useState(() => todayIsoDate());
 
   const settingsQ = useQuery({
@@ -60,7 +61,9 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
   const currency = existing?.currency ?? settingsQ.data?.currency ?? "USD";
 
   const [kind, setKind] = useState<CommitmentKind>(() => existing?.kind ?? "emi");
-  const [name, setName] = useState(() => existing?.name ?? "");
+  const [name, setName] = useState(
+    () => existing?.name ?? searchParams.get("name") ?? "",
+  );
   const [amountKind, setAmountKind] = useState<"fixed" | "percent_of_income">(
     () => existing?.amountKind ?? "fixed",
   );

@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { parseWindows } from "../lib/reminders";
+import { isEmailConfigured, reminderEmailHtml, sendEmail } from "../lib/email";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -170,4 +171,49 @@ notificationRoutes.put("/prefs", requireSession, zv(prefsSchema), async (c) => {
       digestEnabled,
     },
   });
+});
+
+// POST /notifications/test-email — send a short "Family Vault test reminder"
+// to prefs.reminderEmail ?? user.email. Session required.
+notificationRoutes.post("/test-email", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  if (!isEmailConfigured(c.env)) {
+    return c.json({ error: "email_not_configured" }, 503);
+  }
+
+  const user = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (!user) return c.json({ error: "not_found" }, 404);
+
+  const prefs = await db
+    .select({ reminderEmail: schema.reminderPrefs.reminderEmail })
+    .from(schema.reminderPrefs)
+    .where(eq(schema.reminderPrefs.userId, userId))
+    .get();
+
+  const to = (prefs?.reminderEmail ?? user.email).trim().toLowerCase();
+  const appUrl = c.env.APP_URL ?? "";
+
+  const ok = await sendEmail(c.env, {
+    to,
+    subject: "Family Vault test reminder",
+    html: reminderEmailHtml({
+      heading: "Family Vault test reminder",
+      body: "This is a test. If you received it, reminder email delivery is working.",
+      ctaLabel: "Open Family Vault",
+      ctaUrl: appUrl || "https://familyvault.app",
+    }),
+    text: "Family Vault test reminder — delivery is working.",
+  });
+
+  if (!ok) {
+    return c.json({ error: "email_send_failed" }, 502);
+  }
+
+  return c.json({ ok: true, to });
 });

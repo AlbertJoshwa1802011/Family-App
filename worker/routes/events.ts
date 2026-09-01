@@ -156,7 +156,8 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   }
 
   await insertAuditEvent(db, {
-    familyId: data.familyId,
+    // Use the resolved familyId — data.familyId is optional on the request body.
+    familyId,
     actorUserId: userId,
     action: ACTIONS.EVENT_CREATED,
     targetType: "event",
@@ -204,7 +205,9 @@ eventRoutes.get("/:id", requireSession, async (c) => {
     .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
     .where(eq(schema.eventAttendees.eventId, eventId));
 
-  return c.json({ event, attendees });
+  // Nest attendees on the event so the SPA can read `event.attendees`
+  // without a second key (missing that field used to blank the detail screen).
+  return c.json({ event: { ...event, attendees }, attendees });
 });
 
 // PATCH /events/:id — update event fields.

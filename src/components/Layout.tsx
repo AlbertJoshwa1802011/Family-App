@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { AppShell } from "./shell/AppShell";
 import { Assistant } from "./money/Assistant";
+import { LifeEventPrompt } from "./LifeEventPrompt";
 
 /**
  * Root layout wrapper consumed by the protected route in App.tsx.
@@ -13,6 +14,7 @@ export function Layout() {
     <AppShell>
       <Outlet />
       <Assistant />
+      <LifeEventPrompt />
     </AppShell>
   );
 }

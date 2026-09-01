@@ -412,6 +412,118 @@ expenseRoutes.get("/", requireSession, async (c) => {
   return c.json({ expenses, totalMinor });
 });
 
+/**
+ * GET /expenses/suggestions?familyId=
+ *
+ * "Likely this week" — merchants/categories that tended to recur around the
+ * same weekday or week-of-month in the last 90 days. No auto-conversion; the
+ * suggested amount is a median of past entries in the family's currency.
+ */
+expenseRoutes.get("/suggestions", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const familyId = c.req.query("familyId");
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+
+  const membership = await requireFamilyMember(c, familyId);
+  if (membership instanceof Response) return membership;
+
+  const db = getDb(c.env);
+  const nowMs = Date.now();
+  const fromIso = new Date(nowMs - 90 * 86_400_000).toISOString().slice(0, 10);
+  const today = new Date(nowMs);
+  const todayDow = today.getUTCDay(); // 0=Sun
+  const todayDom = today.getUTCDate();
+  const weekOfMonth = Math.ceil(todayDom / 7);
+
+  const rows = await db
+    .select({
+      amountMinor: schema.expenses.amountMinor,
+      currency: schema.expenses.currency,
+      expenseDate: schema.expenses.expenseDate,
+      merchant: schema.expenses.merchant,
+      categoryId: schema.expenses.categoryId,
+      categoryName: schema.expenseCategories.name,
+    })
+    .from(schema.expenses)
+    .leftJoin(
+      schema.expenseCategories,
+      eq(schema.expenses.categoryId, schema.expenseCategories.id),
+    )
+    .where(
+      and(
+        expenseVisibilityWhere(familyId, userId),
+        gte(schema.expenses.expenseDate, fromIso),
+      ),
+    );
+
+  type Bucket = {
+    key: string;
+    label: string;
+    merchant: string | null;
+    categoryId: string | null;
+    amounts: number[];
+    score: number;
+  };
+  const buckets = new Map<string, Bucket>();
+
+  for (const r of rows) {
+    const label = (r.merchant?.trim() || r.categoryName || "").trim();
+    if (!label) continue;
+    const key = `${(r.merchant ?? "").toLowerCase()}|${r.categoryId ?? ""}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
+        key,
+        label,
+        merchant: r.merchant?.trim() || null,
+        categoryId: r.categoryId,
+        amounts: [],
+        score: 0,
+      };
+      buckets.set(key, b);
+    }
+    b.amounts.push(r.amountMinor);
+
+    const [y, m, d] = r.expenseDate.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const wom = Math.ceil(d / 7);
+    // Same weekday this week is a strong signal; same week-of-month weaker.
+    if (dow === todayDow) b.score += 3;
+    if (wom === weekOfMonth) b.score += 1;
+    b.score += 0.5; // any past occurrence
+  }
+
+  function median(nums: number[]): number {
+    const s = [...nums].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 === 0 ? Math.round((s[mid - 1]! + s[mid]!) / 2) : s[mid]!;
+  }
+
+  const suggestions = [...buckets.values()]
+    .filter((b) => b.amounts.length >= 2 && b.score >= 2)
+    .sort((a, b) => b.score - a.score || b.amounts.length - a.amounts.length)
+    .slice(0, 5)
+    .map((b) => {
+      const amountMinor = median(b.amounts);
+      return {
+        label: `${b.label} ~${formatSuggestionAmount(amountMinor)}?`,
+        merchant: b.merchant,
+        categoryId: b.categoryId,
+        amountMinor,
+        occurrences: b.amounts.length,
+      };
+    });
+
+  return c.json({ suggestions, basedOn: "past_90_days" });
+});
+
+function formatSuggestionAmount(amountMinor: number): string {
+  // Display as major units without a currency symbol — the family's currency
+  // is applied when the user opens the pre-filled form.
+  const major = amountMinor / 100;
+  return major % 1 === 0 ? `$${major.toFixed(0)}` : `$${major.toFixed(2)}`;
+}
+
 expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");

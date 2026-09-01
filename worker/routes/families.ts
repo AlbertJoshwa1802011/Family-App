@@ -31,6 +31,28 @@ const updateMemberSchema = z
     message: "At least one of role or status must be provided",
   });
 
+const FAMILY_CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "INR",
+  "CAD",
+  "AUD",
+  "JPY",
+  "SGD",
+  "AED",
+  "CHF",
+  "NZD",
+  "HKD",
+] as const;
+
+const updateFamilySchema = z.object({
+  defaultCurrency: z.enum(FAMILY_CURRENCIES).optional(),
+  name: z.string().min(1).max(200).optional(),
+}).refine((d) => d.defaultCurrency !== undefined || d.name !== undefined, {
+  message: "At least one of defaultCurrency or name must be provided",
+});
+
 function zv<T extends z.ZodType>(schema: T) {
   return zValidator("json", schema, (result, c) => {
     if (!result.success)
@@ -136,6 +158,7 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
       memberType: schema.familyMembers.memberType,
       displayName: schema.familyMembers.displayName,
       dateOfBirth: schema.familyMembers.dateOfBirth,
+      anniversaryDate: schema.familyMembers.anniversaryDate,
       role: schema.familyMembers.role,
       status: schema.familyMembers.status,
       name: schema.users.name,
@@ -344,6 +367,32 @@ familyRoutes.get("/:id", requireSession, async (c) => {
   return c.json({ family });
 });
 
+// PATCH /families/:id — update family-level settings (currency, name).
+// Any active member may change currency; existing incomes/expenses keep their
+// stored currency — only the default for new entries changes.
+familyRoutes.patch("/:id", requireSession, zv(updateFamilySchema), async (c) => {
+  const { id: familyId } = c.req.param();
+  const updates = c.req.valid("json");
+
+  const memberOrError = await requireFamilyMember(c, familyId);
+  if (memberOrError instanceof Response) return memberOrError;
+
+  const db = getDb(c.env);
+  const set: Partial<typeof schema.families.$inferInsert> = {};
+  if (updates.defaultCurrency !== undefined) set.defaultCurrency = updates.defaultCurrency;
+  if (updates.name !== undefined) set.name = updates.name;
+
+  await db.update(schema.families).set(set).where(eq(schema.families.id, familyId));
+
+  const family = await db
+    .select()
+    .from(schema.families)
+    .where(eq(schema.families.id, familyId))
+    .get();
+
+  return c.json({ family });
+});
+
 // GET /families/:id/members — list all active members with user profile info.
 familyRoutes.get("/:id/members", requireSession, async (c) => {
   const { id: familyId } = c.req.param();
@@ -359,6 +408,7 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
       memberType: schema.familyMembers.memberType,
       displayName: schema.familyMembers.displayName,
       dateOfBirth: schema.familyMembers.dateOfBirth,
+      anniversaryDate: schema.familyMembers.anniversaryDate,
       role: schema.familyMembers.role,
       status: schema.familyMembers.status,
       createdAt: schema.familyMembers.createdAt,

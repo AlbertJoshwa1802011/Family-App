@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
@@ -48,14 +49,16 @@ function Protected({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
-    <>
+    <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route
           element={
             <Protected>
               <VaultProvider>
-                <Layout />
+                <ErrorBoundary label="This screen crashed">
+                  <Layout />
+                </ErrorBoundary>
               </VaultProvider>
             </Protected>
           }
@@ -112,6 +115,6 @@ export default function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
       <UpdateToast />
-    </>
+    </ErrorBoundary>
   );
 }

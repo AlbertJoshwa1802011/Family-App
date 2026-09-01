@@ -35,6 +35,13 @@ export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAiLabel, setShowAiLabel] = useState(() => {
+    try {
+      return localStorage.getItem("fv:assistant-label-seen") !== "1";
+    } catch {
+      return true;
+    }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const statusQ = useQuery({
@@ -57,6 +64,25 @@ export function Assistant() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
+
+  // Overview "Ask AI" CTA (and anything else) can open the sheet this way.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener("family-vault:open-assistant", onOpen);
+    return () => window.removeEventListener("family-vault:open-assistant", onOpen);
+  }, []);
+
+  function openAssistant() {
+    setOpen(true);
+    if (showAiLabel) {
+      setShowAiLabel(false);
+      try {
+        localStorage.setItem("fv:assistant-label-seen", "1");
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+  }
 
   if (!statusQ.data?.configured || !activeFamilyId) return null;
 
@@ -98,15 +124,18 @@ export function Assistant() {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openAssistant}
         aria-label="Ask the money assistant"
         className={cn(
-          "pb-safe fixed right-4 bottom-20 z-30 flex size-12 items-center justify-center rounded-full",
-          "bg-m3-purple text-white shadow-[0_6px_24px_-8px_var(--color-m3-purple)]",
+          "pb-safe fixed right-4 bottom-20 z-30 flex items-center justify-center gap-2",
+          "rounded-full border border-white/20 bg-vault-600 text-white",
+          "shadow-[0_8px_28px_-8px_rgba(13,148,136,0.65)] backdrop-blur-md",
           "transition-transform active:scale-95 md:bottom-6",
+          showAiLabel ? "h-14 min-w-14 px-4" : "size-14",
         )}
       >
-        <Sparkles className="size-5" aria-hidden="true" />
+        <Sparkles className="size-6" aria-hidden="true" />
+        {showAiLabel && <span className="text-sm font-semibold tracking-wide">AI</span>}
       </button>
 
       {open &&

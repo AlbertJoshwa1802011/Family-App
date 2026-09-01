@@ -79,6 +79,12 @@ export function MoneySettings() {
     <>
       <AppBar title="Money settings" back />
       <Page className="space-y-4 pb-24">
+        <CurrencySection
+          currency={currency}
+          familyId={activeFamilyId!}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["finance"] })}
+        />
+
         <IncomeSection
           incomes={incomesQ.data?.incomes ?? []}
           currency={currency}
@@ -116,6 +122,107 @@ export function MoneySettings() {
         }}
       />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+const CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "INR",
+  "CAD",
+  "AUD",
+  "JPY",
+  "SGD",
+  "AED",
+  "CHF",
+] as const;
+
+function CurrencySection({
+  currency,
+  familyId,
+  onSaved,
+}: {
+  currency: string;
+  familyId: string;
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState(currency);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/families/${familyId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ defaultCurrency: value }),
+      }),
+    onSuccess: () => {
+      setSaved(true);
+      onSaved();
+    },
+    onError: (e: unknown) =>
+      setError(e instanceof Error ? e.message : "Could not update currency."),
+  });
+
+  return (
+    <Card className="space-y-4 p-4">
+      <div>
+        <h2 className="text-sm font-semibold text-fg">Currency</h2>
+        <p className="text-xs text-fg-muted">
+          Family default for new incomes and expenses. Existing entries keep their
+          original currency — nothing is auto-converted.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {CURRENCIES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => {
+              setValue(c);
+              setSaved(false);
+            }}
+            aria-pressed={value === c}
+            className={cn(
+              "min-h-11 min-w-[4.5rem] rounded-xl border px-3 py-2 text-sm font-semibold transition-colors",
+              value === c
+                ? "border-vault-500/50 bg-vault-500/15 text-vault-300"
+                : "border-line text-fg-muted hover:bg-white/5",
+            )}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {value !== "USD" && (
+        <p className="text-xs text-fg-muted">
+          Prefer dollars? Tap <span className="font-semibold text-fg">USD</span> above.
+        </p>
+      )}
+
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+
+      <Button
+        fullWidth
+        loading={save.isPending}
+        disabled={value === currency && saved}
+        onClick={() => {
+          setError(null);
+          save.mutate();
+        }}
+      >
+        {saved && value === currency ? "Saved" : `Use ${value}`}
+      </Button>
+    </Card>
   );
 }
 
@@ -349,6 +456,7 @@ function ReminderSection({ initial, onSaved }: { initial: Prefs; onSaved: () => 
   const [enabled, setEnabled] = useState(initial.emailEnabled);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () =>
@@ -362,6 +470,14 @@ function ReminderSection({ initial, onSaved }: { initial: Prefs; onSaved: () => 
     },
     onError: (e: unknown) =>
       setError(e instanceof Error ? e.message : "Could not save that address."),
+  });
+
+  const testEmail = useMutation({
+    mutationFn: () =>
+      api<{ ok: true; to: string }>("/notifications/test-email", { method: "POST" }),
+    onSuccess: (res) => setTestMsg(`Sent to ${res.to}`),
+    onError: (e: unknown) =>
+      setTestMsg(e instanceof Error ? e.message : "Could not send test email."),
   });
 
   return (
@@ -422,6 +538,23 @@ function ReminderSection({ initial, onSaved }: { initial: Prefs; onSaved: () => 
       >
         {saved ? "Saved" : "Save reminder settings"}
       </Button>
+
+      <Button
+        fullWidth
+        variant="ghost"
+        loading={testEmail.isPending}
+        onClick={() => {
+          setTestMsg(null);
+          testEmail.mutate();
+        }}
+      >
+        Send test email
+      </Button>
+      {testMsg && (
+        <p className="text-xs text-fg-muted" role="status">
+          {testMsg}
+        </p>
+      )}
     </Card>
   );
 }

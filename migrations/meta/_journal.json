@@ -71,6 +71,13 @@
       "when": 1788201176213,
       "tag": "0009_shallow_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788222811961,
+      "tag": "0010_careless_starjammers",
+      "breakpoints": true
     }
   ]
 }
