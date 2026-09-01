@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, HardDrive, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
@@ -15,10 +16,74 @@ interface ReminderPrefs {
   emailEnabled: boolean;
   pushEnabled: boolean;
   windows: number[];
+  reminderEmail: string | null;
 }
 
 // Lead-time options offered in the UI (days before expiry/event).
 const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+
+const emailInputClass =
+  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
+
+/**
+ * Local draft for the reminder-email override. Remounted via `key` when the
+ * server value changes so we never sync draft→props through an effect.
+ */
+function ReminderEmailField({
+  initial,
+  disabled,
+  onSave,
+  saving,
+}: {
+  initial: string | null;
+  disabled?: boolean;
+  onSave: (next: string | null) => void;
+  saving?: boolean;
+}) {
+  const [draft, setDraft] = useState(initial ?? "");
+  const dirty = draft.trim() !== (initial ?? "").trim();
+
+  const commit = () => {
+    if (!dirty || saving) return;
+    // Empty string clears the override so the cron falls back to the login email.
+    onSave(draft.trim() === "" ? null : draft.trim());
+  };
+
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <label htmlFor="reminder-email" className="text-sm font-medium text-fg">
+        Send reminders to
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="reminder-email"
+          type="email"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          placeholder="albertjoshrock101@gmail.com"
+          disabled={disabled || saving}
+          className={emailInputClass}
+        />
+        {dirty && (
+          <Button
+            type="button"
+            variant="secondary"
+            loading={saving}
+            onClick={commit}
+            className="shrink-0"
+          >
+            Save
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-fg-muted">
+        Daily cron emails reminders even if you don't open the app. Leave blank
+        to use your Google account email.
+      </p>
+    </div>
+  );
+}
 
 function ReminderPrefsCard() {
   const qc = useQueryClient();
@@ -81,6 +146,13 @@ function ReminderPrefsCard() {
             />
           </button>
         }
+      />
+      <ReminderEmailField
+        key={prefs.reminderEmail ?? "none"}
+        initial={prefs.reminderEmail}
+        disabled={save.isPending}
+        saving={save.isPending}
+        onSave={(next) => save.mutate({ reminderEmail: next })}
       />
       <div className="px-4 py-3">
         <div className="text-sm font-medium text-fg">Lead time</div>
