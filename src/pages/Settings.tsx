@@ -241,9 +241,11 @@ export function Settings() {
             Reminders
           </h3>
           <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
-            Google Drive connect &amp; email provider secrets: configure once from a
-            laptop (pending). The app works without them — R2 holds document files;
-            reminder emails stay quiet until Resend is set.
+            Pending laptop setup: enable Cloudflare R2 (Dashboard → R2 → add
+            payment method, then create the bucket), optional Google Drive
+            connect, and Resend for emails. The app runs without them — uploads
+            wait until R2 or Drive is ready; reminder emails stay quiet until
+            Resend is set.
           </p>
           <ReminderPrefsCard />
         </section>
@@ -274,8 +276,9 @@ export function Settings() {
               />
             </Card>
             <p className="px-1 text-xs text-fg-subtle">
-              Pending laptop setup: Drive OAuth + Resend secrets. Document files use
-              Cloudflare R2 and do not block the app.
+              Pending laptop setup: enable R2 in Cloudflare (then uncomment the
+              wrangler binding), optional Drive OAuth, and Resend secrets. These
+              do not block the rest of the app.
             </p>
           </section>
         )}

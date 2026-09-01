@@ -64,9 +64,10 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Uploads a single file to an existing document via R2 multipart:
- *   POST /documents/:id/files/upload (FormData with `file`).
- * Falls back to the legacy Drive resumable flow only if the caller opts in.
+ * Uploads a single file to an existing document.
+ * Prefers R2 (`POST /documents/:id/files/upload`). When the FILES binding is
+ * absent (R2 not enabled on the Cloudflare account yet), falls back to the
+ * Google Drive resumable flow automatically.
  * `onProgress` receives 0..1 for the byte-transfer phase.
  */
 export async function uploadDocumentFile(
@@ -76,7 +77,7 @@ export async function uploadDocumentFile(
 ): Promise<void> {
   const mimeType = file.type || "application/octet-stream";
 
-  await new Promise<void>((resolve, reject) => {
+  const r2Result = await new Promise<"ok" | "r2_missing">((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/documents/${docId}/files/upload`);
     xhr.withCredentials = true;
@@ -85,18 +86,24 @@ export async function uploadDocumentFile(
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
+        resolve("ok");
         return;
       }
+      let errorCode = "";
       let message = `Upload failed (${xhr.status})`;
       try {
         const body = JSON.parse(xhr.responseText) as {
           error?: string;
           message?: string;
         };
+        errorCode = body.error ?? "";
         message = body.message ?? body.error ?? message;
       } catch {
         // keep default
+      }
+      if (xhr.status === 503 && errorCode === "r2_not_configured") {
+        resolve("r2_missing");
+        return;
       }
       reject(new Error(message));
     };
@@ -106,9 +113,12 @@ export async function uploadDocumentFile(
     form.append("contentType", mimeType);
     xhr.send(form);
   });
+
+  if (r2Result === "ok") return;
+  await uploadDocumentFileViaDrive(docId, file, onProgress);
 }
 
-/** @deprecated Drive path — kept for rare admin/legacy use. Prefer uploadDocumentFile. */
+/** Drive path — used automatically when R2 is not bound; also callable directly. */
 export async function uploadDocumentFileViaDrive(
   docId: string,
   file: File,
