@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Lock,
@@ -52,6 +53,9 @@ interface ExpenseListItem {
   merchant: string | null;
   description: string | null;
   visibility: "family" | "private";
+  childCount: number;
+  childrenTotalMinor: number;
+  nestDepth?: number;
   category: { id: string; name: string; color: string | null } | null;
 }
 
@@ -214,6 +218,7 @@ export function Expenses() {
   const [today] = useState(() => todayIsoDate());
   const [monthStart, setMonthStart] = useState(() => `${today.slice(0, 7)}-01`);
   const [view, setView] = useState<View>("mine");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const { from, to } = useMemo(() => monthRange(monthStart), [monthStart]);
   const trendFrom = useMemo(() => shiftMonth(monthStart, -5), [monthStart]);
@@ -245,6 +250,31 @@ export function Expenses() {
     enabled: Boolean(activeFamilyId),
   });
 
+  // When a parent is expanded, load its children from the detail endpoint so
+  // sub-expenses outside the month window still appear under the container.
+  const expandedIds = [...expanded];
+  const childrenQueries = useQueries({
+    queries: expandedIds.map((expenseId) => ({
+      queryKey: ["expenses", "detail", expenseId],
+      queryFn: () =>
+        api<{
+          expense: ExpenseListItem;
+          children: ExpenseListItem[];
+        }>(`/expenses/${expenseId}`),
+      enabled: Boolean(activeFamilyId),
+    })),
+  });
+
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, ExpenseListItem[]>();
+    expandedIds.forEach((expenseId, i) => {
+      const kids = childrenQueries[i]?.data?.children;
+      if (kids) map.set(expenseId, kids);
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by expanded set + query data
+  }, [expanded, childrenQueries]);
+
   const currency = summaryQ.data?.currency ?? "USD";
 
   // Group the list by day for a scannable ledger.
@@ -257,6 +287,20 @@ export function Expenses() {
     }
     return [...groups.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [listQ.data]);
+
+  function toggleExpand(expenseId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(expenseId)) next.delete(expenseId);
+      else next.add(expenseId);
+      return next;
+    });
+  }
+
+  function rowAmount(e: ExpenseListItem): string {
+    const minor = e.childCount > 0 ? e.childrenTotalMinor : e.amountMinor;
+    return formatMoney(minor, e.currency);
+  }
 
   if (!activeFamilyId) {
     return (
@@ -402,45 +446,93 @@ export function Expenses() {
                   {dayLabel(date)}
                 </p>
                 <Card className="divide-y divide-line overflow-hidden">
-                  {items.map((e) => (
-                    <button
-                      key={e.id}
-                      type="button"
-                      onClick={() => navigate(`/money/expenses/${e.id}`)}
-                      className="flex w-full min-h-14 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5 active:bg-white/[0.07]"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="flex size-9 shrink-0 items-center justify-center rounded-xl"
-                        style={{
-                          backgroundColor: `${e.category?.color ?? "#64748b"}26`,
-                        }}
-                      >
-                        <Wallet
-                          className="size-4"
-                          style={{ color: e.category?.color ?? "var(--color-fg-muted)" }}
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-fg">
-                          {e.merchant || e.description || "Expense"}
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-fg-muted">
-                          {e.category?.name ?? "Uncategorized"}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        {e.visibility === "private" ? (
-                          <Lock className="size-3.5 text-fg-subtle" aria-label="Private" />
-                        ) : (
-                          <Badge tone="vault">Shared</Badge>
+                  {items.map((e) => {
+                    const isOpen = expanded.has(e.id);
+                    const kids = childrenMap.get(e.id) ?? [];
+                    return (
+                      <div key={e.id}>
+                        <div className="flex w-full min-h-14 items-center gap-1 px-2 py-1">
+                          {e.childCount > 0 ? (
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-label={isOpen ? "Collapse sub-expenses" : "Expand sub-expenses"}
+                              onClick={() => toggleExpand(e.id)}
+                              className="flex size-10 shrink-0 items-center justify-center rounded-full text-fg-subtle hover:bg-white/5"
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "size-4 transition-transform",
+                                  isOpen ? "rotate-0" : "-rotate-90",
+                                )}
+                              />
+                            </button>
+                          ) : (
+                            <span className="size-10 shrink-0" aria-hidden="true" />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/money/expenses/${e.id}`)}
+                            className="flex min-w-0 flex-1 items-center gap-3 py-2 pr-2 text-left transition-colors hover:bg-white/5 active:bg-white/[0.07]"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                              style={{
+                                backgroundColor: `${e.category?.color ?? "#64748b"}26`,
+                              }}
+                            >
+                              <Wallet
+                                className="size-4"
+                                style={{ color: e.category?.color ?? "var(--color-fg-muted)" }}
+                              />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-fg">
+                                {e.merchant || e.description || "Expense"}
+                              </span>
+                              <span className="mt-0.5 block truncate text-xs text-fg-muted">
+                                {e.category?.name ?? "Uncategorized"}
+                                {e.childCount > 0
+                                  ? ` · ${e.childCount} sub`
+                                  : ""}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              {e.visibility === "private" ? (
+                                <Lock className="size-3.5 text-fg-subtle" aria-label="Private" />
+                              ) : (
+                                <Badge tone="vault">Shared</Badge>
+                              )}
+                              <span className="text-sm font-semibold tabular-nums text-fg">
+                                {rowAmount(e)}
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                        {isOpen && kids.length > 0 && (
+                          <ul className="border-t border-line/60 bg-ink-950/40">
+                            {kids.map((child) => (
+                              <li key={child.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/money/expenses/${child.id}`)}
+                                  className="flex w-full min-h-11 items-center gap-3 py-2 pr-4 pl-14 text-left hover:bg-white/5"
+                                >
+                                  <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">
+                                    {child.merchant || child.description || "Sub-expense"}
+                                  </span>
+                                  <span className="text-sm tabular-nums text-fg">
+                                    {rowAmount(child)}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
                         )}
-                        <span className="text-sm font-semibold tabular-nums text-fg">
-                          {formatMoney(e.amountMinor, e.currency)}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </Card>
               </div>
             ))}

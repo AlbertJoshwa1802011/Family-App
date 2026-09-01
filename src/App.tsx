@@ -29,6 +29,8 @@ import { Commitments } from "./pages/money/Commitments";
 import { CommitmentForm } from "./pages/money/CommitmentForm";
 import { Wishlist } from "./pages/money/Wishlist";
 import { MoneySettings } from "./pages/money/MoneySettings";
+import { Funds } from "./pages/money/Funds";
+import { FundDetail } from "./pages/money/FundDetail";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
@@ -78,6 +80,8 @@ export default function App() {
           <Route path="/money/expenses/new" element={<ExpenseForm />} />
           <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
           <Route path="/money/expenses/:id/edit" element={<ExpenseForm />} />
+          <Route path="/money/funds" element={<Funds />} />
+          <Route path="/money/funds/:id" element={<FundDetail />} />
           <Route path="/money/commitments" element={<Commitments />} />
           <Route path="/money/commitments/new" element={<CommitmentForm />} />
           <Route path="/money/commitments/:id/edit" element={<CommitmentForm />} />

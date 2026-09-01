@@ -35,6 +35,8 @@ interface ExpenseDetail {
   categoryId: string | null;
   paidByMemberId: string;
   visibility: "family" | "private";
+  parentExpenseId?: string | null;
+  nestDepth?: number;
 }
 
 interface FamilyMember {
@@ -102,6 +104,8 @@ function ExpenseFormFields({
   const { activeFamilyId, user } = useAuth();
   const [searchParams] = useSearchParams();
 
+  const parentId = !isEdit ? searchParams.get("parentId") : null;
+
   const [today] = useState(() => todayIsoDate());
   // One id per form instance makes a double-submit idempotent server-side.
   const [clientRequestId] = useState(() => crypto.randomUUID());
@@ -111,6 +115,12 @@ function ExpenseFormFields({
     queryFn: () =>
       api<{ currency: string }>(`/finance/settings?familyId=${activeFamilyId}`),
     enabled: Boolean(activeFamilyId) && !existing,
+  });
+
+  const parentQ = useQuery({
+    queryKey: ["expenses", "detail", parentId],
+    queryFn: () => api<{ expense: ExpenseDetail }>(`/expenses/${parentId}`),
+    enabled: Boolean(parentId),
   });
 
   const currency = existing?.currency ?? settingsQ.data?.currency ?? "USD";
@@ -136,6 +146,11 @@ function ExpenseFormFields({
   );
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryUnderRoot, setNewCategoryUnderRoot] = useState(true);
+  const [categoryCreateError, setCategoryCreateError] = useState<string | null>(null);
+
   const categoriesQ = useQuery({
     queryKey: ["expenses", "categories", activeFamilyId],
     queryFn: () =>
@@ -159,13 +174,58 @@ function ExpenseFormFields({
   // Derive the effective payer instead of defaulting it through an effect.
   const paidByMemberId = paidBySelection ?? myMemberId;
 
+  const createCategory = useMutation({
+    mutationFn: async () => {
+      const name = newCategoryName.trim();
+      if (!name) throw new Error("Enter a category name.");
+      if (!activeFamilyId) throw new Error("Select a family first.");
+      const selected = categoryId
+        ? (categoriesQ.data?.categories ?? []).find((c) => c.id === categoryId)
+        : null;
+      const rootId = selected
+        ? (selected.parentCategoryId ?? selected.id)
+        : null;
+      return api<{ category: Category }>("/expenses/categories", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId: activeFamilyId,
+          name,
+          parentCategoryId:
+            newCategoryUnderRoot && rootId ? rootId : null,
+        }),
+      });
+    },
+    onSuccess: async (data) => {
+      setCategoryId(data.category.id);
+      setShowNewCategory(false);
+      setNewCategoryName("");
+      setCategoryCreateError(null);
+      await qc.invalidateQueries({ queryKey: ["expenses", "categories"] });
+    },
+    onError: (e: unknown) => {
+      setCategoryCreateError(
+        e instanceof ApiError || e instanceof Error
+          ? e.message
+          : "Could not create category.",
+      );
+    },
+  });
+
   const save = useMutation({
     mutationFn: async () => {
+      if (!activeFamilyId && !isEdit) {
+        throw new Error("Select a family before adding an expense.");
+      }
       const amountMinor = parseMajorToMinor(amount, currency);
-      if (amountMinor === null || amountMinor <= 0) {
+      if (amountMinor === null || amountMinor < 0) {
         throw new Error(
           `Enter an amount with at most ${currencyExponent(currency)} decimal places.`,
         );
+      }
+      // Sub-expense under a container may be $0 only when intentionally empty —
+      // still require a real amount for normal leaves (allow 0 for containers).
+      if (amountMinor === 0 && !parentId && !merchant.trim()) {
+        // Allow 0 for named container parents (e.g. "Google Pay").
       }
       if (!paidByMemberId) throw new Error("Select who paid.");
 
@@ -188,12 +248,23 @@ function ExpenseFormFields({
       }
       return api<{ expense: ExpenseDetail }>("/expenses", {
         method: "POST",
-        body: JSON.stringify({ ...body, familyId: activeFamilyId, clientRequestId }),
+        body: JSON.stringify({
+          ...body,
+          familyId: activeFamilyId,
+          clientRequestId,
+          parentExpenseId: parentId || null,
+        }),
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await qc.invalidateQueries({ queryKey: ["expenses"] });
-      navigate("/money/expenses", { replace: true });
+      if (parentId) {
+        navigate(`/money/expenses/${parentId}`, { replace: true });
+      } else if (data.expense?.id && !isEdit) {
+        navigate(`/money/expenses/${data.expense.id}`, { replace: true });
+      } else {
+        navigate("/money/expenses", { replace: true });
+      }
     },
     onError: (e: unknown) => {
       setFormError(
@@ -229,11 +300,41 @@ function ExpenseFormFields({
     return selectedCategory?.parentCategoryId === rootId;
   }
 
+  const parentLabel =
+    parentQ.data?.expense.merchant ||
+    parentQ.data?.expense.description ||
+    "parent expense";
+
+  if (!activeFamilyId && !isEdit) {
+    return (
+      <>
+        <AppBar title="New expense" back />
+        <Page>
+          <Card className="p-4">
+            <p className="text-sm text-fg">No family selected</p>
+            <p className="mt-1 text-xs text-fg-muted">
+              Pick an active family in Settings before adding expenses.
+            </p>
+          </Card>
+        </Page>
+      </>
+    );
+  }
+
   return (
     <>
-      <AppBar title={isEdit ? "Edit expense" : "New expense"} back />
+      <AppBar title={isEdit ? "Edit expense" : parentId ? "Sub-expense" : "New expense"} back />
       <Page className="pb-24">
         <form onSubmit={submit} className="space-y-4">
+          {parentId && (
+            <Card className="border-vault-500/30 bg-vault-500/10 p-3">
+              <p className="text-xs font-medium text-vault-300">Adding under</p>
+              <p className="mt-0.5 text-sm text-fg">
+                {parentQ.isLoading ? "…" : parentLabel}
+              </p>
+            </Card>
+          )}
+
           {/* Amount — the one field worth making large on a phone. */}
           <Card className="p-4">
             <label htmlFor="amount" className="text-xs font-medium text-fg-subtle">
@@ -248,7 +349,160 @@ function ExpenseFormFields({
               placeholder="0.00"
               className="mt-1 w-full bg-transparent text-3xl font-bold tabular-nums text-fg placeholder:text-fg-subtle focus:outline-none"
             />
-            <p className="mt-1 text-xs text-fg-subtle">{currency}</p>
+            <p className="mt-1 text-xs text-fg-subtle">
+              {currency}
+              {!parentId && (
+                <span className="text-fg-subtle">
+                  {" "}
+                  · use 0 for a container (e.g. Google Pay) and add sub-expenses
+                </span>
+              )}
+            </p>
+          </Card>
+
+          {/* Category — always prominent; roots + subcats + inline create. */}
+          <Card className="space-y-3 p-4">
+            <p className="text-sm font-semibold text-fg">Category</p>
+            {!activeFamilyId ? (
+              <p className="text-sm text-danger">Select a family to load categories.</p>
+            ) : categoriesQ.isLoading ? (
+              <Skeleton className="h-9 w-full" />
+            ) : categoriesQ.isError ? (
+              <div className="space-y-2">
+                <p className="text-sm text-danger">Couldn&apos;t load categories.</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void categoriesQ.refetch()}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => setCategoryId(null)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                      categoryId === null
+                        ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                        : "border-line text-fg-muted hover:bg-white/5",
+                    )}
+                  >
+                    None
+                  </button>
+                  {rootCategories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setCategoryId(cat.id)}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                        isRootSelected(cat.id)
+                          ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                          : "border-line text-fg-muted hover:bg-white/5",
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2 rounded-full"
+                        style={{ backgroundColor: cat.color ?? "var(--color-fg-subtle)" }}
+                      />
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+                {childCategories.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-fg-subtle">Subcategory</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {childCategories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setCategoryId(cat.id)}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            categoryId === cat.id
+                              ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                              : "border-line text-fg-muted hover:bg-white/5",
+                          )}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="size-2 rounded-full"
+                            style={{
+                              backgroundColor: cat.color ?? "var(--color-fg-subtle)",
+                            }}
+                          />
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!showNewCategory ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setShowNewCategory(true)}
+                  >
+                    + New category
+                  </Button>
+                ) : (
+                  <div className="space-y-2 rounded-xl border border-line p-3">
+                    <label htmlFor="newCat" className="text-xs font-medium text-fg-subtle">
+                      New category name
+                    </label>
+                    <input
+                      id="newCat"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="e.g. School fees"
+                      maxLength={80}
+                      className={inputClass}
+                    />
+                    {activeRootId && (
+                      <label className="flex items-center gap-2 text-xs text-fg-muted">
+                        <input
+                          type="checkbox"
+                          checked={newCategoryUnderRoot}
+                          onChange={(e) => setNewCategoryUnderRoot(e.target.checked)}
+                        />
+                        Under selected root
+                      </label>
+                    )}
+                    {categoryCreateError && (
+                      <p role="alert" className="text-xs text-danger">
+                        {categoryCreateError}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setShowNewCategory(false);
+                          setCategoryCreateError(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        loading={createCategory.isPending}
+                        onClick={() => createCategory.mutate()}
+                      >
+                        Create
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </Card>
 
           <Card className="space-y-4 p-4">
@@ -315,80 +569,6 @@ function ExpenseFormFields({
                     ))}
                 </select>
               </div>
-            )}
-          </Card>
-
-          {/* Category — roots first; children appear as a second row when relevant. */}
-          <Card className="space-y-3 p-4">
-            <p className="text-xs font-medium text-fg-subtle">Category</p>
-            {categoriesQ.isLoading ? (
-              <Skeleton className="h-9 w-full" />
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryId(null)}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                      categoryId === null
-                        ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                        : "border-line text-fg-muted hover:bg-white/5",
-                    )}
-                  >
-                    None
-                  </button>
-                  {rootCategories.map((cat) => (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => setCategoryId(cat.id)}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                        isRootSelected(cat.id)
-                          ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                          : "border-line text-fg-muted hover:bg-white/5",
-                      )}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: cat.color ?? "var(--color-fg-subtle)" }}
-                      />
-                      {cat.name}
-                    </button>
-                  ))}
-                </div>
-                {childCategories.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-fg-subtle">Subcategory</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {childCategories.map((cat) => (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          onClick={() => setCategoryId(cat.id)}
-                          className={cn(
-                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                            categoryId === cat.id
-                              ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                              : "border-line text-fg-muted hover:bg-white/5",
-                          )}
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="size-2 rounded-full"
-                            style={{
-                              backgroundColor: cat.color ?? "var(--color-fg-subtle)",
-                            }}
-                          />
-                          {cat.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
             )}
           </Card>
 

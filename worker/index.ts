@@ -18,6 +18,7 @@ import { vaultRoutes } from "./routes/vault";
 import { itemsRoutes } from "./routes/items";
 import { expenseRoutes } from "./routes/expenses";
 import { financeRoutes } from "./routes/finance";
+import { fundRoutes } from "./routes/funds";
 import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
@@ -66,6 +67,7 @@ api.route("/vault", vaultRoutes);
 api.route("/items", itemsRoutes);
 api.route("/expenses", expenseRoutes);
 api.route("/finance", financeRoutes);
+api.route("/funds", fundRoutes);
 api.route("/wishlist", wishlistRoutes);
 api.route("/assistant", assistantRoutes);
 
