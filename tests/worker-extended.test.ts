@@ -174,6 +174,7 @@ describe("3. Correct HTTP methods on stub routes", () => {
     { method: "GET",    path: "/api/documents/doc-1" },
     { method: "PATCH",  path: "/api/documents/doc-1" },
     { method: "DELETE", path: "/api/documents/doc-1" },
+    { method: "POST",   path: "/api/documents/doc-1/files/upload" },
     { method: "POST",   path: "/api/documents/doc-1/files/upload-url" },
     { method: "POST",   path: "/api/documents/doc-1/files" },
     { method: "GET",    path: "/api/documents/doc-1/files/file-1/download" },

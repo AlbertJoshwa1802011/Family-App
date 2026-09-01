@@ -19,7 +19,9 @@ export interface DocumentSummary {
 export interface FileVersion {
   id: string;
   documentId: string;
-  driveFileId: string;
+  storageProvider?: "r2" | "drive";
+  r2Key?: string | null;
+  driveFileId: string | null;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -62,13 +64,52 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Uploads a single file to an existing document via the resumable Drive flow:
- *   1. ask the Worker for a Drive resumable session URL,
- *   2. PUT the bytes directly to Drive (the Worker never sees them),
- *   3. record the resulting file metadata in D1.
+ * Uploads a single file to an existing document via R2 multipart:
+ *   POST /documents/:id/files/upload (FormData with `file`).
+ * Falls back to the legacy Drive resumable flow only if the caller opts in.
  * `onProgress` receives 0..1 for the byte-transfer phase.
  */
 export async function uploadDocumentFile(
+  docId: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  const mimeType = file.type || "application/octet-stream";
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/documents/${docId}/files/upload`);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      let message = `Upload failed (${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText) as {
+          error?: string;
+          message?: string;
+        };
+        message = body.message ?? body.error ?? message;
+      } catch {
+        // keep default
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    const form = new FormData();
+    form.append("file", file);
+    form.append("contentType", mimeType);
+    xhr.send(form);
+  });
+}
+
+/** @deprecated Drive path — kept for rare admin/legacy use. Prefer uploadDocumentFile. */
+export async function uploadDocumentFileViaDrive(
   docId: string,
   file: File,
   onProgress?: (fraction: number) => void,
@@ -80,7 +121,6 @@ export async function uploadDocumentFile(
     { method: "POST", body: JSON.stringify({ fileName: file.name, mimeType }) },
   );
 
-  // Direct cross-origin PUT to Google Drive. Use XHR for progress events.
   const driveFileId = await new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", uploadUrl);

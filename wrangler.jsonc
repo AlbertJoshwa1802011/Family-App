@@ -30,6 +30,15 @@
       "id": "bcb22812f2ec49bab095196ff2267e59"
     }
   ],
+  // Document file bytes (passports, insurance PDFs, etc.). First deploy may need:
+  //   npx wrangler r2 bucket create family-vault-files
+  // If the deploy pipeline doesn't auto-create the bucket, see DEPLOY.md §1a.
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "family-vault-files"
+    }
+  ],
   "triggers": {
     "crons": ["0 8 * * *"]
   },

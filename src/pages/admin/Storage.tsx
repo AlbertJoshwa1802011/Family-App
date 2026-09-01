@@ -110,6 +110,11 @@ export function AdminStorage() {
     <>
       <AppBar title="Storage account" back />
       <Page className="space-y-6">
+        <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
+          Google Drive connect &amp; email provider secrets: configure once from a
+          laptop (pending). Document files store in Family Vault cloud (R2) — Drive
+          is optional and does not block the app.
+        </p>
         {errorCode && (
           <Card className="border-danger/40 bg-danger/10 p-4 text-sm text-danger">
             {ERROR_LABELS[errorCode] ?? `Connection failed (${errorCode}).`}
@@ -134,7 +139,8 @@ export function AdminStorage() {
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-fg">Shared Google Drive</div>
               <div className="text-sm text-fg-muted">
-                All family files are uploaded to this account.
+                Optional legacy backend. Primary files use R2.
+                {!data?.connected && !isLoading ? " Pending laptop setup." : ""}
               </div>
             </div>
             {!isLoading && data && (
