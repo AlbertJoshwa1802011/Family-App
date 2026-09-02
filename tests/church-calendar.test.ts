@@ -118,8 +118,8 @@ describe("/api/church", () => {
   });
 
   it("POST /settle snapshots live totals for the month", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
         JSON.stringify({
           success: true,
           funds: [
@@ -134,8 +134,8 @@ describe("/api/church", () => {
           ],
         }),
         { status: 200 },
-      ),
-    );
+      );
+    });
 
     const { env, sqlite } = createTestEnv({
       CONTRIBUTIONS_API_TOKEN: "tok",
@@ -205,7 +205,8 @@ describe("/api/calendar", () => {
   });
 
   it("GET unknown feed → 404 JSON", async () => {
-    const res = await app.request("/api/calendar/feed/nope.ics");
+    const { env } = createTestEnv();
+    const res = await app.request("/api/calendar/feed/nope.ics", {}, env);
     expect(res.status).toBe(404);
   });
 

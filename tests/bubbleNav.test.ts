@@ -17,7 +17,7 @@ describe("clampBubble", () => {
 
 describe("snapBubbleToEdge", () => {
   it("snaps to the left when the centre is on the left half", () => {
-    const snapped = snapBubbleToEdge(20, 400, 390, 844, 360, 64, 12);
+    const snapped = snapBubbleToEdge(20, 400, 390, 844, 200, 64, 12);
     expect(snapped.x).toBe(12);
     expect(snapped.y).toBe(400);
   });

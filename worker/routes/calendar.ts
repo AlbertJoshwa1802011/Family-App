@@ -41,10 +41,10 @@ calendarRoutes.get("/feed-token", requireSession, async (c) => {
 
 calendarRoutes.get("/feed/:file", async (c) => {
   const raw = c.req.param("file");
-  if (!raw.endsWith(".ics")) return c.json({ error: "not_found" }, 404);
+  if (!raw?.endsWith(".ics")) return c.json({ error: "not_found" }, 404);
   const token = raw.slice(0, -4);
 
-  const userId = await c.env.KV.get(`${FEED_KV_PREFIX}${token}`);
+  const userId = await c.env.KV?.get(`${FEED_KV_PREFIX}${token}`);
   if (!userId) return c.json({ error: "not_found" }, 404);
 
   const db = getDb(c.env);
