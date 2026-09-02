@@ -7,8 +7,38 @@ import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, ACTIONS } from "../lib/audit";
+import { notifyEventChange } from "../lib/eventNotify";
+import {
+  deleteGoogleCalendarEvent,
+  upsertGoogleCalendarEvent,
+} from "../lib/googleCalendar";
 
-export const eventRoutes = new Hono<HonoEnv>();
+function whenLabel(startAt: number, allDay: boolean): string {
+  const d = new Date(startAt * 1000);
+  const date = d.toISOString().slice(0, 10);
+  if (allDay) return date;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${date} ${hh}:${mm} UTC`;
+}
+
+async function syncCalendar(
+  env: Parameters<typeof upsertGoogleCalendarEvent>[0],
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  event: {
+    id: string;
+    title: string;
+    description: string | null;
+    location: string | null;
+    startAt: number;
+    endAt: number | null;
+    allDay: boolean;
+    googleCalendarEventId: string | null;
+  },
+) {
+  return upsertGoogleCalendarEvent(env, db, userId, event);
+}
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -48,6 +78,8 @@ function zv<T extends z.ZodType>(s: T) {
       return c.json({ error: "validation_error", issues: result.error.issues }, 400);
   });
 }
+
+export const eventRoutes = new Hono<HonoEnv>();
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -171,7 +203,33 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     .where(eq(schema.events.id, eventId))
     .get();
 
-  return c.json({ event }, 201);
+  let calendar: { status: string; googleCalendarEventId: string | null } = {
+    status: "failed",
+    googleCalendarEventId: null,
+  };
+  if (event) {
+    try {
+      calendar = await syncCalendar(c.env, db, userId, event);
+    } catch (err) {
+      console.error("[events] calendar sync failed:", err);
+    }
+  }
+
+  try {
+    await notifyEventChange(c.env, db, {
+      familyId,
+      actorUserId: userId,
+      eventId,
+      title: data.title,
+      kind: "created",
+      attendeeMemberIds: data.attendeeMemberIds,
+      whenLabel: whenLabel(data.startAt, data.allDay ?? false),
+    });
+  } catch (err) {
+    console.error("[events] notify failed:", err);
+  }
+
+  return c.json({ event, calendar }, 201);
 });
 
 // GET /events/:id — get event with attendees.
@@ -265,7 +323,36 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     targetId: eventId,
   });
 
-  return c.json({ event: updatedEvent });
+  let calendar: { status: string; googleCalendarEventId: string | null } = {
+    status: "failed",
+    googleCalendarEventId: null,
+  };
+  if (updatedEvent) {
+    try {
+      calendar = await syncCalendar(c.env, db, userId, updatedEvent);
+    } catch (err) {
+      console.error("[events] calendar sync failed:", err);
+    }
+  }
+
+  try {
+    await notifyEventChange(c.env, db, {
+      familyId: event.familyId,
+      actorUserId: userId,
+      eventId,
+      title: updatedEvent?.title ?? event.title,
+      kind: "updated",
+      attendeeMemberIds: updates.attendeeMemberIds ?? [],
+      whenLabel: whenLabel(
+        updatedEvent?.startAt ?? event.startAt,
+        updatedEvent?.allDay ?? event.allDay,
+      ),
+    });
+  } catch (err) {
+    console.error("[events] notify failed:", err);
+  }
+
+  return c.json({ event: updatedEvent, calendar });
 });
 
 // DELETE /events/:id — soft delete (status=trashed).
@@ -297,6 +384,8 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
     targetType: "event",
     targetId: eventId,
   });
+
+  await deleteGoogleCalendarEvent(c.env, userId, event.googleCalendarEventId);
 
   return c.json({ ok: true });
 });
@@ -331,6 +420,26 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
     targetType: "event",
     targetId: eventId,
   });
+
+  try {
+    await deleteGoogleCalendarEvent(c.env, userId, event.googleCalendarEventId);
+  } catch (err) {
+    console.error("[events] calendar delete on cancel failed:", err);
+  }
+
+  try {
+    await notifyEventChange(c.env, db, {
+      familyId: event.familyId,
+      actorUserId: userId,
+      eventId,
+      title: event.title,
+      kind: "cancelled",
+      attendeeMemberIds: [],
+      whenLabel: whenLabel(event.startAt, event.allDay),
+    });
+  } catch (err) {
+    console.error("[events] notify failed:", err);
+  }
 
   return c.json({ ok: true });
 });

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
+  Download,
   MapPin,
   Pencil,
   Trash2,
@@ -175,6 +176,20 @@ export function EventDetailPage() {
               {ev.description}
             </p>
           )}
+        </Card>
+
+        <Card className="space-y-2 p-4">
+          <p className="text-xs font-semibold text-fg-muted">Phone calendar</p>
+          <p className="text-sm text-fg-subtle">
+            New events sync to Google Calendar on save (sign in again once to grant calendar access). You can also download an .ics file.
+          </p>
+          <a
+            href={`/api/calendar/events/${ev.id}/ics`}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"
+          >
+            <Download className="size-4" />
+            Download .ics
+          </a>
         </Card>
 
         {/* Attendees */}

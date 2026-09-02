@@ -6,7 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { parseWindows } from "../lib/reminders";
-import { isEmailConfigured, reminderEmailHtml, sendEmail } from "../lib/email";
+import { isEmailConfigured, reminderEmailHtml, sendEmailResult } from "../lib/email";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -199,7 +199,7 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
   const to = (prefs?.reminderEmail ?? user.email).trim().toLowerCase();
   const appUrl = c.env.APP_URL ?? "";
 
-  const ok = await sendEmail(c.env, {
+  const result = await sendEmailResult(c.env, {
     to,
     subject: "Family Vault test reminder",
     html: reminderEmailHtml({
@@ -211,8 +211,11 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
     text: "Family Vault test reminder — delivery is working.",
   });
 
-  if (!ok) {
-    return c.json({ error: "email_send_failed" }, 502);
+  if (!result.ok) {
+    return c.json(
+      { error: result.error ?? "email_send_failed" },
+      result.error === "email_not_configured" ? 503 : 502,
+    );
   }
 
   return c.json({ ok: true, to });

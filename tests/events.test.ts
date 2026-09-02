@@ -195,4 +195,71 @@ describe("GET /api/events/:id nested attendees", () => {
     // Top-level key kept for backward compatibility.
     expect(Array.isArray(body.attendees)).toBe(true);
   });
+
+  it("GET returns the saved fields the edit form needs", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    const startAt = 1_800_000_000;
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "School play",
+      type: "milestone",
+      startAt,
+      endAt: startAt + 3600,
+      allDay: false,
+      location: "Town Hall",
+      description: "Bring flowers",
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      event: { id: string };
+      calendar: { status: string };
+    };
+    expect(created.calendar.status).toBe("skipped_no_token");
+
+    const get = await authed(env, "GET", `/api/events/${created.event.id}`, alice.cookie);
+    const body = (await get.json()) as {
+      event: {
+        title: string;
+        type: string;
+        startAt: number;
+        endAt: number | null;
+        allDay: boolean;
+        location: string | null;
+        description: string | null;
+      };
+    };
+    expect(body.event.title).toBe("School play");
+    expect(body.event.type).toBe("milestone");
+    expect(body.event.startAt).toBe(startAt);
+    expect(body.event.endAt).toBe(startAt + 3600);
+    expect(body.event.allDay).toBe(false);
+    expect(body.event.location).toBe("Town Hall");
+    expect(body.event.description).toBe("Bring flowers");
+  });
+
+  it("POST create writes an in-app notification for the actor", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Picnic",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+
+    const notes = await authed(env, "GET", "/api/notifications", alice.cookie);
+    expect(notes.status).toBe(200);
+    const body = (await notes.json()) as {
+      notifications: { type: string; title: string }[];
+    };
+    expect(body.notifications.some((n) => n.type === "event_created")).toBe(true);
+    expect(body.notifications.some((n) => n.title.includes("Picnic"))).toBe(true);
+  });
 });

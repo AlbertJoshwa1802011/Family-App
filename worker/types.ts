@@ -35,6 +35,13 @@ export interface Env {
   GEMINI_MODEL?: string;
   /** From-address for outbound mail. Must be on a domain verified with Resend. */
   EMAIL_FROM?: string;
+  /**
+   * Origin of the Light of Jesus church contributions app
+   * (Cloudflare Pages). Worker fetches /api/funds and /api/purchases.
+   */
+  CONTRIBUTIONS_API_URL?: string;
+  /** Machine token accepted by the contributions app as ADMIN_API_TOKEN. */
+  CONTRIBUTIONS_API_TOKEN?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

@@ -6,8 +6,8 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
+import { Skeleton } from "../components/ui/Skeleton";
 import { api } from "../lib/api";
-
 import { useAuth } from "../context/AuthContext";
 
 type EventType = "gathering" | "appointment" | "milestone" | "other";
@@ -27,44 +27,149 @@ interface Member {
   picture: string | null;
 }
 
+interface EventPayload {
+  title: string;
+  type: EventType;
+  startAt: number;
+  endAt: number | null;
+  allDay: boolean;
+  location: string | null;
+  description: string | null;
+  attendees?: { memberId: string }[];
+}
+
 interface FormState {
   title: string;
   type: EventType;
-  date: string; // yyyy-mm-dd
+  date: string;
   allDay: boolean;
-  startTime: string; // HH:mm
-  endTime: string; // HH:mm
+  startTime: string;
+  endTime: string;
   location: string;
   description: string;
   attendeeMemberIds: string[];
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 function toUnixSeconds(date: string, time: string): number {
   return Math.floor(new Date(`${date}T${time || "00:00"}`).getTime() / 1000);
 }
 
+/** All-day dates are calendar days, stored as UTC midnight to match GCal/ICS. */
+function utcMidnightSeconds(date: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return toUnixSeconds(date, "00:00");
+  return Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 1000);
+}
+
+function formFromEvent(ev: EventPayload, attendees: { memberId: string }[]): FormState {
+  const start = new Date(ev.startAt * 1000);
+  const end = ev.endAt ? new Date(ev.endAt * 1000) : null;
+  const y = ev.allDay ? start.getUTCFullYear() : start.getFullYear();
+  const mo = ev.allDay ? start.getUTCMonth() : start.getMonth();
+  const d = ev.allDay ? start.getUTCDate() : start.getDate();
+  return {
+    title: ev.title,
+    type: ev.type,
+    date: `${y}-${pad(mo + 1)}-${pad(d)}`,
+    allDay: ev.allDay,
+    startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+    endTime: end ? `${pad(end.getHours())}:${pad(end.getMinutes())}` : "10:00",
+    location: ev.location ?? "",
+    description: ev.description ?? "",
+    attendeeMemberIds: attendees.map((a) => a.memberId),
+  };
+}
+
 export function EventForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+
+  const existingQ = useQuery({
+    queryKey: ["events", id, "form"],
+    queryFn: () =>
+      api<{ event: EventPayload; attendees: { memberId: string }[] }>(`/events/${id}`),
+    enabled: isEdit,
+  });
+
+  if (isEdit && existingQ.isLoading) {
+    return (
+      <>
+        <AppBar title="Edit event" back />
+        <Page>
+          <Card className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-2/3" />
+            <Skeleton className="h-10 w-1/2" />
+          </Card>
+        </Page>
+      </>
+    );
+  }
+
+  if (isEdit && (existingQ.isError || !existingQ.data?.event)) {
+    return (
+      <>
+        <AppBar title="Edit event" back />
+        <Page>
+          <Card className="space-y-2 p-4">
+            <p className="text-sm font-semibold text-fg">Couldn’t load this event</p>
+            <p className="text-sm text-fg-muted">
+              {existingQ.error instanceof Error
+                ? existingQ.error.message
+                : "It may have been deleted."}
+            </p>
+          </Card>
+        </Page>
+      </>
+    );
+  }
+
+  const existing = existingQ.data ?? null;
+  return (
+    <EventFormFields
+      key={existing?.event ? id : "new"}
+      id={id}
+      existing={existing}
+    />
+  );
+}
+
+function EventFormFields({
+  id,
+  existing,
+}: {
+  id: string | undefined;
+  existing: { event: EventPayload; attendees: { memberId: string }[] } | null;
+}) {
+  const isEdit = Boolean(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { families } = useAuth();
-  const activeFamilyId = families[0]?.id;
+  const { activeFamilyId, families } = useAuth();
+  const [today] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const [form, setForm] = useState<FormState>({
-    title: "",
-    type: "other",
-    date: new Date().toISOString().slice(0, 10),
-    allDay: false,
-    startTime: "09:00",
-    endTime: "10:00",
-    location: "",
-    description: "",
-    attendeeMemberIds: [],
+  const [form, setForm] = useState<FormState>(() => {
+    if (existing?.event) {
+      const attendees = existing.event.attendees ?? existing.attendees ?? [];
+      return formFromEvent(existing.event, attendees);
+    }
+    return {
+      title: "",
+      type: "other",
+      date: today,
+      allDay: false,
+      startTime: "09:00",
+      endTime: "10:00",
+      location: "",
+      description: "",
+      attendeeMemberIds: [],
+    };
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Fetch family members for attendee picker
   const { data: membersData } = useQuery({
     queryKey: ["family-members"],
     queryFn: () => api<{ members: Member[] }>("/families/me/members"),
@@ -102,11 +207,16 @@ export function EventForm() {
 
     const targetFamilyId = activeFamilyId || families[0]?.id;
     if (!targetFamilyId && !isEdit) {
-      setErrors((prev) => ({ ...prev, title: "No active family found. Please create a family first." }));
+      setErrors((prev) => ({
+        ...prev,
+        title: "No active family found. Please create a family first.",
+      }));
       return;
     }
 
-    const startAt = toUnixSeconds(form.date, form.allDay ? "00:00" : form.startTime);
+    const startAt = form.allDay
+      ? utcMidnightSeconds(form.date)
+      : toUnixSeconds(form.date, form.startTime);
     const endAt = form.allDay
       ? undefined
       : toUnixSeconds(form.date, form.endTime);
@@ -133,7 +243,7 @@ export function EventForm() {
     set(
       "attendeeMemberIds",
       form.attendeeMemberIds.includes(memberId)
-        ? form.attendeeMemberIds.filter((id) => id !== memberId)
+        ? form.attendeeMemberIds.filter((mid) => mid !== memberId)
         : [...form.attendeeMemberIds, memberId],
     );
   }
@@ -143,7 +253,6 @@ export function EventForm() {
       <AppBar title={isEdit ? "Edit event" : "New event"} back />
       <Page className="space-y-4">
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          {/* Title */}
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">
               Title <span className="text-danger">*</span>
@@ -160,7 +269,6 @@ export function EventForm() {
             )}
           </Card>
 
-          {/* Type */}
           <Card className="p-4">
             <p className="text-xs font-semibold text-fg-muted mb-2">Type</p>
             <div className="flex flex-wrap gap-2">
@@ -181,7 +289,6 @@ export function EventForm() {
             </div>
           </Card>
 
-          {/* Date & Time */}
           <Card className="p-4 space-y-3">
             <div>
               <label className="block text-xs font-semibold text-fg-muted mb-1.5">
@@ -242,7 +349,6 @@ export function EventForm() {
             )}
           </Card>
 
-          {/* Location */}
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">
               Location (optional)
@@ -256,7 +362,6 @@ export function EventForm() {
             />
           </Card>
 
-          {/* Description */}
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">
               Notes (optional)
@@ -270,7 +375,6 @@ export function EventForm() {
             />
           </Card>
 
-          {/* Attendees */}
           {members.length > 0 && (
             <Card className="p-4">
               <p className="text-xs font-semibold text-fg-muted mb-3">
@@ -301,7 +405,7 @@ export function EventForm() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-fg-subtle">
-                Tagged members will be notified when the event is created.
+                You and tagged members get an email when this event is saved.
               </p>
             </Card>
           )}

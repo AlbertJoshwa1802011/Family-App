@@ -25,3 +25,7 @@ GEMINI_MODEL=""
 
 # Secret used to sign sessions and hash invite tokens (use a long random value).
 SESSION_SECRET=""
+
+# CONTRIBUTIONS_API_TOKEN is a Cloudflare Worker secret (same value as the
+# church app's ADMIN_API_TOKEN). Enables live fund + purchase totals.
+CONTRIBUTIONS_API_TOKEN=""

@@ -46,6 +46,7 @@
     "crons": ["0 8 * * *"]
   },
   "vars": {
-    "APP_URL": "https://fam.connect-cloud.workers.dev"
+    "APP_URL": "https://fam.connect-cloud.workers.dev",
+    "CONTRIBUTIONS_API_URL": "https://light-of-jesus-ministry-contributions.pages.dev"
   }
 }

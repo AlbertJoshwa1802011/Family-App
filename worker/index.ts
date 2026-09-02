@@ -21,6 +21,8 @@ import { financeRoutes } from "./routes/finance";
 import { fundRoutes } from "./routes/funds";
 import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
+import { calendarRoutes } from "./routes/calendar";
+import { churchRoutes } from "./routes/church";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
@@ -80,6 +82,8 @@ api.route("/finance", financeRoutes);
 api.route("/funds", fundRoutes);
 api.route("/wishlist", wishlistRoutes);
 api.route("/assistant", assistantRoutes);
+api.route("/calendar", calendarRoutes);
+api.route("/church", churchRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

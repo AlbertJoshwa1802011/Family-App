@@ -5,6 +5,8 @@ export interface NavItem {
   path: string;
   label: string;
   icon: LucideIcon;
+  /** CSS color for the active bubble and icon. */
+  color: string;
   /** If set, the nav item is active when location.pathname starts with this prefix. */
   matchPrefix?: string;
 }
@@ -17,9 +19,9 @@ export interface NavItem {
  * which keeps the tab bar to the destinations used daily.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { path: "/", label: "Home", icon: Home },
-  { path: "/vault", label: "Vault", icon: Shield, matchPrefix: "/vault" },
-  { path: "/documents", label: "Docs", icon: FileText, matchPrefix: "/documents" },
-  { path: "/money", label: "Money", icon: Wallet, matchPrefix: "/money" },
-  { path: "/family", label: "Family", icon: Users, matchPrefix: "/family" },
+  { path: "/", label: "Home", icon: Home, color: "#f59e0b" },
+  { path: "/vault", label: "Vault", icon: Shield, color: "#a855f7", matchPrefix: "/vault" },
+  { path: "/documents", label: "Docs", icon: FileText, color: "#38bdf8", matchPrefix: "/documents" },
+  { path: "/money", label: "Money", icon: Wallet, color: "#22c55e", matchPrefix: "/money" },
+  { path: "/family", label: "Family", icon: Users, color: "#f472b6", matchPrefix: "/family" },
 ];

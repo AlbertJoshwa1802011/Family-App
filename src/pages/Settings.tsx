@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, HardDrive, Info, LogOut, Mail } from "lucide-react";
+import { Bell, CalendarDays, HardDrive, Info, LogOut, Mail } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -107,8 +107,20 @@ function ReminderPrefsCard() {
     mutationFn: () =>
       api<{ ok: true; to: string }>("/notifications/test-email", { method: "POST" }),
     onSuccess: (res) => setTestMsg(`Sent to ${res.to}`),
-    onError: (e: unknown) =>
-      setTestMsg(e instanceof Error ? e.message : "Could not send test email."),
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : "Could not send test email.";
+      if (msg === "email_not_configured") {
+        setTestMsg(
+          "Resend is not configured (RESEND_API_KEY). Emails cannot send until that secret is set.",
+        );
+        return;
+      }
+      if (msg === "email_send_failed" || msg.startsWith("resend_")) {
+        setTestMsg("Resend rejected the send. Check EMAIL_FROM is on a verified domain.");
+        return;
+      }
+      setTestMsg(msg);
+    },
   });
 
   if (isLoading || !data) {
@@ -211,6 +223,53 @@ function ReminderPrefsCard() {
   );
 }
 
+function CalendarFeedCard() {
+  const [url, setUrl] = useState<string | null>(null);
+  const mint = useMutation({
+    mutationFn: () => api<{ url: string }>("/calendar/feed-token", { method: "POST" }),
+    onSuccess: (res) => setUrl(res.url),
+  });
+  const existing = useQuery({
+    queryKey: ["calendar", "feed-token"],
+    queryFn: () => api<{ url: string | null }>("/calendar/feed-token"),
+  });
+  const shown = url ?? existing.data?.url ?? null;
+
+  return (
+    <section className="space-y-2">
+      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+        Google Calendar
+      </h3>
+      <Card className="space-y-3 p-4">
+        <p className="text-sm text-fg-muted">
+          Events write to your Google Calendar on save. Subscribe to the ICS feed
+          as a backup (Google may take hours to refresh a feed).
+        </p>
+        {shown && (
+          <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
+            {shown}
+          </p>
+        )}
+        <Button
+          variant="secondary"
+          fullWidth
+          loading={mint.isPending}
+          leadingIcon={<CalendarDays className="size-4" />}
+          onClick={() => mint.mutate()}
+        >
+          {shown ? "Rotate calendar feed URL" : "Create calendar feed URL"}
+        </Button>
+        <a
+          href="/api/auth/google/start"
+          className="block text-center text-xs font-medium text-vault-400"
+        >
+          Re-connect Google (grants calendar.events)
+        </a>
+      </Card>
+    </section>
+  );
+}
+
 export function Settings() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -241,14 +300,13 @@ export function Settings() {
             Reminders
           </h3>
           <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
-            Pending laptop setup: enable Cloudflare R2 (Dashboard → R2 → add
-            payment method, then create the bucket), optional Google Drive
-            connect, and Resend for emails. The app runs without them — uploads
-            wait until R2 or Drive is ready; reminder emails stay quiet until
-            Resend is set.
+            New events email you immediately. Daily cron still sends lead-time
+            reminders. Use the test button to confirm Resend delivery to your address.
           </p>
           <ReminderPrefsCard />
         </section>
+
+        <CalendarFeedCard />
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">

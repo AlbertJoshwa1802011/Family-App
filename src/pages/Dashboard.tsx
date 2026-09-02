@@ -210,6 +210,10 @@ export function Dashboard() {
       );
     });
 
+  const upcomingEvents = (eventsData?.events ?? [])
+    .filter((e) => e.status === "active" && e.startAt >= nowTime)
+    .slice(0, 5);
+
   return (
     <>
       <AppBar title="Family Vault" trailing={<NotificationBell />} />
@@ -544,6 +548,46 @@ export function Dashboard() {
               ) : (
                 <Card className="divide-y divide-line overflow-hidden card-premium">
                   {selectedDayEvents.map((ev) => {
+                    const colors = eventTypeColor(ev.type);
+                    return (
+                      <ListItem
+                        key={ev.id}
+                        to={`/calendar/events/${ev.id}`}
+                        leading={
+                          <span
+                            className={`flex size-10 items-center justify-center rounded-xl ${colors.bg} ${colors.text}`}
+                          >
+                            <CalendarDays className="size-5" />
+                          </span>
+                        }
+                        title={ev.title}
+                        subtitle={formatEventTime(ev.startAt, ev.endAt, ev.allDay)}
+                      />
+                    );
+                  })}
+                </Card>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold tracking-wider text-fg-subtle uppercase">
+                  Upcoming events
+                </h3>
+                <Link
+                  to="/calendar"
+                  className="text-xs font-semibold text-m3-cyan hover:underline"
+                >
+                  Full calendar
+                </Link>
+              </div>
+              {upcomingEvents.length === 0 ? (
+                <div className="rounded-2xl border border-line bg-surface/30 px-5 py-5 text-center text-xs text-fg-subtle">
+                  Nothing planned in the next 30 days.
+                </div>
+              ) : (
+                <Card className="divide-y divide-line overflow-hidden">
+                  {upcomingEvents.map((ev) => {
                     const colors = eventTypeColor(ev.type);
                     return (
                       <ListItem

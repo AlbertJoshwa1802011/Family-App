@@ -1,82 +1,76 @@
-# 🗄️ Family Vault
+# Family App
 
-A mobile-first **PWA** for families to store important documents (passports, insurance,
-licenses, warranties, medical records…) securely — and **never miss an expiry**.
+A mobile-first **PWA** for one family: documents, vault, calendar, chat-adjacent
+family tools, and money (personal expenses + church fund settlements).
 
-- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4, installable PWA.
-- **Backend:** Cloudflare Worker + Hono (single deployable unit, same-origin API).
-- **Database:** Cloudflare D1 (SQLite) via Drizzle ORM. **Cache:** Cloudflare KV.
-- **Storage:** Documents live in the family owner's Google Drive (5TB) via the Drive API.
-- **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
-- **Reminders:** Daily Cron Trigger → in-app notifications + email (Resend); WhatsApp later.
+**Status: live on `main`.** Merge deploys the Cloudflare Worker and applies D1
+migrations (`.github/workflows/deploy.yml`).
 
-> **Status: Phase 0 — scaffold.** Runnable skeleton (build/lint/typecheck/test green) with
-> stubbed routes. See [`docs/PLAN.md`](docs/PLAN.md) for the phased roadmap,
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design, and
-> [`docs/RESEARCH.md`](docs/RESEARCH.md) / [`docs/REVIEW_NOTES.md`](docs/REVIEW_NOTES.md)
-> for the research + plan-review history.
+## What works today
+
+- **Documents & vault** — family files, expiry reminders, encrypted vault items.
+- **Money / expenses** — fast add, nested spends, coloured categories (built-in
+  + family-created). Private by default.
+- **Church funds** — live collected / purchase totals from
+  [light-of-jesus-ministry-contributions](https://light-of-jesus-ministry-contributions.pages.dev).
+  This app only records **monthly settlements**; it does not duplicate every
+  contribution. Requires Worker secret `CONTRIBUTIONS_API_TOKEN` (same value as
+  the contributions app `ADMIN_API_TOKEN`).
+- **Calendar** — create/edit events (edit form hydrates from `GET /events/:id`).
+  On save, events email you and write to **Google Calendar** (`calendar.events`
+  scope). ICS download + optional subscribe feed as backup (Google polls feeds
+  slowly).
+- **Emails** — event create/update/cancel, daily expiry/event reminders, test
+  send in Settings. Needs `RESEND_API_KEY` and `EMAIL_FROM` on a verified domain.
+- **Navigation** — draggable coloured bubble tab bar (snaps to the left/right
+  edge like iOS AssistiveTouch / GitHub). Position is remembered on the device.
 
 ## Quick start
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # fill in secrets (see below)
-npm run dev                      # Vite + Cloudflare Worker (workerd) with HMR
+cp .dev.vars.example .dev.vars
+npm run db:migrate:local
+npm run dev
 ```
-
-Open the printed local URL. The API is served same-origin under `/api` (try `/api/health`).
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | Dev server (Vite + `@cloudflare/vite-plugin`, real `workerd` + bindings) |
-| `npm run build` | Type-check then build client + worker |
-| `npm run typecheck` | TS type-check (app + worker + config) |
-| `npm run lint` | ESLint (flat config) |
-| `npm run test` | Vitest unit tests |
-| `npm run db:generate` | Generate D1 SQL migrations from the Drizzle schema |
-| `npm run db:migrate:local` | Apply migrations to local D1 |
-| `npm run db:migrate:remote` | Apply migrations to production D1 |
-| `npm run deploy` | Build + `wrangler deploy` |
+| `npm run dev` | Vite + workerd, HMR |
+| `npm run typecheck` / `lint` / `test` / `build` | Gate — all must pass before merge |
+| `npm run db:generate` | After editing `worker/db/schema.ts` |
+| `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |
+| `npm run deploy` | Build + wrangler deploy (normally CI) |
 
-## First-time Cloudflare setup
+## Production secrets
 
 ```bash
-npx wrangler login
-npx wrangler d1 create family-vault-db          # paste database_id into wrangler.jsonc
-npx wrangler kv namespace create KV             # paste id into wrangler.jsonc
-npm run db:generate && npm run db:migrate:remote
-# set secrets:
 npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put GOOGLE_OWNER_REFRESH_TOKEN
-npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put SESSION_SECRET
-npm run deploy
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put EMAIL_FROM
+npx wrangler secret put CONTRIBUTIONS_API_TOKEN   # church app machine token
+# optional:
+npx wrangler secret put GEMINI_API_KEY
 ```
 
-## Google Cloud setup (summary)
+Google Cloud: enable **Drive API** and **Calendar API**. OAuth scopes are
+`openid email profile`, `drive.file`, and `calendar.events`. Existing users
+should sign in once more so Google issues a refresh token that includes calendar.
 
-1. Enable the **Google Drive API**.
-2. **OAuth consent screen** (External): scopes `openid email profile` (identity) + `drive.file`
-   (storage). All non-sensitive → no restricted-scope verification needed.
-3. Create a **Web OAuth client**; add exact redirect URIs (e.g. `https://<app>/api/auth/google/callback`).
-4. **Publish to production** (Testing mode expires refresh tokens after 7 days).
-5. Obtain the owner's long-lived refresh token via an offline-consent flow → store as
-   `GOOGLE_OWNER_REFRESH_TOKEN`.
-
-> ⚠️ **Trust/privacy:** all families' documents physically reside in one Google account's Drive.
-> Acceptable for a single trusted family; see `docs/ARCHITECTURE.md` → "Trust, Privacy & Storage
-> Model" before onboarding unrelated families (Shared Drive + envelope encryption are on the roadmap).
+**Migrations:** merging to `main` runs `wrangler d1 migrations apply` then
+deploys. If categories or settlements 500 with `schema_missing`, re-run the
+Deploy workflow.
 
 ## Project structure
 
 ```
-src/            React PWA (pages, components, context, lib)
-worker/         Hono API + scheduled() cron; db/ (Drizzle schema = source of truth), routes/
-migrations/     Generated D1 SQL migrations
-docs/           PLAN, ARCHITECTURE, RESEARCH, REVIEW_NOTES
-scripts/        Icon generator
-tests/          Vitest
+src/            React PWA
+worker/         Hono API + cron (schema in worker/db/schema.ts)
+migrations/     D1 SQL (0000–0013+)
+tests/          Vitest, real D1 adapter
+docs/           Architecture / features / deploy
 ```

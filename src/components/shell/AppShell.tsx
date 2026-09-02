@@ -12,6 +12,11 @@ import { cn } from "../../lib/cn";
 import { useAuth } from "../../context/AuthContext";
 import { BrandLockup } from "../brand/BrandLockup";
 import { NAV_ITEMS } from "./navItems";
+import {
+  clampBubble,
+  defaultBubblePosition,
+  snapBubbleToEdge,
+} from "../../lib/bubbleNav";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,52 +36,79 @@ function prefersReducedMotion(): boolean {
 // Mobile liquid-glass bottom tab bar
 // ---------------------------------------------------------------------------
 
-const DRAG_MAX_X = 24;
-const SHEET_PEEK_Y = 40;
+const BUBBLE_POS_KEY = "fv:nav-bubble";
+const BUBBLE_PAD = 12;
+const BUBBLE_HEIGHT = 64;
+
+function readBubblePos(): { x: number; y: number } | null {
+  try {
+    const raw = localStorage.getItem(BUBBLE_POS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { x?: number; y?: number };
+    if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function writeBubblePos(next: { x: number; y: number }) {
+  try {
+    localStorage.setItem(BUBBLE_POS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
 
 function MobileBottomTabs() {
   const { pathname } = useLocation();
-  const barRef = useRef<HTMLElement>(null);
-  const [dragX, setDragX] = useState(0);
-  const [dragY, setDragY] = useState(0);
-  const [peeking, setPeeking] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number }>(() => {
+    if (typeof window === "undefined") return { x: 12, y: 12 };
+    const width = Math.min(360, window.innerWidth - 24);
+    return (
+      readBubblePos() ??
+      defaultBubblePosition(
+        window.innerWidth,
+        window.innerHeight,
+        width,
+        BUBBLE_HEIGHT,
+        BUBBLE_PAD,
+      )
+    );
+  });
+  const posRef = useRef(pos);
+  const [dragging, setDragging] = useState(false);
   const [settling, setSettling] = useState(false);
   const pointerId = useRef<number | null>(null);
-  const start = useRef<{ x: number; y: number } | null>(null);
+  const start = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const moved = useRef(false);
   const activeIndex = NAV_ITEMS.findIndex(({ path, matchPrefix }) =>
     isNavActive(path, matchPrefix, pathname),
   );
+  const activeColor = activeIndex >= 0 ? NAV_ITEMS[activeIndex].color : "#6366f1";
 
-  // Reset drag offset when the route changes (adjust state during render).
-  const [dragPath, setDragPath] = useState(pathname);
-  if (pathname !== dragPath) {
-    setDragPath(pathname);
-    setDragX(0);
-    setDragY(0);
-    setPeeking(false);
-    setSettling(false);
-  }
-
-  const springBack = useCallback(() => {
-    if (prefersReducedMotion()) {
-      setDragX(0);
-      setDragY(0);
-      setPeeking(false);
-      setSettling(false);
-      return;
-    }
-    setSettling(true);
-    setDragX(0);
-    setDragY(0);
-    setPeeking(false);
+  const persistSnap = useCallback((next: { x: number; y: number }) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const width = Math.min(360, vw - 24);
+    const snapped = prefersReducedMotion()
+      ? clampBubble(next.x, next.y, vw, vh, width, BUBBLE_HEIGHT, BUBBLE_PAD)
+      : snapBubbleToEdge(next.x, next.y, vw, vh, width, BUBBLE_HEIGHT, BUBBLE_PAD);
+    setSettling(!prefersReducedMotion());
+    posRef.current = snapped;
+    setPos(snapped);
+    writeBubblePos(snapped);
     window.setTimeout(() => setSettling(false), 420);
   }, []);
 
   function onPointerDown(e: ReactPointerEvent) {
-    // Don't steal clicks from NavLinks — only start drag after slight move.
     if (e.button !== 0) return;
     pointerId.current = e.pointerId;
-    start.current = { x: e.clientX, y: e.clientY };
+    start.current = { x: e.clientX, y: e.clientY, px: posRef.current.x, py: posRef.current.y };
+    moved.current = false;
     setSettling(false);
   }
 
@@ -84,30 +116,28 @@ function MobileBottomTabs() {
     if (pointerId.current !== e.pointerId || !start.current) return;
     const dx = e.clientX - start.current.x;
     const dy = e.clientY - start.current.y;
-
-    // Require a small threshold before capturing so taps still navigate.
-    if (Math.abs(dx) < 6 && Math.abs(dy) < 6 && !peeking) return;
-
+    if (!moved.current && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    moved.current = true;
+    setDragging(true);
     try {
       barRef.current?.setPointerCapture(e.pointerId);
     } catch {
       // ignore
     }
-
-    if (prefersReducedMotion()) return;
-
-    // Rubber-band horizontal drag
-    const clampedX = Math.max(-DRAG_MAX_X, Math.min(DRAG_MAX_X, dx * 0.55));
-    setDragX(clampedX);
-
-    // Vertical up → sheet peek (don't navigate away)
-    if (dy < -SHEET_PEEK_Y) {
-      setPeeking(true);
-      setDragY(Math.max(-56, dy * 0.35));
-    } else {
-      setPeeking(false);
-      setDragY(Math.max(-12, Math.min(0, dy * 0.2)));
-    }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const width = Math.min(360, vw - 24);
+    const next = clampBubble(
+      start.current.px + dx,
+      start.current.py + dy,
+      vw,
+      vh,
+      width,
+      BUBBLE_HEIGHT,
+      BUBBLE_PAD,
+    );
+    posRef.current = next;
+    setPos(next);
   }
 
   function onPointerUp(e: ReactPointerEvent) {
@@ -119,14 +149,19 @@ function MobileBottomTabs() {
     } catch {
       // ignore
     }
-    springBack();
+    setDragging(false);
+    if (moved.current) persistSnap(posRef.current);
   }
 
   const pillStyle: CSSProperties = {
-    transform: `translate3d(${dragX}px, ${dragY}px, 0)`,
+    left: pos.x,
+    top: pos.y,
+    width: "min(360px, calc(100vw - 24px))",
     transition: settling
-      ? "transform 420ms cubic-bezier(0.22, 1.2, 0.36, 1)"
+      ? "left 420ms cubic-bezier(0.22, 1.2, 0.36, 1), top 420ms cubic-bezier(0.22, 1.2, 0.36, 1)"
       : undefined,
+    borderColor: `${activeColor}55`,
+    background: "linear-gradient(180deg, rgba(15,23,42,0.88), rgba(15,23,42,0.78))",
   };
 
   const bubbleLeft =
@@ -135,17 +170,15 @@ function MobileBottomTabs() {
 
   return (
     <nav
-      ref={barRef}
       aria-label="Primary navigation"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 md:hidden"
-      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+      className="pointer-events-none fixed inset-0 z-30 md:hidden"
     >
       <div
+        ref={barRef}
         className={cn(
-          "pointer-events-auto relative mx-3 mb-2 touch-none select-none",
-          "rounded-full border border-white/15 bg-white/10 shadow-lg backdrop-blur-2xl",
-          "overflow-hidden",
-          peeking && "liquid-sheen",
+          "pointer-events-auto absolute touch-none select-none",
+          "rounded-full border shadow-lg backdrop-blur-2xl overflow-hidden",
+          dragging && "scale-[1.02] shadow-2xl",
         )}
         style={pillStyle}
         onPointerDown={onPointerDown}
@@ -153,34 +186,36 @@ function MobileBottomTabs() {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {/* Morphing active bubble */}
         {activeIndex >= 0 && (
           <span
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute top-1 bottom-1 rounded-full",
-              "bg-white/18 shadow-inner",
               "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
               "motion-reduce:transition-none",
             )}
-            style={{ left: bubbleLeft, width: bubbleWidth }}
+            style={{
+              left: bubbleLeft,
+              width: bubbleWidth,
+              backgroundColor: `${activeColor}40`,
+              boxShadow: `0 0 18px ${activeColor}66`,
+            }}
           />
         )}
 
         <ul className="relative z-10 flex items-stretch">
-          {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix }) => {
+          {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
             const active = isNavActive(path, matchPrefix, pathname);
             return (
               <li key={path} className="flex-1">
                 <NavLink
                   to={path}
                   end={path === "/"}
-                  className={cn(
-                    "no-select flex min-h-14 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition-colors",
-                    active
-                      ? "text-white"
-                      : "text-fg-subtle/90 hover:text-fg-muted",
-                  )}
+                  className="no-select flex min-h-14 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium"
+                  style={{ color: active ? color : `${color}aa` }}
+                  onClick={(ev) => {
+                    if (moved.current) ev.preventDefault();
+                  }}
                 >
                   <Icon
                     className={cn(
@@ -220,7 +255,7 @@ function NavRail() {
       </div>
 
       <ul className="flex flex-1 flex-col items-center gap-1 py-3">
-        {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix }) => {
+        {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (
             <li key={path}>
@@ -231,11 +266,13 @@ function NavRail() {
                 aria-label={label}
                 className={cn(
                   "no-select flex items-center justify-center rounded-xl transition-colors",
-                  active
-                    ? "bg-vault-500/15 text-vault-400"
-                    : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
+                  active ? "bg-white/10" : "hover:bg-white/5",
                 )}
-                style={{ minWidth: "var(--tap-min)", minHeight: "var(--tap-min)" }}
+                style={{
+                  minWidth: "var(--tap-min)",
+                  minHeight: "var(--tap-min)",
+                  color: active ? color : `${color}99`,
+                }}
               >
                 <Icon
                   className="size-5"
@@ -302,7 +339,7 @@ function NavSidebar() {
       </div>
 
       <ul className="flex flex-1 flex-col gap-1 px-2 py-3">
-        {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix }) => {
+        {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (
             <li key={path}>
@@ -311,11 +348,12 @@ function NavSidebar() {
                 end={path === "/"}
                 className={cn(
                   "no-select flex w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-vault-500/15 text-vault-400"
-                    : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
+                  active ? "bg-white/10" : "hover:bg-white/5 text-fg-subtle",
                 )}
-                style={{ minHeight: "var(--tap-min)" }}
+                style={{
+                  minHeight: "var(--tap-min)",
+                  color: active ? color : undefined,
+                }}
               >
                 <Icon
                   className="size-5 shrink-0"

@@ -340,6 +340,8 @@ export const events = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
+    // Google Calendar event id on the user's primary calendar (best-effort sync).
+    googleCalendarEventId: text("google_calendar_event_id"),
   },
   (t) => [
     index("idx_event_family_start").on(t.familyId, t.startAt),
@@ -1349,5 +1351,32 @@ export const fundActivity = sqliteTable(
   },
   (t) => [
     index("idx_fund_activity_fund_created").on(t.fundId, t.createdAt),
+  ],
+);
+
+// Settlements against live church-contribution funds (external source of truth
+// for collected + spent). Family Vault only records "I settled this month".
+export const churchSettlements = sqliteTable(
+  "church_settlements",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    fundSlug: text("fund_slug").notNull(),
+    periodKey: text("period_key").notNull(), // yyyy-mm
+    collectedMinor: integer("collected_minor").notNull(),
+    spentMinor: integer("spent_minor").notNull(),
+    remainingMinor: integer("remaining_minor").notNull(),
+    settledAt: integer("settled_at").notNull(),
+    settledByUserId: text("settled_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_church_settlement_period").on(t.familyId, t.fundSlug, t.periodKey),
+    index("idx_church_settlements_family").on(t.familyId, t.settledAt),
   ],
 );

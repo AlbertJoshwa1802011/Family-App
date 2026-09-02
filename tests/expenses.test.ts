@@ -525,11 +525,12 @@ describe("expenses: categories", () => {
     const res = await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      categories: { id: string; name: string }[];
+      categories: { id: string; name: string; color: string | null }[];
       tree: { id: string; children: unknown[] }[];
     };
     expect(body.categories.length).toBeGreaterThan(5);
     expect(body.categories.some((c) => c.id.startsWith("builtin_"))).toBe(true);
+    expect(body.categories.some((c) => c.color && c.color.startsWith("#"))).toBe(true);
     const groceries = body.tree.find((t) => t.id === "builtin_groceries");
     expect(groceries?.children.length).toBeGreaterThan(0);
   });

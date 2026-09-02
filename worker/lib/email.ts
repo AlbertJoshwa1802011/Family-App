@@ -36,14 +36,22 @@ export interface EmailMessage {
   text?: string;
 }
 
+export interface SendEmailResult {
+  ok: boolean;
+  error?: string;
+}
+
 /**
- * Sends one email. Returns true on a 2xx Resend response, false otherwise
- * (including when email is not configured). Never throws.
+ * Sends one email. Never throws. Cron callers should use `sendEmail` (boolean).
+ * Interactive callers (test-email) use `sendEmailResult` so the UI can show why.
  */
-export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
+export async function sendEmailResult(
+  env: Env,
+  msg: EmailMessage,
+): Promise<SendEmailResult> {
   if (!env.RESEND_API_KEY) {
     console.log(`[email] skipped (no RESEND_API_KEY): to=${msg.to} subject=${msg.subject}`);
-    return false;
+    return { ok: false, error: "email_not_configured" };
   }
   try {
     const res = await fetch(RESEND_API, {
@@ -61,14 +69,23 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
       }),
     });
     if (!res.ok) {
-      console.error(`[email] Resend ${res.status} for to=${msg.to}`);
-      return false;
+      const detail = (await res.text()).slice(0, 300);
+      console.error(`[email] Resend ${res.status} for to=${msg.to}: ${detail}`);
+      return { ok: false, error: `resend_${res.status}` };
     }
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error(`[email] send failed for to=${msg.to}:`, err);
-    return false;
+    return { ok: false, error: "email_send_failed" };
   }
+}
+
+/**
+ * Sends one email. Returns true on a 2xx Resend response, false otherwise
+ * (including when email is not configured). Never throws.
+ */
+export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
+  return (await sendEmailResult(env, msg)).ok;
 }
 
 /** Minimal, inline-styled HTML wrapper for a reminder email. */
