@@ -15,7 +15,7 @@ export const taskRoutes = new Hono<HonoEnv>();
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
-  .optional();
+  .nullish();
 
 const subtaskSchema = z.object({
   id: z.string(),
@@ -23,32 +23,41 @@ const subtaskSchema = z.object({
   done: z.boolean().default(false),
 });
 
+const optionalText = z.string().max(2000).nullish();
+const optionalId = z.string().min(1).nullish();
+
 const createTaskSchema = z.object({
   familyId: z.string().min(1),
   title: z.string().min(1).max(300),
-  notes: z.string().max(2000).optional(),
-  assignedToMemberId: z.string().optional(),
+  notes: optionalText,
+  assignedToMemberId: optionalId,
   dueDate: isoDate,
-  relatedDocumentId: z.string().optional(),
-  relatedEventId: z.string().optional(),
-  referredTaskId: z.string().optional(),
-  subtasks: z.array(subtaskSchema).max(20).optional(),
-  reminderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd").optional(),
-  remindMemberId: z.string().optional(),
+  relatedDocumentId: optionalId,
+  relatedEventId: optionalId,
+  referredTaskId: optionalId,
+  subtasks: z.array(subtaskSchema).max(20).nullish(),
+  reminderDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
+    .nullish(),
+  remindMemberId: optionalId,
 });
 
 const updateTaskSchema = z.object({
   title: z.string().min(1).max(300).optional(),
-  notes: z.string().max(2000).optional(),
-  assignedToMemberId: z.string().nullable().optional(),
+  notes: optionalText,
+  assignedToMemberId: optionalId,
   dueDate: isoDate,
   status: z.enum(["open", "done", "archived"]).optional(),
-  relatedDocumentId: z.string().nullable().optional(),
-  relatedEventId: z.string().nullable().optional(),
-  referredTaskId: z.string().nullable().optional(),
-  subtasks: z.array(subtaskSchema).max(20).optional(),
-  reminderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd").nullable().optional(),
-  remindMemberId: z.string().nullable().optional(),
+  relatedDocumentId: optionalId,
+  relatedEventId: optionalId,
+  referredTaskId: optionalId,
+  subtasks: z.array(subtaskSchema).max(20).nullish(),
+  reminderDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
+    .nullish(),
+  remindMemberId: optionalId,
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -56,6 +65,22 @@ function zv<T extends z.ZodType>(s: T) {
     if (!result.success)
       return c.json({ error: "validation_error", issues: result.error.issues }, 400);
   });
+}
+
+type Subtask = { id: string; title: string; done: boolean };
+
+function parseSubtasks(json: string | null | undefined): Subtask[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as Subtask[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function decorateTask<T extends { subtasksJson?: string | null }>(row: T) {
+  return { ...row, subtasks: parseSubtasks(row.subtasksJson) };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -102,7 +127,7 @@ taskRoutes.get("/", requireSession, async (c) => {
     .where(and(...(conditions as [typeof conditions[0], ...typeof conditions])))
     .orderBy(asc(schema.tasks.dueDate), desc(schema.tasks.createdAt));
 
-  return c.json({ tasks });
+  return c.json({ tasks: tasks.map(decorateTask) });
 });
 
 // POST /tasks — create a task.
@@ -121,17 +146,17 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     id: taskId,
     familyId: data.familyId,
     title: data.title,
-    notes: data.notes,
-    assignedToMemberId: data.assignedToMemberId,
+    notes: data.notes ?? undefined,
+    assignedToMemberId: data.assignedToMemberId ?? undefined,
     dueDate: data.dueDate,
     status: "open",
     createdBy: userId,
-    relatedDocumentId: data.relatedDocumentId,
-    relatedEventId: data.relatedEventId,
-    referredTaskId: data.referredTaskId,
+    relatedDocumentId: data.relatedDocumentId ?? undefined,
+    relatedEventId: data.relatedEventId ?? undefined,
+    referredTaskId: data.referredTaskId ?? undefined,
     subtasksJson: data.subtasks ? JSON.stringify(data.subtasks) : undefined,
-    reminderDate: data.reminderDate,
-    remindMemberId: data.remindMemberId,
+    reminderDate: data.reminderDate ?? undefined,
+    remindMemberId: data.remindMemberId ?? undefined,
     updatedAt: now,
   });
 
@@ -149,7 +174,8 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     .where(eq(schema.tasks.id, taskId))
     .get();
 
-  return c.json({ task }, 201);
+  if (!task) return c.json({ error: "internal_error" }, 500);
+  return c.json({ task: decorateTask(task) }, 201);
 });
 
 // GET /tasks/:id
@@ -168,7 +194,7 @@ taskRoutes.get("/:id", requireSession, async (c) => {
   const membership = await requireFamilyMember(c, task.familyId);
   if (membership instanceof Response) return membership;
 
-  return c.json({ task });
+  return c.json({ task: decorateTask(task) });
 });
 
 // PATCH /tasks/:id — update task fields or toggle status.
@@ -229,7 +255,7 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
     .where(eq(schema.tasks.id, taskId))
     .get();
 
-  return c.json({ task: updatedTask });
+  return c.json({ task: updatedTask ? decorateTask(updatedTask) : updatedTask });
 });
 
 // DELETE /tasks/:id — hard delete.

@@ -92,6 +92,13 @@
       "when": 1788225000000,
       "tag": "0012_r2_document_files",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1788377055733,
+      "tag": "0013_striped_the_renegades",
+      "breakpoints": true
     }
   ]
 }

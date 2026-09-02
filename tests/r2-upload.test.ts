@@ -47,8 +47,8 @@ describe("POST /api/documents/:id/files/upload", () => {
     expect(body.error).toBeTruthy();
   });
 
-  it("returns 503 r2_not_configured when FILES binding is missing", async () => {
-    const { env, sqlite } = createTestEnv(); // no FILES
+  it("returns 503 storage_not_configured when FILES and Drive are both missing", async () => {
+    const { env, sqlite } = createTestEnv(); // no FILES, no storage account
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
     const actor = seedActor(sqlite, family.id, "owner");
@@ -70,8 +70,8 @@ describe("POST /api/documents/:id/files/upload", () => {
     );
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string; message?: string };
-    expect(body.error).toBe("r2_not_configured");
-    expect(body.message).toMatch(/R2/i);
+    expect(body.error).toBe("storage_not_configured");
+    expect(body.message).toMatch(/Google Drive/i);
   });
 
   it("returns 400 validation_error when file field is missing", async () => {

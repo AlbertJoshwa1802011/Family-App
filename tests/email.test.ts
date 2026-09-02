@@ -13,11 +13,19 @@ import {
 } from "../worker/lib/email";
 import type { Env } from "../worker/types";
 
+function stubKv(): KVNamespace {
+  return {
+    get: async () => null,
+    put: async () => {},
+    delete: async () => {},
+  } as unknown as KVNamespace;
+}
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: {} as Fetcher,
     DB: {} as D1Database,
-    KV: {} as KVNamespace,
+    KV: stubKv(),
     APP_URL: "https://vault.example",
     ...overrides,
   };
@@ -67,7 +75,7 @@ describe("sendEmail", () => {
     expect(headers.Authorization).toBe("Bearer re_test");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.to).toBe("a@b.com");
-    expect(body.subject).toBe("Expiring soon");
+    expect(body.subject).toBe("[Family Vault reminder] Expiring soon");
   });
 
   it("returns false on a non-2xx Resend response", async () => {

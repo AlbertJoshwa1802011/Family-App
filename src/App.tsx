@@ -34,6 +34,7 @@ import { FundDetail } from "./pages/money/FundDetail";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
+import { DeviceLockGate } from "./components/DeviceLockGate";
 import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -67,25 +68,29 @@ export default function App() {
         >
           <Route path="/" element={<Dashboard />} />
 
-          {/* Vault */}
-          <Route path="/vault" element={<Vault />} />
-          <Route path="/vault/new" element={<VaultItemForm />} />
-          <Route path="/vault/:id" element={<VaultItemDetail />} />
-          <Route path="/vault/:id/edit" element={<VaultItemForm />} />
+          {/* Vault — Face ID / PIN every visit */}
+          <Route element={<DeviceLockGate section="vault" title="Vault" />}>
+            <Route path="/vault" element={<Vault />} />
+            <Route path="/vault/new" element={<VaultItemForm />} />
+            <Route path="/vault/:id" element={<VaultItemDetail />} />
+            <Route path="/vault/:id/edit" element={<VaultItemForm />} />
+          </Route>
 
-          {/* Money — one section: the plan, the ledger, commitments, wishlist */}
-          <Route path="/money" element={<MoneyOverview />} />
-          <Route path="/money/settings" element={<MoneySettings />} />
-          <Route path="/money/expenses" element={<Expenses />} />
-          <Route path="/money/expenses/new" element={<ExpenseForm />} />
-          <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
-          <Route path="/money/expenses/:id/edit" element={<ExpenseForm />} />
-          <Route path="/money/funds" element={<Funds />} />
-          <Route path="/money/funds/:id" element={<FundDetail />} />
-          <Route path="/money/commitments" element={<Commitments />} />
-          <Route path="/money/commitments/new" element={<CommitmentForm />} />
-          <Route path="/money/commitments/:id/edit" element={<CommitmentForm />} />
-          <Route path="/money/wishlist" element={<Wishlist />} />
+          {/* Money — Face ID / PIN every visit */}
+          <Route element={<DeviceLockGate section="money" title="Money" />}>
+            <Route path="/money" element={<MoneyOverview />} />
+            <Route path="/money/settings" element={<MoneySettings />} />
+            <Route path="/money/expenses" element={<Expenses />} />
+            <Route path="/money/expenses/new" element={<ExpenseForm />} />
+            <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
+            <Route path="/money/expenses/:id/edit" element={<ExpenseForm />} />
+            <Route path="/money/funds" element={<Funds />} />
+            <Route path="/money/funds/:id" element={<FundDetail />} />
+            <Route path="/money/commitments" element={<Commitments />} />
+            <Route path="/money/commitments/new" element={<CommitmentForm />} />
+            <Route path="/money/commitments/:id/edit" element={<CommitmentForm />} />
+            <Route path="/money/wishlist" element={<Wishlist />} />
+          </Route>
 
           {/* Legacy expense paths, kept so existing links and bookmarks work. */}
           <Route path="/expenses" element={<Navigate to="/money/expenses" replace />} />

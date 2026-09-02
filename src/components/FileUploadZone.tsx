@@ -66,7 +66,7 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
         setState("success");
         onSuccess();
       } catch (e) {
-        const code = e instanceof ApiError ? e.message : "";
+        const code = e instanceof ApiError ? e.code : "";
         const isPending =
           code === "storage_not_configured" ||
           code === "r2_not_configured" ||
@@ -76,8 +76,8 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
         setError(
           isPending
             ? user?.isPlatformAdmin
-              ? "File storage is pending laptop setup: enable Cloudflare R2 in the Dashboard (add a payment method — free tier still applies), uncomment the R2 binding in wrangler, create the bucket, and redeploy. Google Drive connect is an optional fallback."
-              : "File storage is not ready yet. Please try again later, or ask a family admin."
+              ? "File storage is not connected. Open Settings → Storage and connect the family Google Drive (the Gmail that holds files). Cloudflare R2 is optional."
+              : "File storage is not ready yet. Ask a family admin to connect Google Drive under Settings → Storage."
             : e instanceof Error
               ? e.message
               : "Upload failed. Please try again.",
@@ -113,8 +113,7 @@ export function FileUploadZone({ documentId, onSuccess }: Props) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-fg-muted">
-        Prefers Family Vault cloud (R2). Until R2 is enabled, uploads try Google
-        Drive when connected (pending laptop setup).
+        Prefers Family Vault cloud (R2) when enabled; otherwise Google Drive.
       </p>
       <input
         ref={inputRef}

@@ -8,6 +8,7 @@ import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { LiquidPillTabs } from "../../components/ui/LiquidPillTabs";
 import { useAuth } from "../../context/AuthContext";
 import { api, ApiError } from "../../lib/api";
 import {
@@ -15,7 +16,6 @@ import {
   parseMajorToMinor,
   todayIsoDate,
 } from "../../lib/money";
-import { cn } from "../../lib/cn";
 
 interface FundBalances {
   contributionsMinor: number;
@@ -280,39 +280,20 @@ export function FundDetail() {
           )}
         </Card>
 
-        <div
-          role="tablist"
-          aria-label="Fund sections"
-          className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-surface p-1"
-        >
-          {(
-            [
-              ["contributions", "Contributions"],
-              ["spends", "Spends"],
-              ["settle", "Settle"],
-              ["activity", "Activity"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              onClick={() => {
-                setTab(key);
-                setFormError(null);
-              }}
-              className={cn(
-                "flex-1 rounded-lg px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors",
-                tab === key
-                  ? "bg-vault-500/15 text-vault-300"
-                  : "text-fg-subtle hover:text-fg-muted",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <LiquidPillTabs<Tab>
+          ariaLabel="Fund sections"
+          value={tab}
+          onChange={(key) => {
+            setTab(key);
+            setFormError(null);
+          }}
+          items={[
+            { id: "contributions", label: "Contributions" },
+            { id: "spends", label: "Spends" },
+            { id: "settle", label: "Settle" },
+            { id: "activity", label: "Activity" },
+          ]}
+        />
 
         {formError && (
           <p role="alert" className="text-sm text-danger">

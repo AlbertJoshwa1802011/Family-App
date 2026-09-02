@@ -463,9 +463,44 @@ export const contacts = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
+    /** Google People API resource name (`people/c...`) when synced. */
+    googleResourceName: text("google_resource_name"),
+    googleEtag: text("google_etag"),
+    lastPushedAt: integer("last_pushed_at"),
   },
-  (t) => [index("idx_contact_family").on(t.familyId)],
+  (t) => [
+    index("idx_contact_family").on(t.familyId),
+    unique("uq_contact_google_resource").on(t.familyId, t.googleResourceName),
+  ],
 );
+
+// Platform authenticator (Face ID / fingerprint / Windows Hello) per user.
+export const deviceCredentials = sqliteTable(
+  "device_credentials",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Base64url credential id from the authenticator. */
+    credentialId: text("credential_id").notNull().unique(),
+    /** JWK JSON of the ES256 public key. */
+    publicKeyJwk: text("public_key_jwk").notNull(),
+    counter: integer("counter").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_device_cred_user").on(t.userId)],
+);
+
+// Fallback 6-digit PIN when WebAuthn is unavailable (desktop without biometrics).
+export const devicePins = sqliteTable("device_pins", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  pinHash: text("pin_hash").notNull(),
+  salt: text("salt").notNull(),
+  createdAt: integer("created_at").notNull().default(now),
+});
 
 // ── Member Health Notes ──────────────────────────────────────────────────────
 

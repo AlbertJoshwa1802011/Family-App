@@ -50,6 +50,7 @@ interface TaskDetail {
   status: "open" | "done" | "archived";
   referredTaskId?: string | null;
   subtasksJson?: string | null;
+  subtasks?: Subtask[];
   reminderDate?: string | null;
   remindMemberId?: string | null;
 }
@@ -328,6 +329,7 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
     remindMemberId: task?.remindMemberId ?? "",
   }));
   const [subtasks, setSubtasks] = useState<Subtask[]>(() => {
+    if (task?.subtasks && Array.isArray(task.subtasks)) return task.subtasks;
     if (!task?.subtasksJson) return [];
     try {
       return JSON.parse(task.subtasksJson) as Subtask[];
@@ -399,15 +401,19 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
       return;
     }
 
+    const cleanSubtasks = subtasks
+      .map((s) => ({ ...s, title: s.title.trim() }))
+      .filter((s) => s.title.length > 0);
+
     const payload: Record<string, unknown> = {
       title: form.title.trim(),
-      notes: form.notes.trim() || null,
-      assignedToMemberId: form.assignedToMemberId || null,
+      notes: form.notes.trim() || undefined,
+      assignedToMemberId: form.assignedToMemberId || undefined,
       dueDate: form.dueDate || undefined,
-      referredTaskId: form.referredTaskId || null,
-      subtasks: subtasks.length > 0 ? subtasks : undefined,
-      reminderDate: form.reminderDate || null,
-      remindMemberId: form.remindMemberId || null,
+      referredTaskId: form.referredTaskId || undefined,
+      subtasks: cleanSubtasks.length > 0 ? cleanSubtasks : undefined,
+      reminderDate: form.reminderDate || undefined,
+      remindMemberId: form.remindMemberId || undefined,
     };
 
     if (!isEdit) {

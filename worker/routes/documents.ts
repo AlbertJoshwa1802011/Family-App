@@ -13,6 +13,7 @@ import {
   createDriveFolder,
   createResumableUploadUrl,
   downloadDriveFile,
+  uploadDriveFileBytes,
   STORAGE_ACCOUNT_ID,
   DriveError,
 } from "../lib/drive";
@@ -401,17 +402,6 @@ documentRoutes.post("/:id/files/upload", requireSession, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  if (!isR2Configured(c.env) || !c.env.FILES) {
-    return c.json(
-      {
-        error: "r2_not_configured",
-        message:
-          "Document cloud storage (R2) is not configured yet. Files cannot be uploaded until the FILES bucket is bound.",
-      },
-      503,
-    );
-  }
-
   let form: FormData;
   try {
     form = await c.req.formData();
@@ -487,25 +477,67 @@ documentRoutes.post("/:id/files/upload", requireSession, async (c) => {
 
   const version = (prev?.version ?? 0) + 1;
   const fileId = crypto.randomUUID();
-  const r2Key = buildR2Key({
-    familyId: doc.familyId,
-    documentId: docId,
-    fileId,
-    fileName,
-  });
-
   const bytes = await blob.arrayBuffer();
-  await putObject(c.env.FILES, r2Key, bytes, {
-    contentType: mimeType,
-    customMetadata: { documentId: docId, fileId, familyId: doc.familyId },
-  });
+
+  let storageProvider: "r2" | "drive" = "r2";
+  let r2Key: string | null = null;
+  let driveFileId: string | null = null;
+
+  if (isR2Configured(c.env) && c.env.FILES) {
+    r2Key = buildR2Key({
+      familyId: doc.familyId,
+      documentId: docId,
+      fileId,
+      fileName,
+    });
+    await putObject(c.env.FILES, r2Key, bytes, {
+      contentType: mimeType,
+      customMetadata: { documentId: docId, fileId, familyId: doc.familyId },
+    });
+  } else if (await isStorageConfigured(c.env)) {
+    try {
+      const family = await db
+        .select()
+        .from(schema.families)
+        .where(eq(schema.families.id, doc.familyId))
+        .get();
+      if (!family) return c.json({ error: "not_found" }, 404);
+      const folderId = await ensureDriveFolder(c.env, family);
+      const accessToken = await getStorageAccessToken(c.env);
+      driveFileId = await uploadDriveFileBytes(
+        accessToken,
+        folderId,
+        fileName,
+        mimeType,
+        bytes,
+      );
+      storageProvider = "drive";
+    } catch (e) {
+      if (e instanceof DriveError) {
+        return c.json(
+          { error: "drive_error", message: e.message },
+          e.statusCode as 502 | 503,
+        );
+      }
+      throw e;
+    }
+  } else {
+    return c.json(
+      {
+        error: "storage_not_configured",
+        message:
+          "File storage is not connected. A family admin needs to connect Google Drive under Settings → Storage. Cloudflare R2 is optional.",
+      },
+      503,
+    );
+  }
 
   await db.insert(schema.files).values({
     id: fileId,
     documentId: docId,
-    storageProvider: "r2",
+    storageProvider,
     r2Key,
-    driveFileId: null,
+    driveFileId,
     fileName,
     mimeType,
     sizeBytes: blob.size,
@@ -531,7 +563,7 @@ documentRoutes.post("/:id/files/upload", requireSession, async (c) => {
       mimeType,
       sizeBytes: blob.size,
       version,
-      storageProvider: "r2",
+      storageProvider,
     },
   });
 

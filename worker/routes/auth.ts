@@ -4,10 +4,20 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
+import { requireSession } from "../middleware/requireSession";
 import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { audit, ACTIONS } from "../lib/audit";
 import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
+import {
+  LOGIN_SCOPES,
+  extraScopesFromConnect,
+  storeGrantedScopes,
+  refreshKey,
+  accessKey,
+  GOOGLE_SCOPES,
+  userHasScope,
+} from "../lib/google";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -115,6 +125,16 @@ authRoutes.get("/me", async (c) => {
   });
 });
 
+// GET /auth/google/status — which extra Google scopes this session has granted.
+authRoutes.get("/google/status", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const [contacts, gmail] = await Promise.all([
+    userHasScope(c.env, userId, GOOGLE_SCOPES.contacts),
+    userHasScope(c.env, userId, GOOGLE_SCOPES.gmailSend),
+  ]);
+  return c.json({ contacts, gmail });
+});
+
 // GET /auth/google/start — build and return a Google OAuth redirect (PKCE).
 // Returns 302 redirect to the Google auth URL.
 authRoutes.get("/google/start", async (c) => {
@@ -125,6 +145,10 @@ authRoutes.get("/google/start", async (c) => {
     return c.json({ error: "oauth_not_configured" }, 503);
   }
 
+  const connect = c.req.query("connect") ?? "";
+  const extra = extraScopesFromConnect(connect);
+  const returnTo = c.req.query("returnTo") || "/";
+
   // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
   const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
   const codeChallenge = await sha256Base64url(codeVerifier);
@@ -133,7 +157,7 @@ authRoutes.get("/google/start", async (c) => {
   // Persist {codeVerifier} in KV keyed by state; expires in 10 minutes
   await c.env.KV.put(
     `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier }),
+    JSON.stringify({ codeVerifier, extra, returnTo }),
     { expirationTtl: PKCE_TTL_SECS },
   );
 
@@ -141,14 +165,10 @@ authRoutes.get("/google/start", async (c) => {
     client_id: clientId,
     redirect_uri: `${appUrl}/api/auth/google/callback`,
     response_type: "code",
-    scope: [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/drive.file",
-    ].join(" "),
+    scope: [...LOGIN_SCOPES, ...extra].join(" "),
     access_type: "offline",
-    prompt: "consent",
+    prompt: extra.length > 0 ? "consent" : "consent",
+    include_granted_scopes: "true",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -176,7 +196,11 @@ authRoutes.get("/google/callback", async (c) => {
 
   // Verify + consume state from KV
   const kvKey = `oauth:state:${state}`;
-  const stored = await c.env.KV.get(kvKey, "json") as { codeVerifier: string } | null;
+  const stored = await c.env.KV.get(kvKey, "json") as {
+    codeVerifier: string;
+    extra?: string[];
+    returnTo?: string;
+  } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
 
@@ -207,6 +231,7 @@ authRoutes.get("/google/callback", async (c) => {
     id_token: string;
     access_token: string;
     refresh_token?: string;
+    scope?: string;
   };
 
   // Verify the Google ID token with jose against Google's JWKS endpoint
@@ -263,7 +288,13 @@ authRoutes.get("/google/callback", async (c) => {
 
   // Cache owner refresh token in KV (Drive upload/download needs it in Phase 2)
   if (tokens.refresh_token) {
-    await c.env.KV.put(`user:refresh_token:${user.id}`, tokens.refresh_token);
+    await c.env.KV.put(refreshKey(user.id), tokens.refresh_token);
+  }
+  // Drop cached access token so the next call picks up newly granted scopes.
+  await c.env.KV.delete(accessKey(user.id));
+  await storeGrantedScopes(c.env, user.id, tokens.scope);
+  if (stored.extra?.length) {
+    await storeGrantedScopes(c.env, user.id, stored.extra.join(" "));
   }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
@@ -282,7 +313,11 @@ authRoutes.get("/google/callback", async (c) => {
     meta: { userAgent: c.req.header("user-agent") },
   });
 
-  return redirect("/");
+  const dest =
+    stored.returnTo && stored.returnTo.startsWith("/")
+      ? stored.returnTo
+      : "/";
+  return redirect(dest);
 });
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.
