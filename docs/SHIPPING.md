@@ -42,10 +42,9 @@ Do not open an editor until these are written down (in the PR description or an 
 From `CLAUDE.md §1`. All must pass locally before push:
 
 ```bash
-npm run typecheck   # tsc -b + worker + node configs
-npm run lint        # eslint .
-npm run test        # vitest run — must stay green; failures are blockers, not "known"
-npm run build       # tsc -b && vite build
+npm run typecheck && npm run lint && npm run test && npm run build
+# same thing:
+npm run gate
 ```
 
 If the schema changed, also:

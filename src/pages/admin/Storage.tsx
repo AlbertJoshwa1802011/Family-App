@@ -111,9 +111,10 @@ export function AdminStorage() {
       <AppBar title="Storage account" back />
       <Page className="space-y-6">
         <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
-          Primary file store is Cloudflare R2 (pending laptop: enable R2 in the
-          Dashboard, create the bucket, uncomment the wrangler binding). Google
-          Drive connect is an optional fallback — also pending laptop setup.
+          Files upload to Cloudflare R2 when a bucket is bound. Until then,
+          connecting this Google account stores documents in Drive — reconnect
+          after this update so reminder emails can also send from the same
+          Gmail (gmail.send). R2 remains optional.
         </p>
         {errorCode && (
           <Card className="border-danger/40 bg-danger/10 p-4 text-sm text-danger">
@@ -125,7 +126,8 @@ export function AdminStorage() {
         )}
         {justConnected && (
           <Card className="border-success/40 bg-success/10 p-4 text-sm text-success">
-            Storage account connected.
+            Storage account connected. Reminder emails can now leave from this
+            Gmail. Reconnect if you connected before Gmail send was added.
             <button onClick={clearBanner} className="ml-2 underline">
               Dismiss
             </button>

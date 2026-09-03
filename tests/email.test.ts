@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canSendEmail,
   isEmailConfigured,
   reminderEmailHtml,
   sendEmail,
@@ -14,11 +15,19 @@ import {
 } from "../worker/lib/email";
 import type { Env } from "../worker/types";
 
+function stubKv(): KVNamespace {
+  return {
+    get: async () => null,
+    put: async () => {},
+    delete: async () => {},
+  } as unknown as KVNamespace;
+}
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: {} as Fetcher,
     DB: {} as D1Database,
-    KV: {} as KVNamespace,
+    KV: stubKv(),
     APP_URL: "https://vault.example",
     ...overrides,
   };
@@ -34,6 +43,25 @@ describe("isEmailConfigured", () => {
   });
   it("true with RESEND_API_KEY", () => {
     expect(isEmailConfigured(makeEnv({ RESEND_API_KEY: "re_test" }))).toBe(true);
+  });
+});
+
+describe("canSendEmail", () => {
+  it("true when Resend is configured", async () => {
+    expect(await canSendEmail(makeEnv({ RESEND_API_KEY: "re_test" }))).toBe(true);
+  });
+
+  it("true when the storage Gmail refresh token is in KV", async () => {
+    const kv = {
+      get: async (key: string) => (key === "storage:refresh_token" ? "rt" : null),
+      put: async () => {},
+      delete: async () => {},
+    } as unknown as KVNamespace;
+    expect(await canSendEmail(makeEnv({ KV: kv }))).toBe(true);
+  });
+
+  it("false with neither Resend nor a storage token", async () => {
+    expect(await canSendEmail(makeEnv())).toBe(false);
   });
 });
 
@@ -68,7 +96,7 @@ describe("sendEmail", () => {
     expect(headers.Authorization).toBe("Bearer re_test");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.to).toBe("a@b.com");
-    expect(body.subject).toBe("Expiring soon");
+    expect(body.subject).toBe("[Family Vault reminder] Expiring soon");
   });
 
   it("returns false on a non-2xx Resend response", async () => {
@@ -95,16 +123,17 @@ describe("sendEmail", () => {
 });
 
 describe("sendEmailResult", () => {
-  it("returns email_not_configured without a key", async () => {
+  it("returns via:none when no Gmail token and no Resend key", async () => {
     const result = await sendEmailResult(makeEnv(), {
       to: "a@b.com",
       subject: "Hi",
       html: "<p>x</p>",
     });
-    expect(result).toEqual({ ok: false, error: "email_not_configured" });
+    expect(result.ok).toBe(false);
+    expect(result.via).toBe("none");
   });
 
-  it("returns resend_<status> when Resend rejects", async () => {
+  it("returns ok:false when Resend rejects", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("bad from", { status: 403 }),
     );
@@ -114,7 +143,7 @@ describe("sendEmailResult", () => {
       html: "<p>x</p>",
     });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("resend_403");
+    expect(result.via).toBe("none");
   });
 });
 

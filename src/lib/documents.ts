@@ -101,7 +101,7 @@ export async function uploadDocumentFile(
       } catch {
         // keep default
       }
-      if (xhr.status === 503 && errorCode === "r2_not_configured") {
+      if (xhr.status === 503 && (errorCode === "r2_not_configured" || errorCode === "storage_not_configured")) {
         resolve("r2_missing");
         return;
       }

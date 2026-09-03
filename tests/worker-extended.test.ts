@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
+import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
 
 // ---------------------------------------------------------------------------
 // Helper: POST JSON helper
@@ -370,5 +371,27 @@ describe("7. Auth enforcement on event/task/contact routes", () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("unauthorized");
+  });
+
+  it("GET /api/families/me/dashboard-stats → 200 shape for a member", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await app.request("/api/families/me/dashboard-stats", {
+      headers: { Cookie: actor.cookie },
+    }, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      documentCount: number;
+      expiringCount: number;
+      memberCount: number;
+      storageBytes: number;
+      tasksTotal: number;
+      tasksCompleted: number;
+    };
+    expect(body.memberCount).toBeGreaterThanOrEqual(1);
+    expect(body.documentCount).toBe(0);
+    expect(body.expiringCount).toBe(0);
   });
 });

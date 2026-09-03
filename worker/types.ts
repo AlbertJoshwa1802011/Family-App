@@ -11,7 +11,8 @@ export interface Env {
   /**
    * R2 bucket for document file bytes (primary storage).
    * Optional so local/CI tests can run without a live bucket — upload routes
-   * return `r2_not_configured` when missing.
+   * fall back to Google Drive, or return `storage_not_configured` when neither
+   * R2 nor Drive is connected.
    */
   FILES?: R2Bucket;
 

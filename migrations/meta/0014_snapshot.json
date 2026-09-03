@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "44fa26a5-3aad-4ad1-8031-a58b58dbc149",
-  "prevId": "3adc4245-6468-4576-835d-b9e35b1c59f5",
+  "id": "b1ae4513-614d-43a3-85fb-d9dee824091d",
+  "prevId": "44fa26a5-3aad-4ad1-8031-a58b58dbc149",
   "tables": {
     "audit_log": {
       "name": "audit_log",
@@ -250,6 +250,139 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "church_settlements": {
+      "name": "church_settlements",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "family_id": {
+          "name": "family_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fund_slug": {
+          "name": "fund_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "period_key": {
+          "name": "period_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "collected_minor": {
+          "name": "collected_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "spent_minor": {
+          "name": "spent_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "remaining_minor": {
+          "name": "remaining_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "settled_by_user_id": {
+          "name": "settled_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_church_settlements_family": {
+          "name": "idx_church_settlements_family",
+          "columns": [
+            "family_id",
+            "settled_at"
+          ],
+          "isUnique": false
+        },
+        "uq_church_settlement_period": {
+          "name": "uq_church_settlement_period",
+          "columns": [
+            "family_id",
+            "fund_slug",
+            "period_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "church_settlements_family_id_families_id_fk": {
+          "name": "church_settlements_family_id_families_id_fk",
+          "tableFrom": "church_settlements",
+          "tableTo": "families",
+          "columnsFrom": [
+            "family_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "church_settlements_settled_by_user_id_users_id_fk": {
+          "name": "church_settlements_settled_by_user_id_users_id_fk",
+          "tableFrom": "church_settlements",
+          "tableTo": "users",
+          "columnsFrom": [
+            "settled_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -1571,6 +1704,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "(unixepoch())"
+        },
+        "google_calendar_event_id": {
+          "name": "google_calendar_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

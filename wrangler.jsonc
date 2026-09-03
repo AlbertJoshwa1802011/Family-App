@@ -43,7 +43,11 @@
   //   }
   // ],
   "triggers": {
-    "crons": ["0 8 * * *"]
+    // 09:00 Asia/Kolkata (UTC+5:30) every day. Cloudflare cron is UTC.
+    // This Worker scheduled() handler runs whether or not anyone is logged in
+    // or has the app open — expiry, event, and commitment reminder emails
+    // plus in-app notifications are written from here.
+    "crons": ["30 3 * * *"]
   },
   "vars": {
     "APP_URL": "https://fam.connect-cloud.workers.dev",

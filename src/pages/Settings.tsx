@@ -85,6 +85,51 @@ function ReminderEmailField({
   );
 }
 
+function GoogleConnectionsCard() {
+  const { data } = useQuery({
+    queryKey: ["google-status"],
+    queryFn: () => api<{ contacts: boolean; gmail: boolean }>("/auth/google/status"),
+  });
+
+  return (
+    <Card className="divide-y divide-line overflow-hidden">
+      <ListItem
+        leading={<Mail className="size-5 text-fg-muted" />}
+        title="Gmail reminders"
+        subtitle={
+          data?.gmail
+            ? "Granted — reminders can leave from your Gmail"
+            : "Grant Gmail send so tests and reminders leave from your account"
+        }
+        trailing={
+          data?.gmail ? (
+            <span className="text-xs text-success">On</span>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                window.location.href = `/api/auth/google/start?connect=gmail&returnTo=${encodeURIComponent("/settings")}`;
+              }}
+            >
+              Connect
+            </Button>
+          )
+        }
+      />
+      <ListItem
+        to="/contacts"
+        leading={<Mail className="size-5 text-fg-muted" />}
+        title="Google Contacts"
+        subtitle={
+          data?.contacts
+            ? "Connected — sync from the Contacts screen"
+            : "Connect to two-way sync with your phone"
+        }
+      />
+    </Card>
+  );
+}
+
 function ReminderPrefsCard() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -105,18 +150,26 @@ function ReminderPrefsCard() {
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const testEmail = useMutation({
     mutationFn: () =>
-      api<{ ok: true; to: string }>("/notifications/test-email", { method: "POST" }),
-    onSuccess: (res) => setTestMsg(`Sent to ${res.to}`),
+      api<{ ok: true; to: string; via?: string; from?: string }>(
+        "/notifications/test-email",
+        { method: "POST" },
+      ),
+    onSuccess: (res) =>
+      setTestMsg(
+        `Sent to ${res.to}${res.via ? ` via ${res.via}` : ""}${res.from ? ` from ${res.from}` : ""}`,
+      ),
     onError: (e: unknown) => {
       const msg = e instanceof Error ? e.message : "Could not send test email.";
       if (msg === "email_not_configured") {
         setTestMsg(
-          "Resend is not configured (RESEND_API_KEY). Emails cannot send until that secret is set.",
+          "Email is not configured. Reconnect Storage (Gmail send) or set RESEND_API_KEY.",
         );
         return;
       }
       if (msg === "email_send_failed" || msg.startsWith("resend_")) {
-        setTestMsg("Resend rejected the send. Check EMAIL_FROM is on a verified domain.");
+        setTestMsg(
+          "Could not send. Reconnect Admin → Storage for Gmail send, or check EMAIL_FROM on a verified Resend domain.",
+        );
         return;
       }
       setTestMsg(msg);
@@ -260,7 +313,7 @@ function CalendarFeedCard() {
           {shown ? "Rotate calendar feed URL" : "Create calendar feed URL"}
         </Button>
         <a
-          href="/api/auth/google/start"
+          href="/api/auth/google/start?connect=calendar"
           className="block text-center text-xs font-medium text-vault-400"
         >
           Re-connect Google (grants calendar.events)
@@ -301,12 +354,20 @@ export function Settings() {
           </h3>
           <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
             New events email you immediately. Daily cron still sends lead-time
-            reminders. Use the test button to confirm Resend delivery to your address.
+            reminders from Gmail (reconnect Storage) or Resend. Use the test
+            button to confirm delivery.
           </p>
           <ReminderPrefsCard />
         </section>
 
         <CalendarFeedCard />
+
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            Google
+          </h3>
+          <GoogleConnectionsCard />
+        </section>
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
@@ -330,13 +391,12 @@ export function Settings() {
                 to="/admin/storage"
                 leading={<HardDrive className="size-5 text-fg-muted" />}
                 title="Storage account"
-                subtitle="Optional Google Drive — pending laptop setup"
+                subtitle="Connect Google Drive so document uploads work"
               />
             </Card>
             <p className="px-1 text-xs text-fg-subtle">
-              Pending laptop setup: enable R2 in Cloudflare (then uncomment the
-              wrangler binding), optional Drive OAuth, and Resend secrets. These
-              do not block the rest of the app.
+              Connect Drive here so uploads and Gmail reminders (from this
+              account) work. Cloudflare R2 is optional extra storage.
             </p>
           </section>
         )}

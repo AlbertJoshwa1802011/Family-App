@@ -44,6 +44,10 @@ export const ACTIONS = {
   CONTACT_CREATED: "contact.created",
   CONTACT_UPDATED: "contact.updated",
   CONTACT_DELETED: "contact.deleted",
+  CONTACT_SYNCED: "contact.synced",
+
+  DEVICE_LOCK_REGISTERED: "device_lock.registered",
+  DEVICE_LOCK_UNLOCKED: "device_lock.unlocked",
 
   VAULT_ITEM_CREATED: "vault_item.created",
   VAULT_ITEM_UPDATED: "vault_item.updated",
@@ -79,6 +83,8 @@ const SECURITY_ACTIONS = new Set<string>([
   ACTIONS.ADMIN_METRICS_VIEWED,
   ACTIONS.STORAGE_CONNECTED,
   ACTIONS.STORAGE_DISCONNECTED,
+  ACTIONS.DEVICE_LOCK_REGISTERED,
+  ACTIONS.DEVICE_LOCK_UNLOCKED,
 ]);
 
 export interface AuditEvent {

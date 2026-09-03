@@ -43,3 +43,11 @@ describe("worker API", () => {
     expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
   });
 });
+
+describe("scheduled handler (reminders without login)", () => {
+  it("the Worker default export has a scheduled() function", async () => {
+    const mod = await import("../worker/index");
+    const worker = mod.default as { scheduled?: unknown };
+    expect(typeof worker.scheduled).toBe("function");
+  });
+});

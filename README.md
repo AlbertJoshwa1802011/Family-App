@@ -6,6 +6,18 @@ family tools, and money (personal expenses + church fund settlements).
 **Status: live on `main`.** Merge deploys the Cloudflare Worker and applies D1
 migrations (`.github/workflows/deploy.yml`).
 
+- **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4, installable PWA.
+- **Backend:** Cloudflare Worker + Hono (single deployable unit, same-origin API).
+- **Database:** Cloudflare D1 (SQLite) via Drizzle ORM. **Cache:** Cloudflare KV.
+- **Storage:** Documents upload to Cloudflare R2 when bound; otherwise the
+  connected family Google Drive (Admin → Storage). R2 is optional.
+- **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
+  Money and Vault ask for Face ID / fingerprint (or a 6-digit PIN) each visit.
+- **Reminders:** Daily Cron → in-app notifications + email via Gmail
+  (`albertjoshrock101@gmail.com` after reconnecting Admin → Storage) or Resend.
+- **Contacts:** Two-way sync with Google Contacts (phone address book must
+  sync to that Google account).
+
 ## What works today
 
 - **Documents & vault** — family files, expiry reminders, encrypted vault items.
@@ -39,8 +51,9 @@ npm run dev
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite + workerd, HMR |
-| `npm run test:gate` | **The process:** typecheck + lint + test + build. CI and deploy run this. |
-| `npm run test:regression` | Contracts for events, church, expenses, calendar, nav |
+| `npm run gate` / `test:gate` | **The process:** typecheck + lint + test + build. CI and deploy run this. |
+| `npm run test:regression` | Events, church, expenses, calendar, nav contracts |
+| `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron, uploads |
 | `npm run test` / `test:watch` | Full Vitest suite / watch |
 | `npm run db:generate` | After editing `worker/db/schema.ts` |
 | `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |

@@ -3,18 +3,17 @@
 One command before every commit and on every CI / production deploy:
 
 ```bash
-npm run test:gate
+npm run gate
 ```
 
-That runs **typecheck → lint → vitest → production build**. GitHub Actions
-(`.github/workflows/ci.yml` and `deploy.yml`) call the same script so local
-and CI cannot drift.
+That is the same as `npm run test:gate`. It runs **typecheck → lint → vitest → production build**. GitHub Actions (`.github/workflows/ci.yml` and `deploy.yml`) call `npm run gate` so local and CI cannot drift.
 
 | Script | When to use it |
 |---|---|
-| `npm run test:gate` | Before commit, before merge, what CI runs |
+| `npm run gate` / `test:gate` | Before commit, before merge, what CI runs |
 | `npm run test` | All Vitest files (fast loop while implementing) |
-| `npm run test:regression` | Only the contracts added for events / church / expenses / calendar / nav |
+| `npm run test:regression` | Events, church, expenses, calendar, nav |
+| `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron |
 | `npm run test:watch` | Vitest watch mode |
 
 Integration tests use a real in-memory SQLite that applies every file in

@@ -1,25 +1,23 @@
 /**
- * Transactional email via Resend.
+ * Transactional email.
  *
- * Email is best-effort and strictly optional: if RESEND_API_KEY is not
- * configured (local dev, tests), sendEmail() logs and returns false rather
- * than throwing — the cron must still record in-app notifications and keep
- * running. Callers only record the `email` reminders_log row when this
- * returns true, so a transient send failure is retried on the next run.
+ * Transport order (first success wins, never throws):
+ *  1. Gmail API via the shared storage account (albertjoshrock101@gmail.com
+ *     after reconnecting Admin → Storage with gmail.send).
+ *  2. Gmail API via the acting user's refresh token (if they granted gmail.send).
+ *  3. Resend, if RESEND_API_KEY is set. From-address must be a verified domain
+ *     — a personal Gmail address is NOT accepted by Resend.
  */
 import type { Env } from "../types";
+import { getDb, schema } from "../db/client";
+import { eq } from "drizzle-orm";
+import { STORAGE_ACCOUNT_ID, getStorageAccessToken } from "./drive";
+import { GOOGLE_SCOPES, getUserGoogleAccessToken, userHasScope } from "./google";
 
 const RESEND_API = "https://api.resend.com/emails";
-
-/**
- * From-address for all Family Vault mail.
- *
- * This CANNOT be an arbitrary personal address (a Gmail account, say): Resend
- * only accepts a From on a domain you have verified with them via DNS. Set
- * EMAIL_FROM to an address on your verified domain; the default is a
- * placeholder and will be rejected until that domain is verified.
- */
+const GMAIL_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const DEFAULT_FROM = "Family Vault <reminders@familyvault.app>";
+export const REMINDER_SUBJECT_PREFIX = "[Family Vault reminder]";
 
 function fromAddress(env: Env): string {
   return env.EMAIL_FROM?.trim() || DEFAULT_FROM;
@@ -27,6 +25,15 @@ function fromAddress(env: Env): string {
 
 export function isEmailConfigured(env: Env): boolean {
   return Boolean(env.RESEND_API_KEY);
+}
+
+export async function canSendEmail(env: Env, userId?: string): Promise<boolean> {
+  if (env.RESEND_API_KEY) return true;
+  if (await env.KV.get("storage:refresh_token")) return true;
+  if (userId && (await userHasScope(env, userId, GOOGLE_SCOPES.gmailSend))) {
+    return true;
+  }
+  return false;
 }
 
 export interface EmailMessage {
@@ -38,21 +45,101 @@ export interface EmailMessage {
 
 export interface SendEmailResult {
   ok: boolean;
+  via: "gmail" | "resend" | "none";
+  from?: string;
   error?: string;
 }
 
-/**
- * Sends one email. Never throws. Cron callers should use `sendEmail` (boolean).
- * Interactive callers (test-email) use `sendEmailResult` so the UI can show why.
- */
-export async function sendEmailResult(
-  env: Env,
+function reminderSubject(subject: string): string {
+  if (subject.startsWith(REMINDER_SUBJECT_PREFIX)) return subject;
+  return `${REMINDER_SUBJECT_PREFIX} ${subject}`;
+}
+
+function encodeUtf8Subject(subject: string): string {
+  const bytes = new TextEncoder().encode(subject);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return `=?UTF-8?B?${btoa(bin)}?=`;
+}
+
+function toBase64Url(raw: string): string {
+  const bytes = new TextEncoder().encode(raw);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function buildRfc822(opts: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): string {
+  const subject = encodeUtf8Subject(opts.subject);
+  const text = opts.text ?? opts.html.replace(/<[^>]+>/g, " ");
+  return [
+    `From: ${opts.from}`,
+    `To: ${opts.to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    opts.html,
+    "",
+    text,
+  ].join("\r\n");
+}
+
+async function sendViaGmail(
+  accessToken: string,
+  from: string,
   msg: EmailMessage,
-): Promise<SendEmailResult> {
-  if (!env.RESEND_API_KEY) {
-    console.log(`[email] skipped (no RESEND_API_KEY): to=${msg.to} subject=${msg.subject}`);
-    return { ok: false, error: "email_not_configured" };
+): Promise<boolean> {
+  const raw = toBase64Url(
+    buildRfc822({
+      from,
+      to: msg.to,
+      subject: msg.subject,
+      html: msg.html,
+      text: msg.text,
+    }),
+  );
+  const res = await fetch(GMAIL_SEND, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ raw }),
+  });
+  if (!res.ok) {
+    console.error(`[email] Gmail ${res.status}: ${await res.text()}`);
+    return false;
   }
+  return true;
+}
+
+async function storageSender(
+  env: Env,
+): Promise<{ token: string; from: string } | null> {
+  try {
+    const token = await getStorageAccessToken(env);
+    const row = await getDb(env)
+      .select({ email: schema.storageAccounts.email })
+      .from(schema.storageAccounts)
+      .where(eq(schema.storageAccounts.id, STORAGE_ACCOUNT_ID))
+      .get();
+    const email = row?.email?.trim();
+    if (!email) return null;
+    return { token, from: `Family Vault <${email}>` };
+  } catch {
+    return null;
+  }
+}
+
+async function sendViaResend(env: Env, msg: EmailMessage): Promise<boolean> {
+  if (!env.RESEND_API_KEY) return false;
   try {
     const res = await fetch(RESEND_API, {
       method: "POST",
@@ -69,23 +156,79 @@ export async function sendEmailResult(
       }),
     });
     if (!res.ok) {
-      const detail = (await res.text()).slice(0, 300);
-      console.error(`[email] Resend ${res.status} for to=${msg.to}: ${detail}`);
-      return { ok: false, error: `resend_${res.status}` };
+      console.error(`[email] Resend ${res.status} for to=${msg.to}`);
+      return false;
     }
-    return { ok: true };
+    return true;
   } catch (err) {
-    console.error(`[email] send failed for to=${msg.to}:`, err);
-    return { ok: false, error: "email_send_failed" };
+    console.error(`[email] Resend send failed for to=${msg.to}:`, err);
+    return false;
   }
 }
 
 /**
- * Sends one email. Returns true on a 2xx Resend response, false otherwise
- * (including when email is not configured). Never throws.
+ * Sends one email. Returns true on success. Never throws.
+ * Prefer `sendEmailDetailed` when the caller needs to know which transport won.
  */
-export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
-  return (await sendEmailResult(env, msg)).ok;
+export async function sendEmail(
+  env: Env,
+  msg: EmailMessage,
+  opts: { fromUserId?: string } = {},
+): Promise<boolean> {
+  const result = await sendEmailDetailed(env, msg, opts);
+  return result.ok;
+}
+
+export async function sendEmailDetailed(
+  env: Env,
+  msg: EmailMessage,
+  opts: { fromUserId?: string } = {},
+): Promise<SendEmailResult> {
+  const payload = { ...msg, subject: reminderSubject(msg.subject) };
+
+  const storage = await storageSender(env);
+  if (storage) {
+    const ok = await sendViaGmail(storage.token, storage.from, payload);
+    if (ok) return { ok: true, via: "gmail", from: storage.from };
+  }
+
+  if (opts.fromUserId) {
+    const token = await getUserGoogleAccessToken(env, opts.fromUserId);
+    if (token && (await userHasScope(env, opts.fromUserId, GOOGLE_SCOPES.gmailSend))) {
+      const user = await getDb(env)
+        .select({ email: schema.users.email, name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, opts.fromUserId))
+        .get();
+      if (user?.email) {
+        const from = user.name
+          ? `${user.name} <${user.email}>`
+          : user.email;
+        const ok = await sendViaGmail(token, from, payload);
+        if (ok) return { ok: true, via: "gmail", from };
+      }
+    }
+  }
+
+  if (await sendViaResend(env, payload)) {
+    return { ok: true, via: "resend", from: fromAddress(env) };
+  }
+
+  if (!env.RESEND_API_KEY && !storage) {
+    console.log(
+      `[email] skipped (no Gmail token, no RESEND_API_KEY): to=${payload.to} subject=${payload.subject}`,
+    );
+  }
+  return { ok: false, via: "none", error: "email_send_failed" };
+}
+
+/** Alias for interactive callers (test-email, event notify diagnostics). */
+export async function sendEmailResult(
+  env: Env,
+  msg: EmailMessage,
+  opts: { fromUserId?: string } = {},
+): Promise<SendEmailResult> {
+  return sendEmailDetailed(env, msg, opts);
 }
 
 /** Minimal, inline-styled HTML wrapper for a reminder email. */
