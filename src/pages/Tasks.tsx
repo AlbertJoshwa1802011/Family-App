@@ -24,6 +24,7 @@ import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { LiquidPillTabs } from "../components/ui/LiquidPillTabs";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -45,6 +46,7 @@ interface TaskSummary {
   status: "open" | "done" | "archived";
   referredTaskId?: string | null;
   subtasksJson?: string | null;
+  subtasks?: Subtask[];
   reminderDate?: string | null;
   remindMemberId?: string | null;
   createdBy?: string | null;
@@ -184,28 +186,20 @@ function FilterChips({
   onChange: (m: FilterMode) => void;
   overdueCount: number;
 }) {
-  const chips: { key: FilterMode; label: string; icon: typeof Filter }[] = [
-    { key: "all", label: "All Tasks", icon: ListChecks },
-    { key: "mine", label: "My Tasks", icon: User },
-    { key: "overdue", label: `Overdue${overdueCount > 0 ? ` (${overdueCount})` : ""}`, icon: Clock },
+  const chips: { id: FilterMode; label: string; icon: typeof Filter }[] = [
+    { id: "all", label: "All Tasks", icon: ListChecks },
+    { id: "mine", label: "My Tasks", icon: User },
+    { id: "overdue", label: `Overdue${overdueCount > 0 ? ` (${overdueCount})` : ""}`, icon: Clock },
   ];
 
   return (
-    <div className="flex gap-2 mb-5 overflow-x-auto scroll-hide">
-      {chips.map(({ key, label, icon: Icon }) => (
-        <button
-          key={key}
-          onClick={() => onChange(key)}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-all duration-200 tappable ${
-            active === key
-              ? "bg-vault-500/20 text-vault-300 border border-vault-500/40"
-              : "bg-surface-2 text-fg-muted border border-line hover:border-line-strong"
-          }`}
-        >
-          <Icon className="size-3.5" />
-          {label}
-        </button>
-      ))}
+    <div className="mb-5">
+      <LiquidPillTabs
+        ariaLabel="Task filters"
+        value={active}
+        onChange={onChange}
+        items={chips}
+      />
     </div>
   );
 }
@@ -227,7 +221,10 @@ function TaskRow({
 }) {
   const isDone = task.status === "done";
   const due = dueStatus(task.dueDate);
-  const subtasks = parseSubtasks(task.subtasksJson);
+  const subtasks =
+    task.subtasks && Array.isArray(task.subtasks)
+      ? task.subtasks
+      : parseSubtasks(task.subtasksJson);
   const subtasksDone = subtasks.filter((s) => s.done).length;
   const hasSubtasks = subtasks.length > 0;
   const referredTask = task.referredTaskId

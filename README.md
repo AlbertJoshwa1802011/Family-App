@@ -6,9 +6,14 @@ licenses, warranties, medical records…) securely — and **never miss an expir
 - **Frontend:** React 19 + Vite + TypeScript + Tailwind CSS v4, installable PWA.
 - **Backend:** Cloudflare Worker + Hono (single deployable unit, same-origin API).
 - **Database:** Cloudflare D1 (SQLite) via Drizzle ORM. **Cache:** Cloudflare KV.
-- **Storage:** Documents live in the family owner's Google Drive (5TB) via the Drive API.
+- **Storage:** Documents upload to Cloudflare R2 when bound; otherwise the
+  connected family Google Drive (Admin → Storage). R2 is optional.
 - **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
-- **Reminders:** Daily Cron Trigger → in-app notifications + email (Resend); WhatsApp later.
+  Money and Vault ask for Face ID / fingerprint (or a 6-digit PIN) each visit.
+- **Reminders:** Daily Cron → in-app notifications + email via Gmail
+  (`albertjoshrock101@gmail.com` after reconnecting Admin → Storage) or Resend.
+- **Contacts:** Two-way sync with Google Contacts (phone address book must
+  sync to that Google account).
 
 > **Status: Phase 0 — scaffold.** Runnable skeleton (build/lint/typecheck/test green) with
 > stubbed routes. See [`docs/PLAN.md`](docs/PLAN.md) for the phased roadmap,
@@ -34,7 +39,9 @@ Open the printed local URL. The API is served same-origin under `/api` (try `/ap
 | `npm run build` | Type-check then build client + worker |
 | `npm run typecheck` | TS type-check (app + worker + config) |
 | `npm run lint` | ESLint (flat config) |
-| `npm run test` | Vitest unit tests |
+| `npm run test` | Vitest — full suite (must stay green) |
+| `npm run test:ship` | Slice covering Home, tasks/subtasks, Contacts, Face ID, email, cron, uploads |
+| `npm run gate` | **Definition of done:** typecheck + lint + test + build. Run before every commit. Same four commands as GitHub CI and production deploy. |
 | `npm run db:generate` | Generate D1 SQL migrations from the Drizzle schema |
 | `npm run db:migrate:local` | Apply migrations to local D1 |
 | `npm run db:migrate:remote` | Apply migrations to production D1 |

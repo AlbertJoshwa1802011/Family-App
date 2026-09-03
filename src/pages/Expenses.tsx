@@ -17,6 +17,7 @@ import { Badge } from "../components/ui/Badge";
 import { Fab } from "../components/ui/Fab";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MoneySubNav } from "../components/money/MoneySubNav";
+import { LiquidPillTabs } from "../components/ui/LiquidPillTabs";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
@@ -343,35 +344,15 @@ export function Expenses() {
           </button>
         </div>
 
-        {/* Mine / Family toggle */}
-        <div
-          role="tablist"
-          aria-label="Whose expenses"
-          className="flex rounded-xl border border-line bg-surface p-1"
-        >
-          {(
-            [
-              { key: "mine", label: "My spending", icon: Lock },
-              { key: "family", label: "Shared view", icon: Users },
-            ] as const
-          ).map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={view === key}
-              onClick={() => setView(key)}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors",
-                view === key
-                  ? "bg-vault-500/15 text-vault-300"
-                  : "text-fg-subtle hover:text-fg-muted",
-              )}
-            >
-              <Icon className="size-3.5" aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-        </div>
+        <LiquidPillTabs
+          ariaLabel="Whose expenses"
+          value={view}
+          onChange={setView}
+          items={[
+            { id: "mine", label: "My spending", icon: Lock },
+            { id: "family", label: "Shared view", icon: Users },
+          ]}
+        />
 
         {/* Hero total — a single headline number, so a stat tile, not a chart. */}
         <Card className="p-5">

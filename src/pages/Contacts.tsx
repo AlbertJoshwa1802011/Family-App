@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { Mail, Phone, Plus, Contact as ContactIcon } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Mail, Phone, Plus, Contact as ContactIcon, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
@@ -34,8 +35,8 @@ function ContactSkeleton() {
 
 export function Contacts() {
   const navigate = useNavigate();
-  const { families } = useAuth();
-  const activeFamilyId = families[0]?.id;
+  const { activeFamilyId } = useAuth();
+  const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ["contacts", activeFamilyId],
@@ -45,12 +46,72 @@ export function Contacts() {
       ),
   });
 
+  const googleStatus = useQuery({
+    queryKey: ["google-status"],
+    queryFn: () => api<{ contacts: boolean; gmail: boolean }>("/auth/google/status"),
+  });
+
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const sync = useMutation({
+    mutationFn: () =>
+      api<{ pulled: number; created: number; updated: number; pushed: number }>(
+        `/contacts/sync?familyId=${activeFamilyId}`,
+        { method: "POST" },
+      ),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["contacts"] });
+      setSyncMsg(
+        `Synced: ${res.created} new from Google, ${res.pushed} sent to your phone.`,
+      );
+    },
+    onError: (e: unknown) => {
+      setSyncMsg(e instanceof Error ? e.message : "Sync failed.");
+    },
+  });
+
   const contacts = data?.contacts ?? [];
 
   return (
     <>
       <AppBar title="Emergency contacts" back />
-      <Page>
+      <Page className="space-y-3">
+        <Card className="space-y-3 p-4">
+          <p className="text-sm text-fg-muted">
+            Contacts you add here sync to Google Contacts on your phone, and
+            contacts already in Google (including ones the phone backed up)
+            sync here. iPhone: Settings → Contacts → Accounts → Google.
+          </p>
+          {googleStatus.data?.contacts ? (
+            <Button
+              variant="secondary"
+              fullWidth
+              loading={sync.isPending}
+              leadingIcon={<RefreshCw className="size-4" />}
+              onClick={() => {
+                setSyncMsg(null);
+                sync.mutate();
+              }}
+              disabled={!activeFamilyId}
+            >
+              Sync with Google Contacts
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => {
+                window.location.href = `/api/auth/google/start?connect=contacts&returnTo=${encodeURIComponent("/contacts")}`;
+              }}
+            >
+              Connect Google Contacts
+            </Button>
+          )}
+          {syncMsg && (
+            <p className="text-xs text-fg-muted" role="status">
+              {syncMsg}
+            </p>
+          )}
+        </Card>
         {isLoading ? (
           <Card className="divide-y divide-line" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (

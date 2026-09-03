@@ -67,7 +67,9 @@ adminRoutes.post("/storage/connect/start", async (c) => {
       "openid",
       "email",
       "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/gmail.send",
     ].join(" "),
+    include_granted_scopes: "true",
     access_type: "offline",
     prompt: "consent",
     state,
@@ -128,6 +130,7 @@ adminRoutes.get("/storage/connect/callback", async (c) => {
     id_token: string;
     access_token: string;
     refresh_token?: string;
+    scope?: string;
   };
 
   // Without a refresh token we can't use the account long-term (Google omits it
@@ -161,6 +164,9 @@ adminRoutes.get("/storage/connect/callback", async (c) => {
   // any stale cached access token.
   await c.env.KV.put(STORAGE_REFRESH_KEY, tokens.refresh_token);
   await c.env.KV.delete(STORAGE_ACCESS_KEY);
+  if (tokens.scope) {
+    await c.env.KV.put("storage:scopes", tokens.scope);
+  }
 
   const db = getDb(c.env);
   const userId = c.get("userId")!;

@@ -1,12 +1,8 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "../../lib/cn";
 
 /**
- * Section nav for the Money area.
- *
- * Money is one destination with several views rather than many tabs, which
- * keeps the bottom bar at five and keeps the plan, the ledger, funds,
- * commitments and the wishlist feeling like one thing.
+ * Money section nav — same liquid-glass iOS pill as SectionSubNav.
  */
 const LINKS = [
   { to: "/money", label: "Overview", end: true },
@@ -17,31 +13,58 @@ const LINKS = [
 ];
 
 export function MoneySubNav() {
+  const { pathname } = useLocation();
+  const activeIndex = LINKS.findIndex(({ to, end }) =>
+    end ? pathname === to : pathname.startsWith(to),
+  );
+
   return (
     <nav
       aria-label="Money views"
-      className="-mx-4 mb-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="-mx-4 mb-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      <ul className="flex min-w-max gap-1 rounded-xl border border-line bg-surface p-1">
-        {LINKS.map(({ to, label, end }) => (
-          <li key={to}>
-            <NavLink
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn(
-                  "block rounded-lg px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors",
-                  isActive
-                    ? "bg-vault-500/15 text-vault-300"
-                    : "text-fg-subtle hover:text-fg-muted",
-                )
-              }
-            >
-              {label}
-            </NavLink>
-          </li>
-        ))}
-      </ul>
+      <div
+        className={cn(
+          "relative mx-auto flex min-w-max overflow-hidden",
+          "rounded-full border border-white/15 bg-white/10 shadow-lg backdrop-blur-2xl",
+        )}
+      >
+        {activeIndex >= 0 && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute top-1 bottom-1 rounded-full",
+              "bg-white/18 shadow-inner",
+              "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              "motion-reduce:transition-none",
+            )}
+            style={{
+              left: `calc(${activeIndex} * (100% / ${LINKS.length}) + 4px)`,
+              width: `calc(100% / ${LINKS.length} - 8px)`,
+            }}
+          />
+        )}
+        <ul className="relative z-10 flex min-w-max">
+          {LINKS.map(({ to, label, end }) => (
+            <li key={to} className="flex-1">
+              <NavLink
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cn(
+                    "block min-h-11 whitespace-nowrap rounded-full px-3.5 py-2.5 text-center text-xs font-medium transition-colors",
+                    isActive
+                      ? "font-semibold text-white"
+                      : "text-fg-subtle/90 hover:text-fg-muted",
+                  )
+                }
+              >
+                {label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </div>
     </nav>
   );
 }

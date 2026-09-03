@@ -6,7 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { parseWindows } from "../lib/reminders";
-import { isEmailConfigured, reminderEmailHtml, sendEmail } from "../lib/email";
+import { reminderEmailHtml, sendEmailDetailed, canSendEmail } from "../lib/email";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -179,8 +179,15 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const db = getDb(c.env);
 
-  if (!isEmailConfigured(c.env)) {
-    return c.json({ error: "email_not_configured" }, 503);
+  if (!(await canSendEmail(c.env, userId))) {
+    return c.json(
+      {
+        error: "email_not_configured",
+        message:
+          "Reconnect Google Drive storage (includes Gmail send) or set RESEND_API_KEY.",
+      },
+      503,
+    );
   }
 
   const user = await db
@@ -199,21 +206,32 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
   const to = (prefs?.reminderEmail ?? user.email).trim().toLowerCase();
   const appUrl = c.env.APP_URL ?? "";
 
-  const ok = await sendEmail(c.env, {
-    to,
-    subject: "Family Vault test reminder",
-    html: reminderEmailHtml({
-      heading: "Family Vault test reminder",
-      body: "This is a test. If you received it, reminder email delivery is working.",
-      ctaLabel: "Open Family Vault",
-      ctaUrl: appUrl || "https://familyvault.app",
-    }),
-    text: "Family Vault test reminder — delivery is working.",
-  });
+  const result = await sendEmailDetailed(
+    c.env,
+    {
+      to,
+      subject: "Test reminder",
+      html: reminderEmailHtml({
+        heading: "Family Vault test reminder",
+        body: "This is a test. If you received it, reminder email delivery is working.",
+        ctaLabel: "Open Family Vault",
+        ctaUrl: appUrl || "https://familyvault.app",
+      }),
+      text: "Family Vault test reminder — delivery is working.",
+    },
+    { fromUserId: userId },
+  );
 
-  if (!ok) {
-    return c.json({ error: "email_send_failed" }, 502);
+  if (!result.ok) {
+    return c.json(
+      {
+        error: "email_send_failed",
+        message:
+          "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from your Gmail, or add a Resend API key.",
+      },
+      502,
+    );
   }
 
-  return c.json({ ok: true, to });
+  return c.json({ ok: true, to, via: result.via, from: result.from });
 });

@@ -21,6 +21,7 @@ import { financeRoutes } from "./routes/finance";
 import { fundRoutes } from "./routes/funds";
 import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
+import { deviceLockRoutes } from "./routes/deviceLock";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
@@ -80,6 +81,7 @@ api.route("/finance", financeRoutes);
 api.route("/funds", fundRoutes);
 api.route("/wishlist", wishlistRoutes);
 api.route("/assistant", assistantRoutes);
+api.route("/device-lock", deviceLockRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
@@ -104,10 +106,8 @@ export { app };
 export default {
   fetch: app.fetch,
 
-  // Daily maintenance cron (see wrangler.jsonc triggers.crons):
-  // expiry/event reminders, commitment due dates, and the session purge.
-  // This is the only thing that makes reminders independent of app usage —
-  // it runs on Cloudflare's schedule whether or not anyone visits the site.
+  // Daily 09:00 Asia/Kolkata (`30 3 * * *` UTC in wrangler.jsonc).
+  // Runs on Cloudflare whether or not anyone is logged in or has the PWA open.
   async scheduled(
     _event: ScheduledController,
     env: HonoEnv["Bindings"],

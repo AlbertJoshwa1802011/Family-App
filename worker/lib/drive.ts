@@ -205,6 +205,50 @@ export async function deleteDriveFile(
   }
 }
 
+export async function uploadDriveFileBytes(
+  accessToken: string,
+  folderId: string,
+  fileName: string,
+  mimeType: string,
+  bytes: ArrayBuffer,
+): Promise<string> {
+  const metadata = JSON.stringify({
+    name: fileName,
+    mimeType,
+    parents: [folderId],
+  });
+  const boundary = `fam_${crypto.randomUUID().replace(/-/g, "")}`;
+  const encoder = new TextEncoder();
+  const metaPart = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
+  );
+  const fileHeader = encoder.encode(
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+  );
+  const closing = encoder.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(
+    metaPart.length + fileHeader.length + bytes.byteLength + closing.length,
+  );
+  body.set(metaPart, 0);
+  body.set(fileHeader, metaPart.length);
+  body.set(new Uint8Array(bytes), metaPart.length + fileHeader.length);
+  body.set(closing, metaPart.length + fileHeader.length + bytes.byteLength);
+
+  const res = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  });
+  if (!res.ok) {
+    throw new DriveError(`Drive multipart upload failed: ${await res.text()}`, 502);
+  }
+  const { id } = (await res.json()) as { id: string };
+  return id;
+}
+
 export class DriveError extends Error {
   constructor(
     message: string,

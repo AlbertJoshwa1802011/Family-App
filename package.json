@@ -15,6 +15,8 @@
     "typecheck": "tsc -b && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ship": "vitest run tests/tasks.test.ts tests/contacts-sync.test.ts tests/device-lock.test.ts tests/webauthn.test.ts tests/home-copy.test.ts tests/gestures.test.ts tests/cron-schedule.test.ts tests/email.test.ts tests/r2-upload.test.ts tests/currency-email.test.ts tests/worker.test.ts",
+    "gate": "npm run typecheck && npm run lint && npm run test && npm run build",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply family-vault-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply family-vault-db --remote",
