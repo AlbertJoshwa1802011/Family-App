@@ -15,9 +15,34 @@ That is the same as `npm run test:gate`. It runs **typecheck → lint → vitest
 | `npm run test:regression` | Events, church, expenses, calendar, nav |
 | `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron |
 | `npm run test:watch` | Vitest watch mode |
+| `npm run test:catalog` | Per-module 1000-case grids in `tests/catalog/` |
 
 Integration tests use a real in-memory SQLite that applies every file in
 `migrations/` (`tests/helpers/testEnv.ts`). Do not mock the database.
+
+## Module catalogs (1000+ cases each)
+
+These are table-driven `it.each` grids — real contracts, not junk combinatorics.
+One TestEnv is created per `describe` (migrations are expensive; never per-case).
+
+| File | What it records | Count (approx.) |
+|---|---|---|
+| `tests/catalog/api-contract-matrix.test.ts` | Every Worker route: 401, nosniff, request-id, never HTML, broken JSON, deep-path JSON 404 | ~700 |
+| `tests/catalog/events-1000.test.ts` | POST create: 10 titles × 4 types × 2 allDay × 2 location × 7 start offsets, plus Zod rejects | 1120+ |
+| `tests/catalog/expenses-1000.test.ts` | POST amountMinor 0–499 × visibility family/private (`categoryId: null` allowed) | 1000+ |
+| `tests/catalog/documents-1000.test.ts` | POST 200 expiry days × 2 visibility × 3 categories | 1200+ |
+| `tests/catalog/tasks-1000.test.ts` | POST 1000 due dates, then PATCH status cycle | 1000+ |
+| `tests/catalog/contacts-1000.test.ts` | POST 1000 names / relationship / phone | 1000+ |
+| `tests/catalog/families-1000.test.ts` | POST 1000 family names | 1000+ |
+| `tests/catalog/finance-1000.test.ts` | POST incomes 1–500 × 2 visibility, cadence cycle | 1000+ |
+| `tests/catalog/wishlist-1000.test.ts` | POST cost 1–500 × 2 visibility, priority 1–5 | 1000+ |
+| `tests/catalog/items-1000.test.ts` | POST type `note`, 500 titles × 2 visibility | 1000+ |
+| `tests/catalog/church-1000.test.ts` | Settle: 500 invalid `periodKey` → 400; 504 valid months without token → 503 | 1000+ |
+| `tests/catalog/expiry-days.test.ts` | `expiryStatus` for day offsets −250…+749 at pinned UTC midnight | 1000 |
+| `tests/catalog/money-1000.test.ts` | `formatMajorFromMinor` ↔ `parseMajorToMinor` for 200 amounts × 5 currencies | 1000 |
+| `tests/catalog/bubble-1000.test.ts` | `clampBubble` / `snapBubbleToEdge` across 200 widths × 5 heights | 1000+ |
+
+Cross-family reads still 404 (do not leak). Zod failures stay `{ error: "validation_error", issues }`.
 
 ## Regression catalog (must stay green)
 

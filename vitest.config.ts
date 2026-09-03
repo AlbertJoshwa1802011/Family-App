@@ -7,5 +7,8 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     globals: true,
+    // Catalog files issue 1000+ app.request calls per describe; keep a generous ceiling.
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
   },
 });

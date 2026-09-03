@@ -55,14 +55,14 @@ npm run dev
 | `npm run test:regression` | Events, church, expenses, calendar, nav contracts |
 | `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron, uploads |
 | `npm run test` / `test:watch` | Full Vitest suite / watch |
+| `npm run test:catalog` | ≥1000 cases per module (`tests/catalog/`) |
 | `npm run db:generate` | After editing `worker/db/schema.ts` |
 | `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |
 | `npm run deploy` | Build + wrangler deploy (normally CI) |
 
-See `docs/TESTING.md` for the regression catalog (edit-form hydration, event
-email, Google Calendar, church settlements, category-optional expenses, bubble
-nav). A case that is not in that catalog can regress silently — add it there
-when you fix or ship a behaviour.
+See `docs/TESTING.md` for the regression catalog and the per-module 1000-case
+grids (`npm run test:catalog`). A case that is not in that catalog can regress
+silently — add it there when you fix or ship a behaviour.
 
 ## Production secrets
 
