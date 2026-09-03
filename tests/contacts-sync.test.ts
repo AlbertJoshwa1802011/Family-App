@@ -68,4 +68,41 @@ describe("POST /api/contacts/sync", () => {
     const body = (await res.json()) as { contact: { name: string } };
     expect(body.contact.name).toBe("Dr. Rao");
   });
+
+  it("returns 400 when familyId is missing", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await app.request("/api/contacts/sync", {
+      method: "POST",
+      headers: {
+        Cookie: actor.cookie,
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+      },
+      body: "{}",
+    }, env);
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/auth/google/status is 401 without a session", async () => {
+    const { env } = createTestEnv();
+    const res = await app.request("/api/auth/google/status", {}, env);
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/auth/google/status is false/false by default", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await app.request("/api/auth/google/status", {
+      headers: { Cookie: actor.cookie },
+    }, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { contacts: boolean; gmail: boolean };
+    expect(body.contacts).toBe(false);
+    expect(body.gmail).toBe(false);
+  });
 });

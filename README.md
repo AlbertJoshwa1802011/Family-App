@@ -39,7 +39,9 @@ Open the printed local URL. The API is served same-origin under `/api` (try `/ap
 | `npm run build` | Type-check then build client + worker |
 | `npm run typecheck` | TS type-check (app + worker + config) |
 | `npm run lint` | ESLint (flat config) |
-| `npm run test` | Vitest unit tests |
+| `npm run test` | Vitest — full suite (must stay green) |
+| `npm run test:ship` | Slice covering Home, tasks/subtasks, Contacts, Face ID, email, cron, uploads |
+| `npm run gate` | **Definition of done:** typecheck + lint + test + build. Run before every commit. Same four commands as GitHub CI and production deploy. |
 | `npm run db:generate` | Generate D1 SQL migrations from the Drizzle schema |
 | `npm run db:migrate:local` | Apply migrations to local D1 |
 | `npm run db:migrate:remote` | Apply migrations to production D1 |

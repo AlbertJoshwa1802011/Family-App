@@ -124,4 +124,28 @@ describe("device lock webauthn options", () => {
     const body = (await res.json()) as { challenge: string };
     expect(body.challenge.length).toBeGreaterThan(10);
   });
+
+  it("verify without a PIN returns pin_not_set", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await req(env, "POST", "/api/device-lock/pin/verify", actor.cookie, {
+      pin: "123456",
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("pin_not_set");
+  });
+
+  it("unknown device-lock path is JSON 404", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await req(env, "GET", "/api/device-lock/nope", actor.cookie);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("not_found");
+  });
 });

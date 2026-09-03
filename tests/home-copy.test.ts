@@ -4,11 +4,14 @@ import { allQuotes, dayOfYear, quoteForDate } from "../src/lib/quotes";
 
 describe("greetingForHour", () => {
   it("morning, afternoon, evening, night", () => {
-    expect(greetingForHour(7).phrase).toBe("Good morning");
-    expect(greetingForHour(13).phrase).toBe("Good afternoon");
-    expect(greetingForHour(19).phrase).toBe("Good evening");
-    expect(greetingForHour(23).phrase).toBe("Good night");
-    expect(greetingForHour(2).phrase).toBe("Good night");
+    expect(greetingForHour(5).phrase).toBe("Good morning");
+    expect(greetingForHour(11).phrase).toBe("Good morning");
+    expect(greetingForHour(12).phrase).toBe("Good afternoon");
+    expect(greetingForHour(16).phrase).toBe("Good afternoon");
+    expect(greetingForHour(17).phrase).toBe("Good evening");
+    expect(greetingForHour(20).phrase).toBe("Good evening");
+    expect(greetingForHour(21).phrase).toBe("Good night");
+    expect(greetingForHour(4).phrase).toBe("Good night");
   });
 
   it("wishes are non-empty", () => {

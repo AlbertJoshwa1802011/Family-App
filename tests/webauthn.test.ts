@@ -33,5 +33,8 @@ describe("extraScopesFromConnect", () => {
       GOOGLE_SCOPES.gmailSend,
     ]);
     expect(extraScopesFromConnect(undefined)).toEqual([]);
+    expect(extraScopesFromConnect("gmail")).toEqual([GOOGLE_SCOPES.gmailSend]);
+    expect(extraScopesFromConnect("contacts")).toEqual([GOOGLE_SCOPES.contacts]);
+    expect(extraScopesFromConnect("nope")).toEqual([]);
   });
 });
