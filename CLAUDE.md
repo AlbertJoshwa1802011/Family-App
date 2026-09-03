@@ -23,17 +23,26 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 ## 1. Commands you will use constantly
 
 ```bash
-npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
-npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
-npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 136+ tests; must stay green
+npm run gate           # ★ definition of done — typecheck + lint + full test + build. Run before EVERY commit. Alias: test:gate
+npm run test           # vitest run — 511 tests, 37 files. What `gate` runs.
+npm run test:ship      # local slice: Home / tasks / Contacts / Face ID / cron / email / upload
+npm run test:regression  # local slice: events / church / expenses / calendar / bubble nav
+npm run typecheck      # tsc -b + worker tsconfig + node tsconfig
+npm run lint           # eslint .
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
+npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
+npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth needed)
+npm run dev:screenshots  # Playwright mobile screenshots of every screen → screenshots/
 ```
 
-**Definition of done for any change:** `typecheck` ✅, `lint` ✅, `test` ✅, `build` ✅.
+**Definition of done for any change:** `npm run gate` (alias `test:gate`) must pass.
 If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` ✅.
+
+`test:ship` and `test:regression` are **local shortcuts**. They are **not** a substitute for `npm run gate`. GitHub CI and production deploy already run `npm run gate`. Never skip the full suite because a slice was green. Catalog: `docs/TESTING.md`.
+
+Every agent in this repo **must** follow this. Invoke `.claude/skills/gate/SKILL.md` before committing. A red suite is a blocker, not a “known failure.”
 
 ---
 
@@ -209,14 +218,27 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **403+ tests across 23 files**, all green. `tests/helpers/testEnv.ts`
-runs the real generated migrations against in-memory `node:sqlite` behind a D1-compatible
-adapter, so route tests exercise the actual routes → drizzle → SQL path. Prefer it over
-mocks for anything touching authorization or money arithmetic.
+same depth. `tests/helpers/testEnv.ts` runs the real generated migrations against in-memory
+`node:sqlite` behind a D1-compatible adapter, so route tests exercise the actual routes →
+drizzle → SQL path. Prefer it over mocks for anything touching authorization or money arithmetic.
 
-Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
-timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
-tests.
+Frontend libs (`expiry.ts`, `eventTime.ts`, `greeting.ts`, `gestures.ts`) have pure-function
+unit tests using `Date.UTC()` for timezone-stable fixtures. `@testing-library/react` + `jsdom`
+are installed if you add component tests.
+
+**Current baseline:** **511 tests across 37 files**, all green on `main` (CI after PR #16, 2026-09-03).
+Named groups — add tests in the matching file (or a new `tests/<area>.test.ts` if the area is new). Full catalog: `docs/TESTING.md`.
+
+| Group | How to run | What it covers |
+|---|---|---|
+| Full suite (**required**) | `npm run gate` (alias `test:gate`) | typecheck + lint + every `tests/**/*.test.ts` + build. CI and production deploy run this. |
+| Ship slice (local only) | `npm run test:ship` | Home, tasks, Contacts, Face ID, cron, email, upload (`worker.test.ts`) |
+| Regression slice (local only) | `npm run test:regression` | Events, church settlements, expenses, Google Calendar, bubble nav (`tests/regression-v16.test.ts`) |
+| Auth | `npx vitest run tests/auth.test.ts` | Session, OAuth |
+| Money | `npx vitest run tests/expenses.test.ts tests/funds.test.ts tests/money.test.ts tests/finance-api.test.ts` | Spending, funds, commitments |
+| A single file | `npx vitest run tests/<name>.test.ts` | Fastest loop while editing that area |
+
+Agents inherit this habit because (1) this file is read first, (2) `npm run gate` is the commit bar, (3) CI and production deploy fail otherwise. There is no optional path.
 
 ---
 
@@ -237,10 +259,11 @@ tests.
 
 ## 9. Git workflow in this repo
 
-- Develop on the designated feature branch (currently `claude/production-deploy-test-k6z4gf`).
+- Develop on a feature branch off `main`. Run `npm run gate` and only commit when it is green.
 - Conventional-style commit subjects (`feat:`, `security:`, `docs:`, `test:`). Body explains the
   why + lists notable changes. Push with `git push -u origin <branch>`.
-- **Do not open a PR unless explicitly asked.**
+- **Do not open a PR unless explicitly asked** (cloud agents creating PRs as part of their
+  run are the exception).
 - Never commit secrets, `.dev.vars`, or `*.tsbuildinfo` (gitignored).
 
 ---

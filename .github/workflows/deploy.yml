@@ -36,7 +36,7 @@ jobs:
 
       - run: npm ci
 
-      # Quality gate — a bad commit must never reach production.
+      # Quality gate — a bad commit must never reach production. Same as `npm run gate`.
       - run: npm run gate
 
       # Bring the production D1 schema up to date before the new code runs.
