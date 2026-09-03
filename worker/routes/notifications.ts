@@ -225,11 +225,11 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
   if (!result.ok) {
     return c.json(
       {
-        error: "email_send_failed",
+        error: result.error ?? "email_send_failed",
         message:
           "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from your Gmail, or add a Resend API key.",
       },
-      502,
+      result.error === "email_not_configured" ? 503 : 502,
     );
   }
 

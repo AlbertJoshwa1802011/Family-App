@@ -11,6 +11,7 @@ import {
   isEmailConfigured,
   reminderEmailHtml,
   sendEmail,
+  sendEmailResult,
 } from "../worker/lib/email";
 import type { Env } from "../worker/types";
 
@@ -118,6 +119,31 @@ describe("sendEmail", () => {
       html: "<p>x</p>",
     });
     expect(ok).toBe(false);
+  });
+});
+
+describe("sendEmailResult", () => {
+  it("returns via:none when no Gmail token and no Resend key", async () => {
+    const result = await sendEmailResult(makeEnv(), {
+      to: "a@b.com",
+      subject: "Hi",
+      html: "<p>x</p>",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.via).toBe("none");
+  });
+
+  it("returns ok:false when Resend rejects", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("bad from", { status: 403 }),
+    );
+    const result = await sendEmailResult(makeEnv({ RESEND_API_KEY: "re_test" }), {
+      to: "a@b.com",
+      subject: "Hi",
+      html: "<p>x</p>",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.via).toBe("none");
   });
 });
 

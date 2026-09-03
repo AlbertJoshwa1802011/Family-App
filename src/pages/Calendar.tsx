@@ -78,8 +78,8 @@ function EventRow({ event }: { event: EventSummary }) {
 export function CalendarPage() {
   const navigate = useNavigate();
 
-  // Stable reference: computed once on mount so re-renders don't shift the query window.
   const [now] = useState(() => Math.floor(Date.now() / 1000));
+  const weekEnd = now + 7 * 24 * 3600;
   const sixMonths = now + 6 * 30 * 24 * 3600;
 
   const { data, isLoading } = useQuery({
@@ -89,9 +89,11 @@ export function CalendarPage() {
   });
 
   const events = (data?.events ?? []).filter((e) => e.status !== "trashed");
+  const thisWeek = events.filter((e) => e.startAt <= weekEnd);
+  const later = events.filter((e) => e.startAt > weekEnd);
+  const nextUp = events.find((e) => e.status === "active");
 
-  // Group events by month
-  const grouped = events.reduce<Map<string, EventSummary[]>>((acc, ev) => {
+  const groupedLater = later.reduce<Map<string, EventSummary[]>>((acc, ev) => {
     const key = eventMonthKey(ev.startAt);
     if (!acc.has(key)) acc.set(key, []);
     acc.get(key)!.push(ev);
@@ -108,7 +110,7 @@ export function CalendarPage() {
               <EventSkeleton key={i} />
             ))}
           </Card>
-        ) : grouped.size === 0 ? (
+        ) : events.length === 0 ? (
           <EmptyState
             icon={CalendarDays}
             title="No upcoming events"
@@ -124,18 +126,44 @@ export function CalendarPage() {
             }
           />
         ) : (
-          Array.from(grouped.entries()).map(([key, monthEvents]) => (
-            <section key={key} className="space-y-2">
-              <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                {formatMonthYear(monthEvents[0].startAt)}
-              </h3>
-              <Card className="divide-y divide-line overflow-hidden">
-                {monthEvents.map((ev) => (
-                  <EventRow key={ev.id} event={ev} />
-                ))}
-              </Card>
-            </section>
-          ))
+          <>
+            {nextUp && (
+              <section className="space-y-2">
+                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+                  Next up
+                </h3>
+                <Card className="overflow-hidden border-vault-500/30 bg-vault-500/5">
+                  <EventRow event={nextUp} />
+                </Card>
+              </section>
+            )}
+
+            {thisWeek.length > 0 && (
+              <section className="space-y-2">
+                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+                  This week
+                </h3>
+                <Card className="divide-y divide-line overflow-hidden">
+                  {thisWeek.map((ev) => (
+                    <EventRow key={ev.id} event={ev} />
+                  ))}
+                </Card>
+              </section>
+            )}
+
+            {Array.from(groupedLater.entries()).map(([key, monthEvents]) => (
+              <section key={key} className="space-y-2">
+                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+                  {formatMonthYear(monthEvents[0].startAt)}
+                </h3>
+                <Card className="divide-y divide-line overflow-hidden">
+                  {monthEvents.map((ev) => (
+                    <EventRow key={ev.id} event={ev} />
+                  ))}
+                </Card>
+              </section>
+            ))}
+          </>
         )}
       </Page>
       <Fab icon={Plus} label="Add event" onClick={() => navigate("/calendar/events/new")} />

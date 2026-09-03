@@ -14,6 +14,7 @@ export const GOOGLE_SCOPES = {
   driveFile: "https://www.googleapis.com/auth/drive.file",
   contacts: "https://www.googleapis.com/auth/contacts",
   gmailSend: "https://www.googleapis.com/auth/gmail.send",
+  calendarEvents: "https://www.googleapis.com/auth/calendar.events",
 } as const;
 
 export const LOGIN_SCOPES = [
@@ -21,6 +22,7 @@ export const LOGIN_SCOPES = [
   GOOGLE_SCOPES.email,
   GOOGLE_SCOPES.profile,
   GOOGLE_SCOPES.driveFile,
+  GOOGLE_SCOPES.calendarEvents,
 ] as const;
 
 export const STORAGE_CONNECT_SCOPES = [
@@ -123,5 +125,6 @@ export function extraScopesFromConnect(connect: string | undefined): string[] {
   const extra: string[] = [];
   if (wanted.has("contacts")) extra.push(GOOGLE_SCOPES.contacts);
   if (wanted.has("gmail")) extra.push(GOOGLE_SCOPES.gmailSend);
+  if (wanted.has("calendar")) extra.push(GOOGLE_SCOPES.calendarEvents);
   return extra;
 }

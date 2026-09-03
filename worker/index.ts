@@ -21,6 +21,8 @@ import { financeRoutes } from "./routes/finance";
 import { fundRoutes } from "./routes/funds";
 import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
+import { calendarRoutes } from "./routes/calendar";
+import { churchRoutes } from "./routes/church";
 import { deviceLockRoutes } from "./routes/deviceLock";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
@@ -81,6 +83,8 @@ api.route("/finance", financeRoutes);
 api.route("/funds", fundRoutes);
 api.route("/wishlist", wishlistRoutes);
 api.route("/assistant", assistantRoutes);
+api.route("/calendar", calendarRoutes);
+api.route("/church", churchRoutes);
 api.route("/device-lock", deviceLockRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).

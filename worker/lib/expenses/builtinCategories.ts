@@ -133,17 +133,36 @@ export async function ensureBuiltinCategories(db: Db): Promise<void> {
   const missing = BUILTIN_EXPENSE_CATEGORIES.filter((c) => !have.has(c.id));
 
   if (missing.length > 0) {
-    await db.insert(schema.expenseCategories).values(
-      missing.map((c) => ({
-        id: c.id,
-        familyId: null,
-        parentCategoryId: c.parentCategoryId ?? null,
-        name: c.name,
-        icon: c.icon,
-        color: c.color,
-        archived: false,
-      })),
-    );
+    try {
+      await db.insert(schema.expenseCategories).values(
+        missing.map((c) => ({
+          id: c.id,
+          familyId: null,
+          parentCategoryId: c.parentCategoryId ?? null,
+          name: c.name,
+          icon: c.icon,
+          color: c.color,
+          archived: false,
+        })),
+      );
+    } catch {
+      // Unique conflicts or partial seeds — insert remaining rows one by one.
+      for (const c of missing) {
+        try {
+          await db.insert(schema.expenseCategories).values({
+            id: c.id,
+            familyId: null,
+            parentCategoryId: c.parentCategoryId ?? null,
+            name: c.name,
+            icon: c.icon,
+            color: c.color,
+            archived: false,
+          });
+        } catch {
+          // already present
+        }
+      }
+    }
   }
 
   // Backfill parent links on already-seeded rows that predate nesting.

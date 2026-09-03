@@ -369,7 +369,15 @@ function ExpenseFormFields({
               <Skeleton className="h-9 w-full" />
             ) : categoriesQ.isError ? (
               <div className="space-y-2">
-                <p className="text-sm text-danger">Couldn&apos;t load categories.</p>
+                <p className="text-sm text-danger">
+                  Couldn&apos;t load categories
+                  {categoriesQ.error instanceof Error
+                    ? `: ${categoriesQ.error.message}`
+                    : "."}
+                </p>
+                <p className="text-xs text-fg-subtle">
+                  You can still add the expense without a category, then tag it later.
+                </p>
                 <Button
                   type="button"
                   variant="secondary"
@@ -401,9 +409,19 @@ function ExpenseFormFields({
                       className={cn(
                         "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                         isRootSelected(cat.id)
-                          ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                          ? "text-white"
                           : "border-line text-fg-muted hover:bg-white/5",
                       )}
+                      style={
+                        isRootSelected(cat.id)
+                          ? {
+                              backgroundColor: cat.color ?? "#6366f1",
+                              borderColor: cat.color ?? "#6366f1",
+                            }
+                          : cat.color
+                            ? { borderColor: `${cat.color}66` }
+                            : undefined
+                      }
                     >
                       <span
                         aria-hidden="true"

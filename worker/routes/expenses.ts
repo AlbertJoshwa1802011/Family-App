@@ -263,21 +263,30 @@ expenseRoutes.get("/categories", requireSession, async (c) => {
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
-  await ensureBuiltinCategories(db);
+  try {
+    await ensureBuiltinCategories(db);
+  } catch (err) {
+    console.error("[expenses] ensureBuiltinCategories failed:", err);
+    return c.json(
+      { error: "schema_missing", message: "Expense categories table is not ready. Apply D1 migrations." },
+      503,
+    );
+  }
 
   const includeArchived = c.req.query("includeArchived") === "1";
+  const filters = [
+    or(
+      isNull(schema.expenseCategories.familyId),
+      eq(schema.expenseCategories.familyId, familyId),
+    ),
+  ];
+  if (!includeArchived) {
+    filters.push(eq(schema.expenseCategories.archived, false));
+  }
   const rows = await db
     .select()
     .from(schema.expenseCategories)
-    .where(
-      and(
-        or(
-          isNull(schema.expenseCategories.familyId),
-          eq(schema.expenseCategories.familyId, familyId),
-        ),
-        includeArchived ? undefined : eq(schema.expenseCategories.archived, false),
-      ),
-    )
+    .where(and(...filters))
     .orderBy(schema.expenseCategories.name);
 
   const decorated = rows.map((r) => ({ ...r, builtin: r.familyId === null }));

@@ -37,10 +37,7 @@ jobs:
       - run: npm ci
 
       # Quality gate — a bad commit must never reach production.
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build
+      - run: npm run gate
 
       # Bring the production D1 schema up to date before the new code runs.
       - name: Apply D1 migrations (production)

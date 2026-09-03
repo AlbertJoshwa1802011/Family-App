@@ -222,6 +222,15 @@ export async function sendEmailDetailed(
   return { ok: false, via: "none", error: "email_send_failed" };
 }
 
+/** Alias for interactive callers (test-email, event notify diagnostics). */
+export async function sendEmailResult(
+  env: Env,
+  msg: EmailMessage,
+  opts: { fromUserId?: string } = {},
+): Promise<SendEmailResult> {
+  return sendEmailDetailed(env, msg, opts);
+}
+
 /** Minimal, inline-styled HTML wrapper for a reminder email. */
 export function reminderEmailHtml(opts: {
   heading: string;
