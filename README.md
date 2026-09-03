@@ -39,10 +39,17 @@ npm run dev
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite + workerd, HMR |
-| `npm run typecheck` / `lint` / `test` / `build` | Gate — all must pass before merge |
+| `npm run test:gate` | **The process:** typecheck + lint + test + build. CI and deploy run this. |
+| `npm run test:regression` | Contracts for events, church, expenses, calendar, nav |
+| `npm run test` / `test:watch` | Full Vitest suite / watch |
 | `npm run db:generate` | After editing `worker/db/schema.ts` |
 | `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |
 | `npm run deploy` | Build + wrangler deploy (normally CI) |
+
+See `docs/TESTING.md` for the regression catalog (edit-form hydration, event
+email, Google Calendar, church settlements, category-optional expenses, bubble
+nav). A case that is not in that catalog can regress silently — add it there
+when you fix or ship a behaviour.
 
 ## Production secrets
 

@@ -35,3 +35,11 @@ describe("defaultBubblePosition", () => {
     expect(pos.y).toBe(844 - 64 - 12);
   });
 });
+
+describe("snapBubbleToEdge mid-line", () => {
+  it("snaps right when the centre is exactly on the midline", () => {
+    // width 200, vw 390 → mid 195. x=95 → centre 195.
+    const snapped = snapBubbleToEdge(95, 400, 390, 844, 200, 64, 12);
+    expect(snapped.x).toBe(390 - 200 - 12);
+  });
+});

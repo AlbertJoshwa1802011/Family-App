@@ -28,6 +28,24 @@ describe("buildCalendar", () => {
     expect(ics).toContain("UID:evt-1@familyvault");
     expect(ics).toContain("END:VCALENDAR");
   });
+
+  it("emits VALUE=DATE for all-day events", () => {
+    const ics = buildCalendar({
+      nowSecs: 1_800_000_000,
+      name: "Family Vault",
+      events: [
+        {
+          uid: "evt-2",
+          title: "Holiday",
+          startAt: 1_800_000_000,
+          endAt: null,
+          allDay: true,
+        },
+      ],
+    });
+    expect(ics).toContain("DTSTART;VALUE=DATE:");
+    expect(ics).toContain("SUMMARY:Holiday");
+  });
 });
 
 describe("toGcalBody", () => {

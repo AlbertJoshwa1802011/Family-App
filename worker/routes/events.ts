@@ -50,19 +50,27 @@ const eventBaseSchema = z.object({
   description: z.string().max(2000).optional(),
   startAt: z.number().int().positive(),
   endAt: z.number().int().positive().optional(),
-  allDay: z.boolean().optional().default(false),
+  allDay: z.boolean().optional(),
   location: z.string().max(500).optional(),
-  type: EventType.optional().default("other"),
-  attendeeMemberIds: z.array(z.string()).optional().default([]),
-  documentIds: z.array(z.string()).optional().default([]),
+  type: EventType.optional(),
+  attendeeMemberIds: z.array(z.string()).optional(),
+  documentIds: z.array(z.string()).optional(),
 });
 
-const createEventSchema = eventBaseSchema.refine(
-  (d) => !d.endAt || d.endAt >= d.startAt,
-  { message: "endAt must be >= startAt", path: ["endAt"] },
-);
+const createEventSchema = eventBaseSchema
+  .extend({
+    allDay: z.boolean().optional().default(false),
+    type: EventType.optional().default("other"),
+    attendeeMemberIds: z.array(z.string()).optional().default([]),
+    documentIds: z.array(z.string()).optional().default([]),
+  })
+  .refine((d) => !d.endAt || d.endAt >= d.startAt, {
+    message: "endAt must be >= startAt",
+    path: ["endAt"],
+  });
 
-// partial() must be called on ZodObject before refine()
+// partial() on a schema with .default() would re-apply those defaults on PATCH
+// (wiping type back to "other"). Keep the patch object default-free.
 const updateEventSchema = eventBaseSchema.partial().refine(
   (d) => !d.endAt || !d.startAt || d.endAt >= d.startAt,
   { message: "endAt must be >= startAt", path: ["endAt"] },
