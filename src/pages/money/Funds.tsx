@@ -153,8 +153,10 @@ export function Funds() {
           <Card className="space-y-2 p-4">
             <p className="text-sm font-semibold text-fg">Church data isn’t connected yet</p>
             <p className="text-sm text-fg-muted">
-              {snapQ.error instanceof Error ? snapQ.error.message : "church_not_configured"}
-              . Set CONTRIBUTIONS_API_TOKEN on the Worker to pull live fund and purchase totals.
+              Live totals come from the contributions site. A family admin must set
+              the Worker secret <span className="font-mono text-xs">CONTRIBUTIONS_API_TOKEN</span>{" "}
+              to the same value as that site’s <span className="font-mono text-xs">ADMIN_API_TOKEN</span>.
+              Steps are in the repo file docs/OPS.md.
             </p>
           </Card>
         ) : funds.length === 0 ? (

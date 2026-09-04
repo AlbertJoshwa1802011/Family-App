@@ -262,6 +262,29 @@ describe("expenses: privacy", () => {
     const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)).json()) as ListBody;
     expect(list.expenses).toHaveLength(0);
   });
+
+  it("list view=mine is only the caller's rows; default list still shows shared family rows", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 100 }));
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 200, visibility: "family" }),
+    );
+
+    const mine = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=mine`, alice.cookie)
+    ).json()) as ListBody;
+    expect(mine.expenses).toHaveLength(1);
+    expect(mine.totalMinor).toBe(100);
+
+    const shared = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=family`, alice.cookie)
+    ).json()) as ListBody;
+    expect(shared.expenses).toHaveLength(2);
+    expect(shared.totalMinor).toBe(300);
+  });
 });
 
 describe("expenses: summary", () => {

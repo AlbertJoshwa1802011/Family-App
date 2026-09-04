@@ -10,6 +10,19 @@ describe("worker API", () => {
     expect(body.service).toBe("family-vault");
   });
 
+  it("GET /api/health lists OAuth redirect URIs when APP_URL is bound", async () => {
+    const res = await app.request("/api/health", {}, { APP_URL: "https://fam.connect-cloud.workers.dev" } as never);
+    const body = (await res.json()) as {
+      oauth?: { loginCallback: string; storageCallback: string };
+    };
+    expect(body.oauth?.loginCallback).toBe(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+    );
+    expect(body.oauth?.storageCallback).toBe(
+      "https://fam.connect-cloud.workers.dev/api/admin/storage/connect/callback",
+    );
+  });
+
   it("GET /api/auth/me returns an unauthenticated shape", async () => {
     const res = await app.request("/api/auth/me");
     expect(res.status).toBe(200);

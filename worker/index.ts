@@ -63,9 +63,18 @@ app.use("/api/documents/:id/files/upload", bodyLimit({
 // --- API routes (everything else falls through to static assets) ---
 const api = new Hono<HonoEnv>();
 
-api.get("/health", (c) =>
-  c.json({ ok: true, service: "family-vault", time: Date.now() }),
-);
+api.get("/health", (c) => {
+  const appUrl = (c.env?.APP_URL ?? "").replace(/\/$/, "");
+  return c.json({
+    ok: true,
+    service: "family-vault",
+    time: Date.now(),
+    oauth: {
+      loginCallback: appUrl ? `${appUrl}/api/auth/google/callback` : null,
+      storageCallback: appUrl ? `${appUrl}/api/admin/storage/connect/callback` : null,
+    },
+  });
+});
 
 api.route("/auth", authRoutes);
 api.route("/families", familyRoutes);

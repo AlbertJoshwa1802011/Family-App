@@ -29,7 +29,7 @@ export function AppBar({
 }) {
   const navigate = useNavigate();
   return (
-    <header className="pt-safe sticky top-0 z-20 border-b border-line bg-ink-950/80 backdrop-blur-lg">
+    <header className="pt-safe sticky top-0 z-20 border-b border-white/10 bg-ink-950/55 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-3 sm:px-4">
         {back ? (
           <button

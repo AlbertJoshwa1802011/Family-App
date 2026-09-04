@@ -13,7 +13,6 @@ import {
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
-import { Badge } from "../components/ui/Badge";
 import { Fab } from "../components/ui/Fab";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MoneySubNav } from "../components/money/MoneySubNav";
@@ -243,10 +242,10 @@ export function Expenses() {
   });
 
   const listQ = useQuery({
-    queryKey: ["expenses", "list", activeFamilyId, from, to],
+    queryKey: ["expenses", "list", activeFamilyId, from, to, view],
     queryFn: () =>
       api<{ expenses: ExpenseListItem[]; totalMinor: number }>(
-        `/expenses?familyId=${activeFamilyId}&from=${from}&to=${to}`,
+        `/expenses?familyId=${activeFamilyId}&from=${from}&to=${to}&view=${view}`,
       ),
     enabled: Boolean(activeFamilyId),
   });
@@ -349,13 +348,13 @@ export function Expenses() {
           value={view}
           onChange={setView}
           items={[
-            { id: "mine", label: "My spending", icon: Lock },
-            { id: "family", label: "Shared view", icon: Users },
+            { id: "mine", label: "Mine", icon: Lock },
+            { id: "family", label: "Shared", icon: Users },
           ]}
         />
 
         {/* Hero total — a single headline number, so a stat tile, not a chart. */}
-        <Card className="p-5">
+        <Card className="rounded-[28px] border-white/15 bg-white/8 p-5 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
           {summaryQ.isLoading ? (
             <>
               <Skeleton className="h-3 w-24" />
@@ -479,13 +478,13 @@ export function Expenses() {
                                   : ""}
                               </span>
                             </span>
-                            <span className="flex shrink-0 items-center gap-2">
+                            <span className="flex w-24 shrink-0 items-center justify-end gap-2">
                               {e.visibility === "private" ? (
                                 <Lock className="size-3.5 text-fg-subtle" aria-label="Private" />
                               ) : (
-                                <Badge tone="vault">Shared</Badge>
+                                <Users className="size-3.5 text-vault-300" aria-label="Shared" />
                               )}
-                              <span className="text-sm font-semibold tabular-nums text-fg">
+                              <span className="min-w-[4.5rem] text-right text-sm font-semibold tabular-nums text-fg">
                                 {rowAmount(e)}
                               </span>
                             </span>

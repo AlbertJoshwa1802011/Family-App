@@ -1,22 +1,16 @@
 import { HardDrive, Settings } from "lucide-react";
 import {
-  useCallback,
   useRef,
   useState,
-  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "../../lib/cn";
+import { indexFromX } from "../../lib/liquidNav";
 import { useAuth } from "../../context/AuthContext";
 import { BrandLockup } from "../brand/BrandLockup";
 import { NAV_ITEMS } from "./navItems";
-import {
-  clampBubble,
-  defaultBubblePosition,
-  snapBubbleToEdge,
-} from "../../lib/bubbleNav";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,179 +27,131 @@ function prefersReducedMotion(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Mobile liquid-glass bottom tab bar
+// Mobile liquid-glass bottom tab bar (pinned like WhatsApp / iOS)
+// Long-press then drag moves the active pill *inside* the bar only.
 // ---------------------------------------------------------------------------
 
-const BUBBLE_POS_KEY = "fv:nav-bubble";
-const BUBBLE_PAD = 12;
-const BUBBLE_HEIGHT = 64;
-
-function readBubblePos(): { x: number; y: number } | null {
-  try {
-    const raw = localStorage.getItem(BUBBLE_POS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { x?: number; y?: number };
-    if (typeof parsed.x === "number" && typeof parsed.y === "number") {
-      return { x: parsed.x, y: parsed.y };
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-function writeBubblePos(next: { x: number; y: number }) {
-  try {
-    localStorage.setItem(BUBBLE_POS_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
-}
+const LONG_PRESS_MS = 380;
 
 function MobileBottomTabs() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const barRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ x: number; y: number }>(() => {
-    if (typeof window === "undefined") return { x: 12, y: 12 };
-    const width = Math.min(360, window.innerWidth - 24);
-    return (
-      readBubblePos() ??
-      defaultBubblePosition(
-        window.innerWidth,
-        window.innerHeight,
-        width,
-        BUBBLE_HEIGHT,
-        BUBBLE_PAD,
-      )
-    );
-  });
-  const posRef = useRef(pos);
-  const [dragging, setDragging] = useState(false);
-  const [settling, setSettling] = useState(false);
   const pointerId = useRef<number | null>(null);
-  const start = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const moved = useRef(false);
+  const pressTimer = useRef<number | null>(null);
+  const armed = useRef(false);
+  const dragged = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
   const activeIndex = NAV_ITEMS.findIndex(({ path, matchPrefix }) =>
     isNavActive(path, matchPrefix, pathname),
   );
-  const activeColor = activeIndex >= 0 ? NAV_ITEMS[activeIndex].color : "#6366f1";
+  const displayIndex = dragIndex ?? (activeIndex >= 0 ? activeIndex : 0);
+  const activeColor = NAV_ITEMS[displayIndex]?.color ?? "#6366f1";
 
-  const persistSnap = useCallback((next: { x: number; y: number }) => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const width = Math.min(360, vw - 24);
-    const snapped = prefersReducedMotion()
-      ? clampBubble(next.x, next.y, vw, vh, width, BUBBLE_HEIGHT, BUBBLE_PAD)
-      : snapBubbleToEdge(next.x, next.y, vw, vh, width, BUBBLE_HEIGHT, BUBBLE_PAD);
-    setSettling(!prefersReducedMotion());
-    posRef.current = snapped;
-    setPos(snapped);
-    writeBubblePos(snapped);
-    window.setTimeout(() => setSettling(false), 420);
-  }, []);
+  function clearPressTimer() {
+    if (pressTimer.current != null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  }
+
+  function indexAt(clientX: number): number {
+    const el = barRef.current;
+    if (!el) return displayIndex;
+    const rect = el.getBoundingClientRect();
+    return indexFromX(clientX - rect.left, rect.width, NAV_ITEMS.length);
+  }
 
   function onPointerDown(e: ReactPointerEvent) {
     if (e.button !== 0) return;
     pointerId.current = e.pointerId;
-    start.current = { x: e.clientX, y: e.clientY, px: posRef.current.x, py: posRef.current.y };
-    moved.current = false;
-    setSettling(false);
+    armed.current = false;
+    dragged.current = false;
+    const startX = e.clientX;
+    pressTimer.current = window.setTimeout(() => {
+      armed.current = true;
+      setDragging(true);
+      setDragIndex(indexAt(startX));
+      try {
+        barRef.current?.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }, prefersReducedMotion() ? 10_000 : LONG_PRESS_MS);
   }
 
   function onPointerMove(e: ReactPointerEvent) {
-    if (pointerId.current !== e.pointerId || !start.current) return;
-    const dx = e.clientX - start.current.x;
-    const dy = e.clientY - start.current.y;
-    if (!moved.current && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-    moved.current = true;
-    setDragging(true);
-    try {
-      barRef.current?.setPointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const width = Math.min(360, vw - 24);
-    const next = clampBubble(
-      start.current.px + dx,
-      start.current.py + dy,
-      vw,
-      vh,
-      width,
-      BUBBLE_HEIGHT,
-      BUBBLE_PAD,
-    );
-    posRef.current = next;
-    setPos(next);
+    if (pointerId.current !== e.pointerId) return;
+    if (!armed.current) return;
+    dragged.current = true;
+    setDragIndex(indexAt(e.clientX));
   }
 
   function onPointerUp(e: ReactPointerEvent) {
     if (pointerId.current !== e.pointerId) return;
     pointerId.current = null;
-    start.current = null;
+    clearPressTimer();
     try {
       barRef.current?.releasePointerCapture(e.pointerId);
     } catch {
       // ignore
     }
+    if (armed.current) {
+      const next = indexAt(e.clientX);
+      const item = NAV_ITEMS[next];
+      if (item) navigate(item.path);
+    }
+    armed.current = false;
     setDragging(false);
-    if (moved.current) persistSnap(posRef.current);
+    setDragIndex(null);
   }
 
-  const pillStyle: CSSProperties = {
-    left: pos.x,
-    top: pos.y,
-    width: "min(360px, calc(100vw - 24px))",
-    transition: settling
-      ? "left 420ms cubic-bezier(0.22, 1.2, 0.36, 1), top 420ms cubic-bezier(0.22, 1.2, 0.36, 1)"
-      : undefined,
-    borderColor: `${activeColor}55`,
-    background: "linear-gradient(180deg, rgba(15,23,42,0.88), rgba(15,23,42,0.78))",
-  };
-
-  const bubbleLeft =
-    activeIndex >= 0 ? `${(activeIndex / NAV_ITEMS.length) * 100}%` : "0%";
+  const bubbleLeft = `${(displayIndex / NAV_ITEMS.length) * 100}%`;
   const bubbleWidth = `${100 / NAV_ITEMS.length}%`;
 
   return (
     <nav
       aria-label="Primary navigation"
-      className="pointer-events-none fixed inset-0 z-30 md:hidden"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(10px,env(safe-area-inset-bottom))] md:hidden"
     >
       <div
         ref={barRef}
         className={cn(
-          "pointer-events-auto absolute touch-none select-none",
-          "rounded-full border shadow-lg backdrop-blur-2xl overflow-hidden",
-          dragging && "scale-[1.02] shadow-2xl",
+          "pointer-events-auto relative mx-auto max-w-md touch-none select-none overflow-hidden",
+          "rounded-[28px] border border-white/20 shadow-[0_8px_40px_-8px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.28)]",
+          "bg-white/12 backdrop-blur-2xl backdrop-saturate-150",
+          dragging && "scale-[1.015]",
         )}
-        style={pillStyle}
+        style={{ borderColor: `${activeColor}66` }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {activeIndex >= 0 && (
+        {displayIndex >= 0 && (
           <span
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute top-1 bottom-1 rounded-full",
-              "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              dragging
+                ? undefined
+                : "transition-[left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
               "motion-reduce:transition-none",
             )}
             style={{
               left: bubbleLeft,
               width: bubbleWidth,
-              backgroundColor: `${activeColor}40`,
-              boxShadow: `0 0 18px ${activeColor}66`,
+              background: `linear-gradient(180deg, ${activeColor}55, ${activeColor}28)`,
+              boxShadow: `0 0 22px ${activeColor}55, inset 0 1px 0 rgba(255,255,255,0.35)`,
             }}
           />
         )}
 
         <ul className="relative z-10 flex items-stretch">
-          {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
-            const active = isNavActive(path, matchPrefix, pathname);
+          {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }, i) => {
+            const active = i === displayIndex;
             return (
               <li key={path} className="flex-1">
                 <NavLink
@@ -214,7 +160,7 @@ function MobileBottomTabs() {
                   className="no-select flex min-h-14 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium"
                   style={{ color: active ? color : `${color}aa` }}
                   onClick={(ev) => {
-                    if (moved.current) ev.preventDefault();
+                    if (dragged.current) ev.preventDefault();
                   }}
                 >
                   <Icon
@@ -412,7 +358,7 @@ export interface AppShellProps {
 /**
  * Responsive application shell.
  *
- * - Mobile  (<768 px): floating liquid-glass bottom tabs + content
+ * - Mobile  (<768 px): pinned liquid-glass bottom tabs + content
  * - Tablet  (768-1023 px): icon-only nav rail (64 px) + content shifted right
  * - Desktop (>=1024 px): icon+label sidebar (200 px) + content shifted right
  */
@@ -425,7 +371,7 @@ export function AppShell({ children }: AppShellProps) {
 
       <main
         className={cn(
-          // Extra bottom padding so content clears the floating pill
+          // Extra bottom padding so content clears the pinned tab bar
           "min-h-full pb-20 [padding-bottom:calc(5rem+env(safe-area-inset-bottom))]",
           "md:ml-16 md:pb-0 md:[padding-bottom:0]",
           "lg:ml-[200px]",

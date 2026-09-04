@@ -21,8 +21,9 @@ function bufferToB64url(buf: ArrayBuffer): string {
 }
 
 function b64urlToBuffer(s: string): ArrayBuffer {
-  const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "==".slice((s.length * 3) % 4);
-  const bin = atob(padded);
+  const normalized = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (normalized.length % 4)) % 4;
+  const bin = atob(normalized + "=".repeat(pad));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
@@ -123,6 +124,10 @@ export function DeviceLockGate({
   const [unlocked, setUnlocked] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [pin, setPin] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetPin, setResetPin] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetTo, setResetTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const autoTried = useRef(false);
@@ -175,6 +180,48 @@ export function DeviceLockGate({
         e instanceof ApiError || e instanceof Error
           ? e.message
           : "Face ID / fingerprint failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRequestReset() {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await api<{ to: string }>("/device-lock/pin/reset/request", {
+        method: "POST",
+      });
+      setResetTo(res.to);
+      setResetOpen(true);
+    } catch (e) {
+      setError(
+        e instanceof ApiError || e instanceof Error
+          ? e.message
+          : "Could not email a reset code.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onConfirmReset() {
+    setError(null);
+    if (!/^\d{6}$/.test(resetCode) || !/^\d{6}$/.test(resetPin)) {
+      setError("Enter the 6-digit email code and your new PIN.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/device-lock/pin/reset/confirm", {
+        method: "POST",
+        body: JSON.stringify({ code: resetCode, pin: resetPin }),
+      });
+      markUnlocked();
+    } catch (e) {
+      setError(
+        e instanceof ApiError || e instanceof Error ? e.message : "PIN reset failed.",
       );
     } finally {
       setBusy(false);
@@ -264,6 +311,44 @@ export function DeviceLockGate({
               {status?.pin ? "Unlock with PIN" : "Save PIN and unlock"}
             </Button>
           </div>
+
+          {status?.pin && (
+            <div className="space-y-2 border-t border-line pt-3">
+              <button
+                type="button"
+                className="text-xs font-medium text-vault-300"
+                onClick={() => void onRequestReset()}
+              >
+                Forgot PIN? Email a reset code to your Google login
+              </button>
+              {resetOpen && (
+                <div className="space-y-2">
+                  <p className="text-xs text-fg-muted">
+                    We sent a code{resetTo ? ` to ${resetTo}` : ""}. Enter it with a new PIN.
+                  </p>
+                  <input
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Email code"
+                    className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-center text-sm tracking-[0.3em] text-fg"
+                  />
+                  <input
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={resetPin}
+                    onChange={(e) => setResetPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="New 6-digit PIN"
+                    className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-center text-sm tracking-[0.3em] text-fg"
+                  />
+                  <Button fullWidth loading={busy} onClick={() => void onConfirmReset()}>
+                    Set new PIN
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-danger">

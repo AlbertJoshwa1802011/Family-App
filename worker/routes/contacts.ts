@@ -227,8 +227,13 @@ contactRoutes.post("/sync", requireSession, async (c) => {
       break;
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : "sync_failed";
-    return c.json({ error: "google_sync_failed", detail: message }, 502);
+    const status = e instanceof PeopleError ? e.statusCode : 0;
+    const raw = e instanceof Error ? e.message : "sync_failed";
+    const message =
+      status === 403
+        ? "Google blocked Contacts (403). Enable People API on the Cloud project, reconnect Contacts in Settings, and submit the app for Google verification — Contacts is a restricted scope."
+        : raw;
+    return c.json({ error: "google_sync_failed", detail: raw, message }, 502);
   }
 
   // Push local contacts that have never been sent to Google.

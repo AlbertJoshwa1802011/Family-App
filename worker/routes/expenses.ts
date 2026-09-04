@@ -447,6 +447,7 @@ expenseRoutes.get("/", requireSession, async (c) => {
   const categoryId = c.req.query("categoryId");
   const paidBy = c.req.query("paidBy");
   const scope = c.req.query("scope");
+  const view = c.req.query("view");
   const q = c.req.query("q")?.trim();
 
   if (from) {
@@ -475,6 +476,9 @@ expenseRoutes.get("/", requireSession, async (c) => {
   }
   if (categoryId) where = and(where, eq(schema.expenses.categoryId, categoryId));
   if (paidBy) where = and(where, eq(schema.expenses.paidByMemberId, paidBy));
+  if (view === "mine") {
+    where = and(where, eq(schema.expenses.createdByUserId, userId));
+  }
   if (scope === "personal") {
     where = and(where, eq(schema.expenses.splitType, "none"));
   } else if (scope === "shared") {

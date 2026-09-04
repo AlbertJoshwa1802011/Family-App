@@ -34,8 +34,9 @@ migrations (`.github/workflows/deploy.yml`).
   slowly).
 - **Emails** — event create/update/cancel, daily expiry/event reminders, test
   send in Settings. Needs `RESEND_API_KEY` and `EMAIL_FROM` on a verified domain.
-- **Navigation** — draggable coloured bubble tab bar (snaps to the left/right
-  edge like iOS AssistiveTouch / GitHub). Position is remembered on the device.
+- **Navigation** — pinned liquid-glass tab bar (Home, Vault, Docs, Money,
+  Family) like WhatsApp / iOS. Long-press and drag slides the active pill
+  *inside* the bar; the bar stays at the bottom.
 
 ## Quick start
 
@@ -59,10 +60,9 @@ npm run dev
 | `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |
 | `npm run deploy` | Build + wrangler deploy (normally CI) |
 
-See `docs/TESTING.md` for the regression catalog (edit-form hydration, event
-email, Google Calendar, church settlements, category-optional expenses, bubble
-nav). A case that is not in that catalog can regress silently — add it there
-when you fix or ship a behaviour.
+See `docs/OPS.md` for Google redirect URIs, Drive upload, Gmail/Resend, church
+token, Contacts verification, and Face ID. See `docs/TESTING.md` for the test
+catalog.
 
 ## Production secrets
 
@@ -77,9 +77,9 @@ npx wrangler secret put CONTRIBUTIONS_API_TOKEN   # church app machine token
 npx wrangler secret put GEMINI_API_KEY
 ```
 
-Google Cloud: enable **Drive API** and **Calendar API**. OAuth scopes are
-`openid email profile`, `drive.file`, and `calendar.events`. Existing users
-should sign in once more so Google issues a refresh token that includes calendar.
+Google Cloud: enable **Drive API**, **Calendar API**, **Gmail API**, and
+**People API**. Add both OAuth redirect URIs (login + storage). Full click-path:
+`docs/OPS.md`.
 
 **Migrations:** merging to `main` runs `wrangler d1 migrations apply` then
 deploys. If categories or settlements 500 with `schema_missing`, re-run the

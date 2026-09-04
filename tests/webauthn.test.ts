@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashPin, rpIdFromAppUrl, b64urlEncode, b64urlDecode } from "../worker/lib/webauthn";
+import { hashPin, rpIdFromAppUrl, b64urlEncode, b64urlDecode, parseClientData, normalizeB64url } from "../worker/lib/webauthn";
 import { extraScopesFromConnect, GOOGLE_SCOPES } from "../worker/lib/google";
 
 describe("webauthn helpers", () => {
@@ -23,6 +23,49 @@ describe("webauthn helpers", () => {
     const encoded = b64urlEncode(bytes);
     expect(encoded).not.toMatch(/[+/=]/);
     expect([...b64urlDecode(encoded)]).toEqual([...bytes]);
+  });
+
+  it("b64urlDecode accepts unpadded browser clientDataJSON", () => {
+    const packed = b64urlEncode(new TextEncoder().encode("hello"));
+    expect(packed).not.toMatch(/=/);
+    expect(new TextDecoder().decode(b64urlDecode(packed))).toBe("hello");
+  });
+});
+
+describe("parseClientData", () => {
+  function pack(data: object): string {
+    return b64urlEncode(new TextEncoder().encode(JSON.stringify(data)));
+  }
+
+  it("accepts an unpadded challenge and either allowed origin", () => {
+    const packed = pack({
+      type: "webauthn.create",
+      challenge: "abc",
+      origin: "https://fam.connect-cloud.workers.dev",
+    });
+    expect(() =>
+      parseClientData(packed, {
+        type: "webauthn.create",
+        challenge: "abc==",
+        origins: ["https://other.example", "https://fam.connect-cloud.workers.dev"],
+      }),
+    ).not.toThrow();
+    expect(normalizeB64url("abc==")).toBe("abc");
+  });
+
+  it("rejects a foreign origin", () => {
+    const packed = pack({
+      type: "webauthn.create",
+      challenge: "abc",
+      origin: "https://evil.example",
+    });
+    expect(() =>
+      parseClientData(packed, {
+        type: "webauthn.create",
+        challenge: "abc",
+        origins: ["https://fam.connect-cloud.workers.dev"],
+      }),
+    ).toThrow(/origin/);
   });
 });
 

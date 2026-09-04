@@ -86,6 +86,32 @@ describe("device lock PIN", () => {
     const res = await req(env, "GET", "/api/device-lock/status", "");
     expect(res.status).toBe(401);
   });
+
+  it("PIN reset request without email transport → 503", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    await req(env, "POST", "/api/device-lock/pin/setup", actor.cookie, { pin: "123456" });
+    const res = await req(env, "POST", "/api/device-lock/pin/reset/request", actor.cookie);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("email_not_configured");
+  });
+
+  it("PIN reset confirm rejects a wrong code", async () => {
+    const { env, sqlite } = createTestEnv();
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const actor = seedActor(sqlite, family.id, "owner");
+    const res = await req(env, "POST", "/api/device-lock/pin/reset/confirm", actor.cookie, {
+      code: "000000",
+      pin: "654321",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("invalid_reset_code");
+  });
 });
 
 describe("device lock webauthn options", () => {
