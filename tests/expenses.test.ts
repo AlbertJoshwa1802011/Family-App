@@ -284,6 +284,12 @@ describe("expenses: privacy", () => {
     ).json()) as ListBody;
     expect(shared.expenses).toHaveLength(2);
     expect(shared.totalMinor).toBe(300);
+
+    const def = (await (
+      await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)
+    ).json()) as ListBody;
+    expect(def.expenses).toHaveLength(2);
+    expect(def.totalMinor).toBe(300);
   });
 });
 

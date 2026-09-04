@@ -30,6 +30,12 @@ describe("webauthn helpers", () => {
     expect(packed).not.toMatch(/=/);
     expect(new TextDecoder().decode(b64urlDecode(packed))).toBe("hello");
   });
+
+  it("b64urlDecode pads 1-byte and 2-byte payloads (old pad math threw)", () => {
+    expect([...b64urlDecode(b64urlEncode(new Uint8Array([1])))]).toEqual([1]);
+    expect([...b64urlDecode(b64urlEncode(new Uint8Array([1, 2])))]).toEqual([1, 2]);
+    expect([...b64urlDecode(b64urlEncode(new Uint8Array([1, 2, 3])))]).toEqual([1, 2, 3]);
+  });
 });
 
 describe("parseClientData", () => {
@@ -66,6 +72,33 @@ describe("parseClientData", () => {
         origins: ["https://fam.connect-cloud.workers.dev"],
       }),
     ).toThrow(/origin/);
+  });
+
+  it("rejects a type or challenge mismatch", () => {
+    const packed = pack({
+      type: "webauthn.get",
+      challenge: "abc",
+      origin: "https://fam.connect-cloud.workers.dev",
+    });
+    expect(() =>
+      parseClientData(packed, {
+        type: "webauthn.create",
+        challenge: "abc",
+        origins: ["https://fam.connect-cloud.workers.dev"],
+      }),
+    ).toThrow(/type/);
+    const packedChallenge = pack({
+      type: "webauthn.create",
+      challenge: "nope",
+      origin: "https://fam.connect-cloud.workers.dev",
+    });
+    expect(() =>
+      parseClientData(packedChallenge, {
+        type: "webauthn.create",
+        challenge: "abc",
+        origins: ["https://fam.connect-cloud.workers.dev"],
+      }),
+    ).toThrow(/challenge/);
   });
 });
 

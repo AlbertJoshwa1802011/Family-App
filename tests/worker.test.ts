@@ -23,6 +23,30 @@ describe("worker API", () => {
     );
   });
 
+  it("GET /api/health strips a trailing slash on APP_URL", async () => {
+    const res = await app.request(
+      "/api/health",
+      {},
+      { APP_URL: "https://fam.connect-cloud.workers.dev/" } as never,
+    );
+    const body = (await res.json()) as {
+      oauth?: { loginCallback: string; storageCallback: string };
+    };
+    expect(body.oauth?.loginCallback).toBe(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+    );
+    expect(body.oauth?.storageCallback).not.toContain("workers.dev//");
+  });
+
+  it("GET /api/health oauth callbacks are null without APP_URL", async () => {
+    const res = await app.request("/api/health", {}, {} as never);
+    const body = (await res.json()) as {
+      oauth?: { loginCallback: string | null; storageCallback: string | null };
+    };
+    expect(body.oauth?.loginCallback).toBeNull();
+    expect(body.oauth?.storageCallback).toBeNull();
+  });
+
   it("GET /api/auth/me returns an unauthenticated shape", async () => {
     const res = await app.request("/api/auth/me");
     expect(res.status).toBe(200);
