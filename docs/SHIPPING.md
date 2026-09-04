@@ -39,13 +39,15 @@ Do not open an editor until these are written down (in the PR description or an 
 
 ## 2. Definition of done — the green gate (every change)
 
-From `CLAUDE.md §1`. All must pass locally before push:
+From `CLAUDE.md §1`. One command; run it locally before every commit:
 
 ```bash
-npm run typecheck && npm run lint && npm run test && npm run build
-# same thing:
-npm run gate
+npm run gate        # typecheck + lint + full npm test + build (alias: test:gate)
 ```
+
+GitHub CI and the production deploy workflow run that same script. `npm run test:ship`
+and `npm run test:regression` are local shortcuts (Home/tasks/lock vs events/church/calendar)
+— never ship on a slice alone. See `docs/TESTING.md`.
 
 If the schema changed, also:
 

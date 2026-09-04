@@ -1,6 +1,7 @@
 # Testing process
 
-One command before every commit and on every CI / production deploy:
+Agents: this is the process. `CLAUDE.md §1` and `.claude/skills/gate/SKILL.md`
+say the same thing. One command before every commit and on every CI / production deploy:
 
 ```bash
 npm run gate
