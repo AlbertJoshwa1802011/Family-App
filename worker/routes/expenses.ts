@@ -474,11 +474,16 @@ expenseRoutes.get("/", requireSession, async (c) => {
     }
     where = and(where, lte(schema.expenses.expenseDate, to));
   }
-  if (categoryId) where = and(where, eq(schema.expenses.categoryId, categoryId));
-  if (paidBy) where = and(where, eq(schema.expenses.paidByMemberId, paidBy));
+  // Same "mine" books as GET /summary — list and charts must agree.
   if (view === "mine") {
     where = and(where, eq(schema.expenses.createdByUserId, userId));
   }
+  if (categoryId === "none" || categoryId === "uncategorized") {
+    where = and(where, isNull(schema.expenses.categoryId));
+  } else if (categoryId) {
+    where = and(where, eq(schema.expenses.categoryId, categoryId));
+  }
+  if (paidBy) where = and(where, eq(schema.expenses.paidByMemberId, paidBy));
   if (scope === "personal") {
     where = and(where, eq(schema.expenses.splitType, "none"));
   } else if (scope === "shared") {
@@ -877,6 +882,7 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
   let totalMinor = 0;
   const byCategoryMap = new Map<string, { categoryId: string | null; totalMinor: number; count: number }>();
   const byMonthMap = new Map<string, number>();
+  const byDayMap = new Map<string, { totalMinor: number; count: number }>();
   let privateMinor = 0;
   let sharedMinor = 0;
   let leafCount = 0;
@@ -898,6 +904,11 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
 
     const month = r.expenseDate.slice(0, 7); // yyyy-mm
     byMonthMap.set(month, (byMonthMap.get(month) ?? 0) + r.amountMinor);
+
+    const day = byDayMap.get(r.expenseDate) ?? { totalMinor: 0, count: 0 };
+    day.totalMinor += r.amountMinor;
+    day.count += 1;
+    byDayMap.set(r.expenseDate, day);
 
     if (r.visibility === "private") privateMinor += r.amountMinor;
     else sharedMinor += r.amountMinor;
@@ -938,6 +949,10 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
     .map(([month, minor]) => ({ month, totalMinor: minor }))
     .sort((a, b) => (a.month < b.month ? -1 : 1));
 
+  const byDay = [...byDayMap.entries()]
+    .map(([date, v]) => ({ date, totalMinor: v.totalMinor, count: v.count }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+
   return c.json({
     view,
     currency: family?.defaultCurrency ?? "USD",
@@ -947,6 +962,7 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
     sharedMinor,
     byCategory,
     byMonth,
+    byDay,
   });
 });
 
