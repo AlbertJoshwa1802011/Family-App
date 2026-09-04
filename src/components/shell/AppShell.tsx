@@ -150,7 +150,7 @@ function MobileBottomTabs() {
         )}
 
         <ul className="relative z-10 flex items-stretch">
-          {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }, i) => {
+          {NAV_ITEMS.map(({ path, label, icon: Icon, color }, i) => {
             const active = i === displayIndex;
             return (
               <li key={path} className="flex-1">
