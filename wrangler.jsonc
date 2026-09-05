@@ -31,11 +31,17 @@
     }
   ],
   // Document file bytes (passports, insurance PDFs, etc.).
-  // PENDING laptop: Cloudflare account must enable R2 in the Dashboard first
-  // (R2 requires adding a payment method — free tier still applies after).
-  // Then uncomment this block and run:
-  //   npx wrangler r2 bucket create family-vault-files
-  // Until then, uploads fall back to Google Drive when connected (also pending).
+  // Do NOT uncomment until R2 is enabled on the Cloudflare account AND the
+  // bucket exists — otherwise `wrangler deploy` fails.
+  //
+  // Cloudflare dashboard steps (one-time, needs a payment method; free tier
+  // still applies after R2 is turned on):
+  //   1. dash.cloudflare.com → R2 Object Storage → Overview → Enable R2
+  //      (add a billing method if prompted).
+  //   2. Create bucket named `family-vault-files` (or run
+  //      `npx wrangler r2 bucket create family-vault-files`).
+  //   3. Uncomment the block below and merge/deploy.
+  // Full walkthrough: docs/OPS.md §7.
   // "r2_buckets": [
   //   {
   //     "binding": "FILES",

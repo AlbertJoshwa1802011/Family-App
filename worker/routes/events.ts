@@ -9,8 +9,10 @@ import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, ACTIONS } from "../lib/audit";
 import { notifyEventChange } from "../lib/eventNotify";
 import {
+  calendarStatusMessage,
   deleteGoogleCalendarEvent,
   upsertGoogleCalendarEvent,
+  type CalendarSyncResult,
 } from "../lib/googleCalendar";
 
 function whenLabel(startAt: number, allDay: boolean): string {
@@ -211,9 +213,10 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     .where(eq(schema.events.id, eventId))
     .get();
 
-  let calendar: { status: string; googleCalendarEventId: string | null } = {
+  let calendar: CalendarSyncResult = {
     status: "failed",
     googleCalendarEventId: null,
+    message: calendarStatusMessage("failed"),
   };
   if (event) {
     try {
@@ -331,9 +334,10 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     targetId: eventId,
   });
 
-  let calendar: { status: string; googleCalendarEventId: string | null } = {
+  let calendar: CalendarSyncResult = {
     status: "failed",
     googleCalendarEventId: null,
+    message: calendarStatusMessage("failed"),
   };
   if (updatedEvent) {
     try {
@@ -450,6 +454,34 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
   }
 
   return c.json({ ok: true });
+});
+
+// POST /events/:id/sync-calendar — retry Google Calendar write without editing.
+// Existing events created before Calendar API / reconnect never sync otherwise.
+eventRoutes.post("/:id/sync-calendar", requireSession, async (c) => {
+  const { id: eventId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const event = await db
+    .select()
+    .from(schema.events)
+    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+    .get();
+
+  if (!event) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, event.familyId);
+  if (membership instanceof Response) return membership;
+
+  const calendar = await syncCalendar(c.env, db, userId, event);
+  const latest = await db
+    .select()
+    .from(schema.events)
+    .where(eq(schema.events.id, eventId))
+    .get();
+
+  return c.json({ event: latest ?? event, calendar });
 });
 
 // POST /events/:id/attendees — add members as attendees.

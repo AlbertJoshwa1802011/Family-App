@@ -9,14 +9,15 @@ import type { Env } from "../types";
 import type { Db } from "../db/client";
 import { schema } from "../db/client";
 import { eq } from "drizzle-orm";
+import { classifyGoogleApiError, getUserGoogleAccessToken } from "./google";
 
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CAL_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
 export type CalendarSyncStatus =
   | "synced"
   | "skipped_no_token"
   | "needs_reconnect"
+  | "needs_api_enabled"
   | "failed";
 
 export interface CalendarEventInput {
@@ -69,36 +70,19 @@ function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
   };
 }
 
-async function calendarAccessToken(env: Env, userId: string): Promise<string | null> {
-  const cacheKey = `user:gcal_access_token:${userId}`;
-  const cached = await env.KV.get(cacheKey);
-  if (cached) return cached;
-
-  const refreshToken = await env.KV.get(`user:refresh_token:${userId}`);
-  if (!refreshToken || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
-    return null;
+export function calendarStatusMessage(status: CalendarSyncStatus): string {
+  switch (status) {
+    case "synced":
+      return "Saved to Google Calendar.";
+    case "skipped_no_token":
+      return "Sign in again in Settings to grant Google Calendar access.";
+    case "needs_reconnect":
+      return "Reconnect Google Calendar in Settings (calendar.events).";
+    case "needs_api_enabled":
+      return "Enable Google Calendar API on the Cloud project, then tap Sync again.";
+    case "failed":
+      return "Google Calendar could not save this event. Try Sync again or download an .ics file.";
   }
-
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) {
-    console.error(`[gcal] token refresh failed: ${res.status}`);
-    return null;
-  }
-  const body = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!body.access_token) return null;
-  await env.KV.put(cacheKey, body.access_token, {
-    expirationTtl: Math.max((body.expires_in ?? 3600) - 300, 60),
-  });
-  return body.access_token;
 }
 
 async function gcalFetch(
@@ -120,15 +104,28 @@ async function gcalFetch(
  * Create or patch the Google Calendar event. Returns the remote id when
  * synced, plus a status the API can echo to the SPA.
  */
+export interface CalendarSyncResult {
+  status: CalendarSyncStatus;
+  googleCalendarEventId: string | null;
+  message: string;
+}
+
+function result(
+  status: CalendarSyncStatus,
+  googleCalendarEventId: string | null,
+): CalendarSyncResult {
+  return { status, googleCalendarEventId, message: calendarStatusMessage(status) };
+}
+
 export async function upsertGoogleCalendarEvent(
   env: Env,
   db: Db,
   userId: string,
   ev: CalendarEventInput,
-): Promise<{ status: CalendarSyncStatus; googleCalendarEventId: string | null }> {
+): Promise<CalendarSyncResult> {
   try {
-    const token = await calendarAccessToken(env, userId);
-    if (!token) return { status: "skipped_no_token", googleCalendarEventId: ev.googleCalendarEventId };
+    const token = await getUserGoogleAccessToken(env, userId);
+    if (!token) return result("skipped_no_token", ev.googleCalendarEventId);
 
     const body = JSON.stringify(toGcalBody(ev));
     let res: Response;
@@ -145,11 +142,15 @@ export async function upsertGoogleCalendarEvent(
     }
 
     if (res.status === 401 || res.status === 403) {
-      return { status: "needs_reconnect", googleCalendarEventId: ev.googleCalendarEventId };
+      const errBody = await res.text();
+      const kind = classifyGoogleApiError(res.status, errBody);
+      console.error(`[gcal] upsert ${res.status}: ${errBody.slice(0, 200)}`);
+      if (kind === "api_disabled") return result("needs_api_enabled", ev.googleCalendarEventId);
+      return result("needs_reconnect", ev.googleCalendarEventId);
     }
     if (!res.ok) {
       console.error(`[gcal] upsert ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return { status: "failed", googleCalendarEventId: ev.googleCalendarEventId };
+      return result("failed", ev.googleCalendarEventId);
     }
     const created = (await res.json()) as { id?: string };
     const remoteId = created.id ?? ev.googleCalendarEventId;
@@ -159,10 +160,10 @@ export async function upsertGoogleCalendarEvent(
         .set({ googleCalendarEventId: remoteId })
         .where(eq(schema.events.id, ev.id));
     }
-    return { status: "synced", googleCalendarEventId: remoteId ?? null };
+    return result("synced", remoteId ?? null);
   } catch (err) {
     console.error("[gcal] upsert failed:", err);
-    return { status: "failed", googleCalendarEventId: ev.googleCalendarEventId };
+    return result("failed", ev.googleCalendarEventId);
   }
 }
 
@@ -173,7 +174,7 @@ export async function deleteGoogleCalendarEvent(
 ): Promise<void> {
   if (!googleCalendarEventId) return;
   try {
-    const token = await calendarAccessToken(env, userId);
+    const token = await getUserGoogleAccessToken(env, userId);
     if (!token) return;
     const res = await gcalFetch(
       token,

@@ -88,7 +88,8 @@ function ReminderEmailField({
 function GoogleConnectionsCard() {
   const { data } = useQuery({
     queryKey: ["google-status"],
-    queryFn: () => api<{ contacts: boolean; gmail: boolean }>("/auth/google/status"),
+    queryFn: () =>
+      api<{ contacts: boolean; gmail: boolean; calendar: boolean }>("/auth/google/status"),
   });
 
   return (
@@ -109,6 +110,29 @@ function GoogleConnectionsCard() {
               variant="secondary"
               onClick={() => {
                 window.location.href = `/api/auth/google/start?connect=gmail&returnTo=${encodeURIComponent("/settings")}`;
+              }}
+            >
+              Connect
+            </Button>
+          )
+        }
+      />
+      <ListItem
+        leading={<CalendarDays className="size-5 text-fg-muted" />}
+        title="Google Calendar"
+        subtitle={
+          data?.calendar
+            ? "Granted — new events write to your primary calendar"
+            : "Grant calendar.events so saves appear on your phone"
+        }
+        trailing={
+          data?.calendar ? (
+            <span className="text-xs text-success">On</span>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                window.location.href = `/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent("/settings")}`;
               }}
             >
               Connect
@@ -163,6 +187,12 @@ function ReminderPrefsCard() {
       if (msg === "email_not_configured") {
         setTestMsg(
           "Email is not configured. Reconnect Storage (Gmail send) or set RESEND_API_KEY.",
+        );
+        return;
+      }
+      if (msg === "gmail_api_disabled") {
+        setTestMsg(
+          "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key.",
         );
         return;
       }
@@ -295,8 +325,9 @@ function CalendarFeedCard() {
       </h3>
       <Card className="space-y-3 p-4">
         <p className="text-sm text-fg-muted">
-          Events write to your Google Calendar on save. Subscribe to the ICS feed
-          as a backup (Google may take hours to refresh a feed).
+          Events write to your Google Calendar on save. If sync failed, open the
+          event and tap Sync, or Connect Google Calendar above. The ICS feed is
+          a backup (Google may take hours to refresh a feed).
         </p>
         {shown && (
           <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
@@ -312,12 +343,6 @@ function CalendarFeedCard() {
         >
           {shown ? "Rotate calendar feed URL" : "Create calendar feed URL"}
         </Button>
-        <a
-          href="/api/auth/google/start?connect=calendar"
-          className="block text-center text-xs font-medium text-vault-400"
-        >
-          Re-connect Google (grants calendar.events)
-        </a>
       </Card>
     </section>
   );

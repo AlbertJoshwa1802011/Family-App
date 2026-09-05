@@ -183,9 +183,13 @@ function EventFormFields({
         : api("/events", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: (data: unknown) => {
       void qc.invalidateQueries({ queryKey: ["events"] });
-      const ev = (data as { event?: { id?: string } })?.event;
-      navigate(ev?.id ? `/calendar/events/${ev.id}` : "/calendar", {
+      const res = data as {
+        event?: { id?: string };
+        calendar?: { status?: string; message?: string };
+      };
+      navigate(res.event?.id ? `/calendar/events/${res.event.id}` : "/calendar", {
         replace: true,
+        state: res.calendar ? { calendar: res.calendar } : undefined,
       });
     },
   });

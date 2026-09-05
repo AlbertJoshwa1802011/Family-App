@@ -223,13 +223,14 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
   );
 
   if (!result.ok) {
+    const error = result.error ?? "email_send_failed";
+    const message =
+      error === "gmail_api_disabled"
+        ? "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key."
+        : "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from your Gmail, or add a Resend API key.";
     return c.json(
-      {
-        error: result.error ?? "email_send_failed",
-        message:
-          "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from your Gmail, or add a Resend API key.",
-      },
-      result.error === "email_not_configured" ? 503 : 502,
+      { error, message },
+      error === "email_not_configured" ? 503 : 502,
     );
   }
 

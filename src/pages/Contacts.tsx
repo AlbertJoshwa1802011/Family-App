@@ -48,7 +48,8 @@ export function Contacts() {
 
   const googleStatus = useQuery({
     queryKey: ["google-status"],
-    queryFn: () => api<{ contacts: boolean; gmail: boolean }>("/auth/google/status"),
+    queryFn: () =>
+      api<{ contacts: boolean; gmail: boolean; calendar: boolean }>("/auth/google/status"),
   });
 
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
