@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -374,6 +375,17 @@ export const tasks = sqliteTable(
     status: text("status", { enum: ["open", "done", "archived"] })
       .notNull()
       .default("open"),
+    // Nested subtasks. Root tasks have parentTaskId = null. Depth is capped in
+    // app code (MAX_TASK_DEPTH) because D1 cannot enforce a graph constraint.
+    parentTaskId: text("parent_task_id").references(
+      (): AnySQLiteColumn => tasks.id,
+      { onDelete: "cascade" },
+    ),
+    priority: text("priority", { enum: ["low", "medium", "high"] })
+      .notNull()
+      .default("medium"),
+    // Set when status becomes "done"; cleared on reopen. Used by the Completed view.
+    completedAt: integer("completed_at"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -390,6 +402,9 @@ export const tasks = sqliteTable(
   (t) => [
     index("idx_task_family_status").on(t.familyId, t.status),
     index("idx_task_assignee").on(t.assignedToMemberId),
+    index("idx_task_parent").on(t.parentTaskId),
+    index("idx_task_family_created").on(t.familyId, t.createdAt),
+    index("idx_task_family_priority").on(t.familyId, t.priority),
   ],
 );
 

@@ -53,7 +53,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_attendees` | Tagged family members per event (CASCADE) | 0001 |
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
-| `tasks` | Family to-dos, assignable, linked to doc/event | 0002 |
+| `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
@@ -64,6 +64,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 - **Events `type` vs `status`**: `type` = what kind (`gathering|appointment|milestone|other`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
+- **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a task sets `completed_at` and hides it from the To-do view; leftover open subtasks are promoted to roots. `priority` is `low|medium|high` (default medium).
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
 
 ---
@@ -109,7 +110,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | POST | `/events/:id/cancel` | cancelled stays visible |
 | GET | `/events/:id/ics` | "Add to calendar" download |
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
-| GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | tasks (assignee/related family-scope-validated; null clears) |
+| GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
@@ -119,7 +120,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 **POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` enum `["gathering","appointment","milestone","other"]`; `attendeeMemberIds` array.
 
-**POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `status` (update only) enum `["open","done","archived"]`.
+**POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `priority` enum `["low","medium","high"]` (default medium); `parentTaskId` must belong to the same family; nesting deeper than 5 returns `max_task_depth`. **PATCH:** `status` enum `["open","done","archived"]` (done sets `completedAt`, reopen clears it); `parentTaskId` null promotes to root; cycle → `task_cycle`.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
@@ -142,6 +143,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/calendar/events/:id` | `EventDetailPage` | Yes |
 | `/calendar/events/:id/edit` | `EventForm` | Yes |
 | `/tasks` | `Tasks` | Yes |
+| `/tasks/:id` | `TaskDetailPage` | Yes |
 | `/contacts` | `Contacts` | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |

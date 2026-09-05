@@ -121,6 +121,13 @@ All primary keys are **text UUIDs** generated in app code (`crypto.randomUUID()`
 - `status` = lifecycle: `active | cancelled | trashed`. Cancelled stays visible (strikethrough +
   badge); trashed is filtered out of all lists. Never conflate the two.
 
+### Tasks: complete vs archive vs nested
+- `status` = lifecycle: `open | done | archived`. Completing a task (`done`) sets `completedAt` and
+  removes it from the To-do view — leftover open subtasks are promoted to roots. Archive hides it
+  from Completed too. `priority` is `low | medium | high` (default medium). Nested via
+  `parentTaskId`, max depth 5. Deleting a task explicitly deletes descendants (D1 cascades are
+  advisory). List views: `todo | priority | due | recent | mine | completed`.
+
 ### `eventMonthKey()`
 Returns `"${year}-${month_index}"` with a **0-indexed** month (June → `"2026-5"`). Used only for
 grouping; the visible label uses `Intl.DateTimeFormat`. A test pins the format — don't switch to
@@ -238,7 +245,7 @@ src/
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
-                         Tasks, Contacts, Family, Settings, Login, NotFound
+                         Tasks, TaskDetail, Contacts, Family, Settings, Login, NotFound
 migrations/             generated SQL (0000–0003) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
 docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
@@ -269,7 +276,7 @@ on a real D1 adapter (`tests/helpers/testEnv.ts`).
 
 **Frontend flows (done):** `activeFamily` in AuthContext (persisted, switchable) — every list
 query passes `familyId`; CreateFamily onboarding gate for zero-family users; DocumentForm +
-rebuilt DocumentDetail (Drive upload/download, versions); Tasks/Contacts composers; Family page
+rebuilt DocumentDetail (Drive upload/download, versions); Tasks with nested subtasks, complete/archive, and planning views (todo / priority / due / recent / mine / completed); Contacts composers; Family page
 invite flow + `/invite/:token` accept page; Dashboard real stats.
 
 **Premium batch (done):** family chat (`chat_messages`, paginated, soft-delete, @mention →
