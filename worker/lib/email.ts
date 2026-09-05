@@ -12,7 +12,7 @@ import type { Env } from "../types";
 import { getDb, schema } from "../db/client";
 import { eq } from "drizzle-orm";
 import { STORAGE_ACCOUNT_ID, getStorageAccessToken } from "./drive";
-import { GOOGLE_SCOPES, getUserGoogleAccessToken, userHasScope } from "./google";
+import { GOOGLE_SCOPES, classifyGoogleApiError, getUserGoogleAccessToken, userHasScope } from "./google";
 
 const RESEND_API = "https://api.resend.com/emails";
 const GMAIL_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
@@ -95,7 +95,7 @@ async function sendViaGmail(
   accessToken: string,
   from: string,
   msg: EmailMessage,
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const raw = toBase64Url(
     buildRfc822({
       from,
@@ -114,10 +114,15 @@ async function sendViaGmail(
     body: JSON.stringify({ raw }),
   });
   if (!res.ok) {
-    console.error(`[email] Gmail ${res.status}: ${await res.text()}`);
-    return false;
+    const text = await res.text();
+    console.error(`[email] Gmail ${res.status}: ${text}`);
+    const kind = classifyGoogleApiError(res.status, text);
+    return {
+      ok: false,
+      error: kind === "api_disabled" ? "gmail_api_disabled" : "gmail_send_failed",
+    };
   }
-  return true;
+  return { ok: true };
 }
 
 async function storageSender(
@@ -185,11 +190,13 @@ export async function sendEmailDetailed(
   opts: { fromUserId?: string } = {},
 ): Promise<SendEmailResult> {
   const payload = { ...msg, subject: reminderSubject(msg.subject) };
+  let gmailDisabled = false;
 
   const storage = await storageSender(env);
   if (storage) {
-    const ok = await sendViaGmail(storage.token, storage.from, payload);
-    if (ok) return { ok: true, via: "gmail", from: storage.from };
+    const gmail = await sendViaGmail(storage.token, storage.from, payload);
+    if (gmail.ok) return { ok: true, via: "gmail", from: storage.from };
+    if (gmail.error === "gmail_api_disabled") gmailDisabled = true;
   }
 
   if (opts.fromUserId) {
@@ -204,8 +211,9 @@ export async function sendEmailDetailed(
         const from = user.name
           ? `${user.name} <${user.email}>`
           : user.email;
-        const ok = await sendViaGmail(token, from, payload);
-        if (ok) return { ok: true, via: "gmail", from };
+        const gmail = await sendViaGmail(token, from, payload);
+        if (gmail.ok) return { ok: true, via: "gmail", from };
+        if (gmail.error === "gmail_api_disabled") gmailDisabled = true;
       }
     }
   }
@@ -219,7 +227,11 @@ export async function sendEmailDetailed(
       `[email] skipped (no Gmail token, no RESEND_API_KEY): to=${payload.to} subject=${payload.subject}`,
     );
   }
-  return { ok: false, via: "none", error: "email_send_failed" };
+  return {
+    ok: false,
+    via: "none",
+    error: gmailDisabled ? "gmail_api_disabled" : "email_send_failed",
+  };
 }
 
 /** Alias for interactive callers (test-email, event notify diagnostics). */

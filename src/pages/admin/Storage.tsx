@@ -24,6 +24,12 @@ interface StorageStats {
   usageInDriveTrashBytes: number | null;
 }
 
+interface IntegrationsStatus {
+  r2: boolean;
+  drive: { connected: boolean; email: string | null };
+  email: { resend: boolean; gmailStorage: boolean };
+}
+
 const ERROR_LABELS: Record<string, string> = {
   missing_params: "The authorization response was incomplete.",
   invalid_state: "The request expired or was tampered with. Try again.",
@@ -88,6 +94,11 @@ export function AdminStorage() {
     retry: false,
   });
 
+  const { data: integrations } = useQuery({
+    queryKey: ["admin-integrations"],
+    queryFn: () => api<IntegrationsStatus>("/admin/integrations"),
+  });
+
   const connect = useMutation({
     mutationFn: () =>
       api<{ url: string }>("/admin/storage/connect/start", { method: "POST" }),
@@ -114,8 +125,33 @@ export function AdminStorage() {
           Files upload to Cloudflare R2 when a bucket is bound. Until then,
           connecting this Google account stores documents in Drive — reconnect
           after this update so reminder emails can also send from the same
-          Gmail (gmail.send). R2 remains optional.
+          Gmail (gmail.send). Enable R2 in the Cloudflare dashboard (see
+          docs/OPS.md §7), then uncomment r2_buckets in wrangler.jsonc.
         </p>
+        {integrations && (
+          <Card className="divide-y divide-line overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 text-sm">
+              <span className="text-fg">Cloudflare R2</span>
+              <span className={integrations.r2 ? "text-success" : "text-warning"}>
+                {integrations.r2 ? "Bound" : "Not bound — enable in Cloudflare"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 text-sm">
+              <span className="text-fg">Drive + Gmail send</span>
+              <span className={integrations.drive.connected ? "text-success" : "text-warning"}>
+                {integrations.drive.connected
+                  ? integrations.drive.email ?? "Connected"
+                  : "Reconnect below"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 text-sm">
+              <span className="text-fg">Resend API key</span>
+              <span className={integrations.email.resend ? "text-success" : "text-fg-muted"}>
+                {integrations.email.resend ? "Set" : "Optional backup"}
+              </span>
+            </div>
+          </Card>
+        )}
         {errorCode && (
           <Card className="border-danger/40 bg-danger/10 p-4 text-sm text-danger">
             {ERROR_LABELS[errorCode] ?? `Connection failed (${errorCode}).`}

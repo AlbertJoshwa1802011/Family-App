@@ -12,9 +12,9 @@ import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
 import {
   LOGIN_SCOPES,
   extraScopesFromConnect,
+  clearUserGoogleAccessCache,
   storeGrantedScopes,
   refreshKey,
-  accessKey,
   GOOGLE_SCOPES,
   userHasScope,
 } from "../lib/google";
@@ -128,11 +128,12 @@ authRoutes.get("/me", async (c) => {
 // GET /auth/google/status — which extra Google scopes this session has granted.
 authRoutes.get("/google/status", requireSession, async (c) => {
   const userId = c.get("userId")!;
-  const [contacts, gmail] = await Promise.all([
+  const [contacts, gmail, calendar] = await Promise.all([
     userHasScope(c.env, userId, GOOGLE_SCOPES.contacts),
     userHasScope(c.env, userId, GOOGLE_SCOPES.gmailSend),
+    userHasScope(c.env, userId, GOOGLE_SCOPES.calendarEvents),
   ]);
-  return c.json({ contacts, gmail });
+  return c.json({ contacts, gmail, calendar });
 });
 
 // GET /auth/google/start — build and return a Google OAuth redirect (PKCE).
@@ -148,6 +149,10 @@ authRoutes.get("/google/start", async (c) => {
   const connect = c.req.query("connect") ?? "";
   const extra = extraScopesFromConnect(connect);
   const returnTo = c.req.query("returnTo") || "/";
+  // Force the consent screen only when requesting extra scopes (Calendar,
+  // Contacts, Gmail) or when the client asks for a fresh refresh token.
+  // prompt=consent on every login re-shows Google's "unverified app" warning.
+  const forceConsent = extra.length > 0 || c.req.query("consent") === "1";
 
   // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
   const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
@@ -167,7 +172,7 @@ authRoutes.get("/google/start", async (c) => {
     response_type: "code",
     scope: [...LOGIN_SCOPES, ...extra].join(" "),
     access_type: "offline",
-    prompt: extra.length > 0 ? "consent" : "consent",
+    prompt: forceConsent ? "consent" : "select_account",
     include_granted_scopes: "true",
     state,
     code_challenge: codeChallenge,
@@ -290,12 +295,12 @@ authRoutes.get("/google/callback", async (c) => {
   if (tokens.refresh_token) {
     await c.env.KV.put(refreshKey(user.id), tokens.refresh_token);
   }
-  // Drop cached access token so the next call picks up newly granted scopes.
-  await c.env.KV.delete(accessKey(user.id));
+  // Drop cached access tokens so the next call picks up newly granted scopes.
+  // Include the legacy calendar-only cache so reconnect cannot keep serving a
+  // token minted before calendar.events / gmail.send was granted.
+  await clearUserGoogleAccessCache(c.env, user.id);
+  // Only persist scopes Google actually returned — never the requested extras.
   await storeGrantedScopes(c.env, user.id, tokens.scope);
-  if (stored.extra?.length) {
-    await storeGrantedScopes(c.env, user.id, stored.extra.join(" "));
-  }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
 

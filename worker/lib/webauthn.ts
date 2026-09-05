@@ -33,17 +33,22 @@ export function b64urlEncode(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 export function b64urlDecode(s: string): Uint8Array {
-  const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "==".slice((s.length * 3) % 4);
-  const bin = atob(padded);
+  const normalized = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (normalized.length % 4)) % 4;
+  const bin = atob(normalized + "=".repeat(pad));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
 /** Parse clientDataJSON and confirm type + challenge + origin. */
+export function normalizeB64url(s: string): string {
+  return s.replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
 export function parseClientData(
   clientDataJSON: string,
-  expected: { type: string; challenge: string; origin: string },
+  expected: { type: string; challenge: string; origins: string[] },
 ): void {
   const json = new TextDecoder().decode(b64urlDecode(clientDataJSON));
   const data = JSON.parse(json) as {
@@ -54,10 +59,11 @@ export function parseClientData(
   if (data.type !== expected.type) {
     throw new Error("clientData type mismatch");
   }
-  if (data.challenge !== expected.challenge) {
+  if (!data.challenge || normalizeB64url(data.challenge) !== normalizeB64url(expected.challenge)) {
     throw new Error("clientData challenge mismatch");
   }
-  if (data.origin !== expected.origin) {
+  const allowed = new Set(expected.origins.filter(Boolean));
+  if (!data.origin || !allowed.has(data.origin)) {
     throw new Error("clientData origin mismatch");
   }
 }

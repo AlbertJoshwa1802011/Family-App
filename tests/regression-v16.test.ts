@@ -68,19 +68,28 @@ afterEach(() => {
 });
 
 describe("OAuth scopes (Google Calendar)", () => {
-  it("google/start asks for calendar.events and keeps granted Drive scopes", async () => {
+  it("plain login does not request calendar.events or force consent", async () => {
     const { env } = createTestEnv({ GOOGLE_CLIENT_ID: "cid.apps.googleusercontent.com" });
     const res = await app.request("/api/auth/google/start", {}, env);
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const loc = res.headers.get("location") ?? "";
+    const decoded = decodeURIComponent(loc);
     expect(loc).toContain("accounts.google.com");
-    expect(decodeURIComponent(loc)).toContain(
-      "https://www.googleapis.com/auth/calendar.events",
-    );
-    expect(decodeURIComponent(loc)).toContain(
-      "https://www.googleapis.com/auth/drive.file",
-    );
+    expect(decoded).not.toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(decoded).toContain("https://www.googleapis.com/auth/drive.file");
     expect(loc).toContain("include_granted_scopes=true");
+    expect(loc).toContain("prompt=select_account");
+    expect(loc).not.toContain("prompt=consent");
+  });
+
+  it("connect=calendar requests calendar.events with prompt=consent", async () => {
+    const { env } = createTestEnv({ GOOGLE_CLIENT_ID: "cid.apps.googleusercontent.com" });
+    const res = await app.request("/api/auth/google/start?connect=calendar", {}, env);
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const loc = res.headers.get("location") ?? "";
+    const decoded = decodeURIComponent(loc);
+    expect(decoded).toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(loc).toContain("prompt=consent");
   });
 });
 
@@ -211,6 +220,86 @@ describe("Event edit hydration + notify", () => {
     const notes = await authed(env, "GET", "/api/notifications", alice.cookie);
     const body = (await notes.json()) as { notifications: { type: string }[] };
     expect(body.notifications.some((n) => n.type === "event_cancelled")).toBe(true);
+  });
+
+  it("Calendar API disabled (403 ACCESS_NOT_CONFIGURED) is needs_api_enabled", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }));
+      }
+      if (url.includes("calendar/v3")) {
+        return new Response(
+          "Google Calendar API has not been used in project 1 before or it is disabled.",
+          { status: 403 },
+        );
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Disabled API",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      calendar: { status: string; message: string };
+    };
+    expect(created.calendar.status).toBe("needs_api_enabled");
+    expect(created.calendar.message).toMatch(/Calendar API/i);
+  });
+
+  it("POST /events/:id/sync-calendar retries a Google write", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }));
+      }
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "POST") {
+        return new Response(JSON.stringify({ id: "gcal-retry" }), { status: 200 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Later sync",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as { event: { id: string } };
+
+    const retry = await authed(
+      env,
+      "POST",
+      `/api/events/${created.event.id}/sync-calendar`,
+      alice.cookie,
+    );
+    expect(retry.status).toBe(200);
+    const body = (await retry.json()) as {
+      calendar: { status: string; googleCalendarEventId: string | null };
+    };
+    expect(body.calendar.status).toBe("synced");
+    expect(body.calendar.googleCalendarEventId).toBe("gcal-retry");
   });
 
   it("stores the Google Calendar id when upsert succeeds", async () => {

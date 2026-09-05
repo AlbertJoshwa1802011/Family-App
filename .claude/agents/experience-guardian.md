@@ -42,7 +42,7 @@ against ALL of:
 - If a dev server / preview is available, use the `preview_*` tools to **resize to phone
   (~390px), tablet, and desktop** and screenshot the feature. Verify no horizontal scroll,
   gestures/affordances present, empty/loading/error states, both themes, Simple/Elder mode.
-- Confirm `typecheck`/`lint`/`test`/`build` are green (don't re-run if already reported).
+- Confirm `npm run gate` (typecheck + lint + full test + build) is green (don't re-run if already reported).
 
 ## Output (strict)
 A short verdict line, then findings as a flat list, highest severity first. One line each:

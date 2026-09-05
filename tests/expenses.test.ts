@@ -33,6 +33,7 @@ interface SummaryBody {
   sharedMinor: number;
   byCategory: { categoryId: string | null; name: string; totalMinor: number; count: number }[];
   byMonth: { month: string; totalMinor: number }[];
+  byDay: { date: string; totalMinor: number; count: number }[];
 }
 
 const ORIGIN = "http://localhost:5173";
@@ -262,6 +263,35 @@ describe("expenses: privacy", () => {
     const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)).json()) as ListBody;
     expect(list.expenses).toHaveLength(0);
   });
+
+  it("list view=mine is only the caller's rows; default list still shows shared family rows", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 100 }));
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 200, visibility: "family" }),
+    );
+
+    const mine = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=mine`, alice.cookie)
+    ).json()) as ListBody;
+    expect(mine.expenses).toHaveLength(1);
+    expect(mine.totalMinor).toBe(100);
+
+    const shared = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=family`, alice.cookie)
+    ).json()) as ListBody;
+    expect(shared.expenses).toHaveLength(2);
+    expect(shared.totalMinor).toBe(300);
+
+    const def = (await (
+      await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)
+    ).json()) as ListBody;
+    expect(def.expenses).toHaveLength(2);
+    expect(def.totalMinor).toBe(300);
+  });
 });
 
 describe("expenses: summary", () => {
@@ -337,6 +367,10 @@ describe("expenses: summary", () => {
     expect(body.byCategory).toHaveLength(1);
     expect(body.byCategory[0].name).toBe("Uncategorized");
     expect(body.byCategory[0].totalMinor).toBe(1000);
+    expect(body.byDay).toEqual([
+      { date: "2026-07-02", totalMinor: 300, count: 1 },
+      { date: "2026-08-09", totalMinor: 700, count: 1 },
+    ]);
   });
 
   it("honours a from/to window", async () => {
@@ -379,6 +413,70 @@ describe("expenses: summary", () => {
     const outsider = seedActor(sqlite, otherFamily.id, "owner");
     const res = await get(env, `/api/expenses/summary?familyId=${familyId}`, outsider.cookie);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("expenses: list filters (Money Manager clarity)", () => {
+  it("q= searches merchant and description", async () => {
+    const { env, familyId, alice } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "Corner Shop" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        merchant: "Pharmacy",
+        description: "vitamins",
+      }),
+    );
+
+    const shop = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&q=Corner`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(shop.expenses).toHaveLength(1);
+    expect(shop.expenses[0].merchant).toBe("Corner Shop");
+
+    const note = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&q=vitamin`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(note.expenses).toHaveLength(1);
+    expect(note.expenses[0].merchant).toBe("Pharmacy");
+  });
+
+  it("categoryId=none returns only uncategorized rows", async () => {
+    const { env, familyId, alice } = setup();
+    const cats = (await (
+      await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie)
+    ).json()) as { categories: { id: string }[] };
+    const catId = cats.categories[0].id;
+
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { categoryId: catId, merchant: "Tagged" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "Loose" }),
+    );
+
+    const none = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&categoryId=none`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(none.expenses.map((e) => e.merchant)).toEqual(["Loose"]);
+
+    const tagged = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&categoryId=${catId}`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(tagged.expenses.map((e) => e.merchant)).toEqual(["Tagged"]);
   });
 });
 

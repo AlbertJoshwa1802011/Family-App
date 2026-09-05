@@ -32,7 +32,7 @@ export function LiquidPillTabs<T extends string>({
     >
       <div
         className={cn(
-          "relative mx-auto flex min-w-max overflow-hidden",
+          "relative w-full overflow-hidden",
           "rounded-full border border-white/15 bg-white/10 shadow-lg backdrop-blur-2xl",
         )}
       >
@@ -51,7 +51,7 @@ export function LiquidPillTabs<T extends string>({
             }}
           />
         )}
-        <div className="relative z-10 flex min-w-max">
+        <div className="relative z-10 flex w-full">
           {items.map((item) => {
             const Icon = item.icon;
             const selected = item.id === value;
@@ -63,7 +63,7 @@ export function LiquidPillTabs<T extends string>({
                 aria-selected={selected}
                 onClick={() => onChange(item.id)}
                 className={cn(
-                  "flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-xs font-medium transition-colors",
+                  "flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2.5 text-xs font-medium transition-colors",
                   selected
                     ? "font-semibold text-white"
                     : "text-fg-subtle/90 hover:text-fg-muted",

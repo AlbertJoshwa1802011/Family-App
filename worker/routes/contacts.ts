@@ -20,6 +20,7 @@ import {
   updateGoogleContact,
   deleteGoogleContact,
 } from "../lib/people";
+import { contactDbErrorMessage, ensureContactsGoogleColumns } from "../lib/contactsSchema";
 
 export const contactRoutes = new Hono<HonoEnv>();
 
@@ -72,6 +73,8 @@ contactRoutes.get("/", requireSession, async (c) => {
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
+
+  await ensureContactsGoogleColumns(c.env.DB);
 
   const contacts = await db
     .select()
@@ -146,6 +149,8 @@ contactRoutes.post("/sync", requireSession, async (c) => {
   const token = await getUserGoogleAccessToken(c.env, userId);
   if (!token) return c.json({ error: "google_token_missing" }, 503);
 
+  await ensureContactsGoogleColumns(c.env.DB);
+
   const db = getDb(c.env);
   let syncToken = await c.env.KV.get(syncTokenKey(userId, familyId));
   let pulled = 0;
@@ -173,7 +178,7 @@ contactRoutes.post("/sync", requireSession, async (c) => {
         const flat = flattenPerson(person);
         if (!flat.name) continue;
         pulled += 1;
-        const existing = await db
+        const existingRows = await db
           .select()
           .from(schema.contacts)
           .where(
@@ -182,7 +187,8 @@ contactRoutes.post("/sync", requireSession, async (c) => {
               eq(schema.contacts.googleResourceName, flat.resourceName),
             ),
           )
-          .get();
+          .limit(1);
+        const existing = existingRows[0];
         const now = Math.floor(Date.now() / 1000);
         if (existing) {
           await db
@@ -199,21 +205,30 @@ contactRoutes.post("/sync", requireSession, async (c) => {
             .where(eq(schema.contacts.id, existing.id));
           updated += 1;
         } else {
-          await db.insert(schema.contacts).values({
-            id: crypto.randomUUID(),
-            familyId,
-            name: flat.name,
-            phone: flat.phone,
-            email: flat.email,
-            notes: flat.notes,
-            relationship: "Google",
-            createdBy: userId,
-            googleResourceName: flat.resourceName,
-            googleEtag: flat.etag,
-            lastPushedAt: now,
-            updatedAt: now,
-          });
-          created += 1;
+          try {
+            await db.insert(schema.contacts).values({
+              id: crypto.randomUUID(),
+              familyId,
+              name: flat.name,
+              phone: flat.phone,
+              email: flat.email,
+              notes: flat.notes,
+              relationship: "Google",
+              createdBy: userId,
+              googleResourceName: flat.resourceName,
+              googleEtag: flat.etag,
+              lastPushedAt: now,
+              updatedAt: now,
+            });
+            created += 1;
+          } catch (insertErr) {
+            const blob =
+              insertErr instanceof Error
+                ? `${insertErr.message} ${insertErr.cause instanceof Error ? insertErr.cause.message : ""}`
+                : "";
+            if (!/unique constraint/i.test(blob)) throw insertErr;
+            updated += 1;
+          }
         }
       }
 
@@ -227,8 +242,13 @@ contactRoutes.post("/sync", requireSession, async (c) => {
       break;
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : "sync_failed";
-    return c.json({ error: "google_sync_failed", detail: message }, 502);
+    const status = e instanceof PeopleError ? e.statusCode : 0;
+    const mapped = contactDbErrorMessage(e);
+    const message =
+      status === 403
+        ? "Google blocked Contacts (403). Enable People API on the Cloud project, reconnect Contacts in Settings, and submit the app for Google verification — Contacts is a restricted scope."
+        : mapped.message;
+    return c.json({ error: "google_sync_failed", detail: mapped.detail, message }, 502);
   }
 
   // Push local contacts that have never been sent to Google.

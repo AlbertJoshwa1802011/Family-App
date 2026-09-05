@@ -9,8 +9,9 @@ import { eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
-import { generateRandom } from "../lib/crypto";
+import { generateRandom, sha256Hex } from "../lib/crypto";
 import { audit, ACTIONS } from "../lib/audit";
+import { reminderEmailHtml, sendEmailDetailed } from "../lib/email";
 import {
   WEBAUTHN_CHALLENGE_TTL,
   rpIdFromAppUrl,
@@ -47,6 +48,43 @@ function originFromEnv(env: HonoEnv["Bindings"], reqUrl: string): string {
   return new URL(reqUrl).origin;
 }
 
+function allowedOrigins(
+  env: HonoEnv["Bindings"],
+  reqUrl: string,
+  originHeader: string | undefined,
+): string[] {
+  const set = new Set<string>();
+  set.add(originFromEnv(env, reqUrl));
+  if (originHeader) {
+    try {
+      set.add(new URL(originHeader).origin);
+    } catch {
+      if (/^https?:\/\//.test(originHeader)) set.add(originHeader.replace(/\/$/, ""));
+    }
+  }
+  try {
+    set.add(new URL(reqUrl).origin);
+  } catch {
+    /* ignore */
+  }
+  return [...set];
+}
+
+function rpIdForRequest(
+  env: HonoEnv["Bindings"],
+  reqUrl: string,
+  originHeader: string | undefined,
+): string {
+  if (originHeader) {
+    try {
+      return new URL(originHeader).hostname;
+    } catch {
+      /* fall through */
+    }
+  }
+  return rpIdFromAppUrl(env.APP_URL ?? new URL(reqUrl).origin);
+}
+
 deviceLockRoutes.get("/status", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const db = getDb(c.env);
@@ -63,7 +101,7 @@ deviceLockRoutes.get("/status", requireSession, async (c) => {
   return c.json({
     webauthn: Boolean(cred),
     pin: Boolean(pin),
-    rpId: rpIdFromAppUrl(c.env.APP_URL ?? new URL(c.req.url).origin),
+    rpId: rpIdForRequest(c.env, c.req.url, c.req.header("Origin")),
   });
 });
 
@@ -92,7 +130,7 @@ async function webauthnOptions(c: import("hono").Context<HonoEnv>) {
     .from(schema.deviceCredentials)
     .where(eq(schema.deviceCredentials.userId, userId));
 
-  const rpId = rpIdFromAppUrl(c.env.APP_URL ?? new URL(c.req.url).origin);
+  const rpId = rpIdForRequest(c.env, c.req.url, c.req.header("Origin"));
   const purpose = c.req.query("purpose") === "assert" ? "assert" : "register";
 
   return c.json({
@@ -147,15 +185,22 @@ deviceLockRoutes.post(
     const challenge = await c.env.KV.get(`webauthn:challenge:${userId}`);
     if (!challenge) return c.json({ error: "challenge_expired" }, 400);
 
-    const origin = originFromEnv(c.env, c.req.url);
+    const origins = allowedOrigins(c.env, c.req.url, c.req.header("Origin"));
     try {
       parseClientData(data.clientDataJSON, {
         type: "webauthn.create",
         challenge,
-        origin,
+        origins,
       });
     } catch {
-      return c.json({ error: "invalid_client_data" }, 400);
+      return c.json(
+        {
+          error: "invalid_client_data",
+          message:
+            "Face ID could not verify this phone. Open the app at the same address you signed in with (fam.connect-cloud.workers.dev), then try Set up Face ID again.",
+        },
+        400,
+      );
     }
 
     let parsed: ReturnType<typeof publicKeyFromAuthData>;
@@ -203,15 +248,22 @@ deviceLockRoutes.post(
     const challenge = await c.env.KV.get(`webauthn:challenge:${userId}`);
     if (!challenge) return c.json({ error: "challenge_expired" }, 400);
 
-    const origin = originFromEnv(c.env, c.req.url);
+    const origins = allowedOrigins(c.env, c.req.url, c.req.header("Origin"));
     try {
       parseClientData(data.clientDataJSON, {
         type: "webauthn.get",
         challenge,
-        origin,
+        origins,
       });
     } catch {
-      return c.json({ error: "invalid_client_data" }, 400);
+      return c.json(
+        {
+          error: "invalid_client_data",
+          message:
+            "Face ID did not match this session. Try again, or use your PIN. If it keeps failing, set Face ID up again from this same app address.",
+        },
+        400,
+      );
     }
 
     const db = getDb(c.env);
@@ -280,6 +332,25 @@ deviceLockRoutes.post("/pin/setup", requireSession, zv(pinSchema), async (c) => 
     action: ACTIONS.DEVICE_LOCK_REGISTERED,
     meta: { method: "pin" },
   });
+  const user = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (user?.email) {
+    const appUrl = c.env.APP_URL ?? "";
+    void sendEmailDetailed(c.env, {
+      to: user.email,
+      subject: "Your Money / Vault PIN was updated",
+      html: reminderEmailHtml({
+        heading: "PIN updated",
+        body: "Someone (hopefully you) set or changed the 6-digit PIN that unlocks Money and the Vault on this Family Vault account.",
+        ctaLabel: "Open Family Vault",
+        ctaUrl: appUrl || "/",
+      }),
+      text: "Your Family Vault PIN was updated. If this wasn't you, sign in with Google and reset it.",
+    });
+  }
   return c.json({ ok: true });
 });
 
@@ -302,3 +373,90 @@ deviceLockRoutes.post("/pin/verify", requireSession, zv(pinSchema), async (c) =>
   });
   return c.json({ ok: true });
 });
+
+const PIN_RESET_TTL = 600;
+const pinResetConfirmSchema = z.object({
+  code: z.string().regex(/^\d{6}$/),
+  pin: z.string().regex(/^\d{6}$/, "PIN must be 6 digits"),
+});
+
+deviceLockRoutes.post("/pin/reset/request", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+  const user = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (!user?.email) return c.json({ error: "not_found" }, 404);
+
+  const n = crypto.getRandomValues(new Uint32Array(1))[0]! % 1_000_000;
+  const code = String(n).padStart(6, "0");
+  await c.env.KV.put(`pinreset:${userId}`, await sha256Hex(code), {
+    expirationTtl: PIN_RESET_TTL,
+  });
+
+  const appUrl = c.env.APP_URL ?? "";
+  const result = await sendEmailDetailed(c.env, {
+    to: user.email,
+    subject: "Reset your Family Vault PIN",
+    html: reminderEmailHtml({
+      heading: "PIN reset code",
+      body: `Use this 6-digit code to set a new Money / Vault PIN: ${code}. It expires in 10 minutes.`,
+      ctaLabel: "Open Family Vault",
+      ctaUrl: appUrl || "/",
+    }),
+    text: `Your Family Vault PIN reset code is ${code}. It expires in 10 minutes.`,
+  });
+  if (!result.ok) {
+    return c.json(
+      {
+        error: "email_not_configured",
+        message:
+          "We couldn't email a reset code to your Google login address. Reconnect Storage (Gmail send) or set RESEND_API_KEY, then try again.",
+      },
+      503,
+    );
+  }
+  return c.json({ ok: true, to: user.email });
+});
+
+deviceLockRoutes.post(
+  "/pin/reset/confirm",
+  requireSession,
+  zv(pinResetConfirmSchema),
+  async (c) => {
+    const userId = c.get("userId")!;
+    const { code, pin } = c.req.valid("json");
+    const stored = await c.env.KV.get(`pinreset:${userId}`);
+    if (!stored || stored !== (await sha256Hex(code))) {
+      return c.json(
+        { error: "invalid_reset_code", message: "That code is wrong or expired." },
+        400,
+      );
+    }
+    const salt = generateRandom(16);
+    const pinHash = await hashPin(pin, salt);
+    const db = getDb(c.env);
+    const existing = await db
+      .select({ userId: schema.devicePins.userId })
+      .from(schema.devicePins)
+      .where(eq(schema.devicePins.userId, userId))
+      .get();
+    if (existing) {
+      await db
+        .update(schema.devicePins)
+        .set({ pinHash, salt })
+        .where(eq(schema.devicePins.userId, userId));
+    } else {
+      await db.insert(schema.devicePins).values({ userId, pinHash, salt });
+    }
+    await c.env.KV.delete(`pinreset:${userId}`);
+    await audit(c, {
+      actorUserId: userId,
+      action: ACTIONS.DEVICE_LOCK_REGISTERED,
+      meta: { method: "pin_reset" },
+    });
+    return c.json({ ok: true });
+  },
+);

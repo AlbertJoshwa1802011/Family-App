@@ -1,6 +1,7 @@
 # Testing process
 
-One command before every commit and on every CI / production deploy:
+Agents: this is the process. `CLAUDE.md §1` and `.claude/skills/gate/SKILL.md`
+say the same thing. One command before every commit and on every CI / production deploy:
 
 ```bash
 npm run gate
@@ -77,11 +78,39 @@ These cases lock the bugs this branch fixed. They live in
 - Built-in categories have `#` colours.
 - `POST /expenses` with `categoryId: null` still creates the row (add is not blocked).
 - `GET /categories` without `familyId` → 400.
+- `GET /expenses?view=mine` lists only the caller's books (same rule as summary).
+- `GET /expenses?q=` matches merchant/description; `categoryId=none` is uncategorized.
+- `GET /expenses/summary` includes `byDay` for the month heat-map.
 
 ### Bubble nav
 - Clamp stays inside the padded viewport.
 - Snap is left/right by centre vs midline (no rubber-band back to the start).
 - Default position is bottom-centre.
+
+### Pinned liquid tab bar
+- `indexFromX` maps five equal slots (WhatsApp-style); out-of-range X clamps to 0/last.
+- `clampPillLeft` never leaves the bar (including a pill wider than the bar).
+- `pillLeftForIndex` keeps first/last pills inside the inset.
+
+### Face ID / PIN
+- `b64urlDecode` accepts unpadded 1-, 2-, and 3-byte payloads (the old pad formula threw `invalid_client_data`).
+- `parseClientData` allows any origin on the allow-list; rejects foreign origin / type / challenge.
+- `GET /device-lock/status` `rpId` follows the request `Origin` hostname.
+- PIN reset without email → 503 `email_not_configured`; with Resend → 200 `{ to }`.
+- PIN reset confirm with a hashed KV code replaces the PIN and cannot reuse the code.
+- WebAuthn register with a foreign origin → 400 `invalid_client_data` plus a Face ID message.
+
+### Health / OAuth URIs
+- `GET /api/health` lists `oauth.loginCallback` and `oauth.storageCallback` from `APP_URL`.
+- Trailing slash on `APP_URL` is stripped; missing `APP_URL` → null callbacks.
+
+### Contacts sync
+- Unconnected → 409 `contacts_not_connected`.
+- People API 403 → 502 `google_sync_failed` with a People API / verification message.
+
+### Expenses Mine / Shared
+- `GET /expenses?view=mine` is only the caller's rows.
+- `view=family` and omitting `view` still include others' `visibility=family` rows (privacy filter unchanged).
 
 ## Adding a new API surface
 

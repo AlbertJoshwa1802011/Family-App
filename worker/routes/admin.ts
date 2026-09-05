@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requirePlatformAdmin } from "../middleware/requirePlatformAdmin";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { createDriveFolder, getStorageAccessToken, STORAGE_ACCOUNT_ID } from "../lib/drive";
+import { isR2Configured } from "../lib/r2";
 import { audit, ACTIONS } from "../lib/audit";
 
 export const adminRoutes = new Hono<HonoEnv>();
@@ -38,6 +39,31 @@ adminRoutes.get("/storage", async (c) => {
     email: row?.email ?? null,
     rootFolderId: row?.rootFolderId ?? null,
     updatedAt: row?.updatedAt ?? null,
+  });
+});
+
+// GET /admin/integrations — what is actually bound vs still laptop/Cloud setup.
+adminRoutes.get("/integrations", async (c) => {
+  const row = await getDb(c.env)
+    .select({
+      status: schema.storageAccounts.status,
+      email: schema.storageAccounts.email,
+    })
+    .from(schema.storageAccounts)
+    .where(eq(schema.storageAccounts.id, STORAGE_ACCOUNT_ID))
+    .get();
+
+  const storageToken = await c.env.KV.get("storage:refresh_token");
+  return c.json({
+    r2: isR2Configured(c.env),
+    drive: {
+      connected: row?.status === "connected" && Boolean(storageToken),
+      email: row?.email ?? null,
+    },
+    email: {
+      resend: Boolean(c.env.RESEND_API_KEY),
+      gmailStorage: Boolean(storageToken),
+    },
   });
 });
 

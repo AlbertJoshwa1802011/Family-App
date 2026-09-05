@@ -9,7 +9,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
 interface ContactSummary {
@@ -48,7 +48,8 @@ export function Contacts() {
 
   const googleStatus = useQuery({
     queryKey: ["google-status"],
-    queryFn: () => api<{ contacts: boolean; gmail: boolean }>("/auth/google/status"),
+    queryFn: () =>
+      api<{ contacts: boolean; gmail: boolean; calendar: boolean }>("/auth/google/status"),
   });
 
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -65,6 +66,19 @@ export function Contacts() {
       );
     },
     onError: (e: unknown) => {
+      const code = e instanceof ApiError ? e.code : "";
+      if (code === "contacts_not_connected") {
+        setSyncMsg("Google Contacts is not connected for this login. Tap Connect Google Contacts, accept Contacts permission, then sync again.");
+        return;
+      }
+      if (code === "google_sync_failed") {
+        setSyncMsg(
+          e instanceof Error
+            ? e.message
+            : "Google blocked Contacts sync. Enable the People API on the Cloud project and complete app verification (Contacts is a restricted scope).",
+        );
+        return;
+      }
       setSyncMsg(e instanceof Error ? e.message : "Sync failed.");
     },
   });

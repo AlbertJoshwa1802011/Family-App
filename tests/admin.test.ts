@@ -70,8 +70,8 @@ describe("admin storage routes — route shape", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /api/admin/metrics without session → 401 unauthorized", async () => {
-    const res = await app.request("/api/admin/metrics");
+  it("GET /api/admin/integrations without session → 401 unauthorized", async () => {
+    const res = await app.request("/api/admin/integrations");
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: string }).error).toBe("unauthorized");
   });

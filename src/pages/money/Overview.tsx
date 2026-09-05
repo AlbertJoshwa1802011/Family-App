@@ -53,7 +53,7 @@ function Figure({
   sub?: string;
 }) {
   return (
-    <Card className="p-4">
+    <Card className="rounded-[28px] border-white/15 bg-white/8 p-4 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
       <div className="flex items-center gap-1.5 text-fg-subtle">
         {Icon && <Icon className="size-3.5" aria-hidden="true" />}
         <p className="text-[11px] font-medium uppercase tracking-wide">{label}</p>
@@ -452,8 +452,12 @@ export function MoneyOverview() {
           </>
         ) : (
           <>
-            <Card className="p-5">
-              <div className="flex items-start justify-between gap-3">
+            <Card className="relative overflow-hidden rounded-[28px] border-white/15 bg-white/8 p-5 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full bg-vault-500/25 blur-3xl"
+              />
+              <div className="relative flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
                     Left to spend
