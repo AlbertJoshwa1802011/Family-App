@@ -36,6 +36,13 @@
       "when": 1783037947930,
       "tag": "0004_fancy_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788643536149,
+      "tag": "0005_cute_starjammers",
+      "breakpoints": true
     }
   ]
 }
