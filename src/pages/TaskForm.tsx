@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Plus,
   X,
@@ -48,6 +48,8 @@ interface TaskDetail {
   assignedToMemberId?: string | null;
   dueDate?: string | null;
   status: "open" | "done" | "archived";
+  priority?: "low" | "medium" | "high";
+  parentTaskId?: string | null;
   referredTaskId?: string | null;
   subtasksJson?: string | null;
   subtasks?: Subtask[];
@@ -69,6 +71,8 @@ interface FormState {
   referredTaskId: string;
   reminderDate: string;
   remindMemberId: string;
+  parentTaskId: string;
+  priority: "low" | "medium" | "high";
 }
 
 /* ── Premium Form Input ──────────────────────────────────────────────────────── */
@@ -291,7 +295,8 @@ export function TaskForm() {
 
   const { data: taskData, isLoading: isLoadingTask } = useQuery({
     queryKey: ["task", id],
-    queryFn: () => api<{ task: TaskDetail }>(`/tasks/${id}`),
+    queryFn: () =>
+      api<{ task: TaskDetail; children?: TaskDetail[] }>(`/tasks/${id}`),
     enabled: isEdit,
   });
 
@@ -310,14 +315,32 @@ export function TaskForm() {
   }
 
   const task = taskData?.task ?? null;
-  return <TaskFormFields key={task?.id ?? "new"} id={id} task={task} />;
+  const nestedChildren = taskData?.children ?? [];
+  return (
+    <TaskFormFields
+      key={task?.id ?? "new"}
+      id={id}
+      task={task}
+      nestedChildren={nestedChildren}
+    />
+  );
 }
 
-function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) {
+function TaskFormFields({
+  id,
+  task,
+  nestedChildren = [],
+}: {
+  id?: string;
+  task: TaskDetail | null;
+  nestedChildren?: TaskDetail[];
+}) {
   const isEdit = Boolean(id);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
   const { activeFamilyId } = useAuth();
+  const parentFromQuery = searchParams.get("parent") ?? "";
 
   const [form, setForm] = useState<FormState>(() => ({
     title: task?.title ?? "",
@@ -327,6 +350,8 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
     referredTaskId: task?.referredTaskId ?? "",
     reminderDate: task?.reminderDate ?? "",
     remindMemberId: task?.remindMemberId ?? "",
+    parentTaskId: task?.parentTaskId ?? parentFromQuery,
+    priority: task?.priority ?? "medium",
   }));
   const [subtasks, setSubtasks] = useState<Subtask[]>(() => {
     if (task?.subtasks && Array.isArray(task.subtasks)) return task.subtasks;
@@ -355,6 +380,14 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
       ),
   });
   const allTasks = (tasksData?.tasks ?? []).filter((t) => t.id !== id);
+
+  const parentIdForBanner = form.parentTaskId;
+  const { data: parentData } = useQuery({
+    queryKey: ["task", parentIdForBanner],
+    queryFn: () =>
+      api<{ task: TaskDetail }>(`/tasks/${parentIdForBanner}`),
+    enabled: Boolean(parentIdForBanner) && parentIdForBanner !== id,
+  });
 
   const mutation = useMutation({
     mutationFn: (payload: object) =>
@@ -414,6 +447,8 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
       subtasks: cleanSubtasks.length > 0 ? cleanSubtasks : undefined,
       reminderDate: form.reminderDate || undefined,
       remindMemberId: form.remindMemberId || undefined,
+      parentTaskId: form.parentTaskId || undefined,
+      priority: form.priority,
     };
 
     if (!isEdit) {
@@ -483,6 +518,36 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
             </FormSection>
           </div>
 
+          {parentIdForBanner && parentIdForBanner !== id && (
+            <div className="card-premium px-4 py-3 text-sm text-fg-muted">
+              Nested under{" "}
+              <span className="font-medium text-fg">
+                {parentData?.task.title ?? "parent task"}
+              </span>
+            </div>
+          )}
+
+          <FormSection label="Priority" icon={ListChecks}>
+            <div className="flex gap-2">
+              {(["low", "medium", "high"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => set("priority", p)}
+                  className={`min-h-10 flex-1 rounded-xl border text-sm font-medium capitalize ${
+                    form.priority === p
+                      ? p === "high"
+                        ? "border-danger/40 bg-danger/15 text-danger"
+                        : "border-vault-500/40 bg-vault-500/15 text-vault-300"
+                      : "border-line text-fg-muted"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </FormSection>
+
           {/* ── Notes ──────────────────────────────────────────────────────── */}
           <FormSection label="Notes" icon={FileText}>
             <textarea
@@ -496,6 +561,53 @@ function TaskFormFields({ id, task }: { id?: string; task: TaskDetail | null }) 
 
           {/* ── Subtasks ───────────────────────────────────────────────────── */}
           <SubtaskBuilder subtasks={subtasks} onChange={setSubtasks} />
+
+          {isEdit && (
+            <div className="card-premium p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs font-semibold text-fg-muted">
+                  <ListChecks className="size-3.5" />
+                  Nested tasks ({nestedChildren.length})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/tasks/new?parent=${id}`)}
+                  className="text-xs font-medium text-vault-300"
+                >
+                  Add nested
+                </button>
+              </div>
+              {nestedChildren.length === 0 ? (
+                <p className="text-xs text-fg-subtle">
+                  Nested tasks can have their own due dates, assignees, and further layers.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {nestedChildren.map((child) => (
+                    <button
+                      key={child.id}
+                      type="button"
+                      onClick={() => navigate(`/tasks/${child.id}/edit`)}
+                      className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-white/[0.03]"
+                    >
+                      {child.status === "done" ? (
+                        <CheckCircle2 className="size-4 text-vault-400" />
+                      ) : (
+                        <Circle className="size-4 text-fg-subtle" />
+                      )}
+                      <span
+                        className={`flex-1 truncate text-sm ${
+                          child.status === "done" ? "text-fg-subtle line-through" : "text-fg"
+                        }`}
+                      >
+                        {child.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Link to Another Task ───────────────────────────────────────── */}
           <CollapsibleSection

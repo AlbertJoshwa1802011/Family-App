@@ -437,12 +437,26 @@ export const tasks = sqliteTable(
     remindMemberId: text("remind_member_id").references(() => familyMembers.id, {
       onDelete: "set null",
     }),
+    // Nested subtasks. Root tasks have parentTaskId = null. Depth is capped in
+    // app code (MAX_TASK_DEPTH) because D1 cannot enforce a graph constraint.
+    parentTaskId: text("parent_task_id").references(
+      (): AnySQLiteColumn => tasks.id,
+      { onDelete: "cascade" },
+    ),
+    priority: text("priority", { enum: ["low", "medium", "high"] })
+      .notNull()
+      .default("medium"),
+    // Set when status becomes "done"; cleared on reopen. Used by the Completed view.
+    completedAt: integer("completed_at"),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
   },
   (t) => [
     index("idx_task_family_status").on(t.familyId, t.status),
     index("idx_task_assignee").on(t.assignedToMemberId),
+    index("idx_task_parent").on(t.parentTaskId),
+    index("idx_task_family_created").on(t.familyId, t.createdAt),
+    index("idx_task_family_priority").on(t.familyId, t.priority),
   ],
 );
 

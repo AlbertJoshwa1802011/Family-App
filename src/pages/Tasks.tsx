@@ -12,7 +12,6 @@ import {
   Calendar,
   Clock,
   User,
-  Filter,
   Sparkles,
   ListChecks,
 } from "lucide-react";
@@ -27,6 +26,17 @@ import { Fab } from "../components/ui/Fab";
 import { LiquidPillTabs } from "../components/ui/LiquidPillTabs";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import {
+  applyTaskView,
+  attachChildCounts,
+  buildForest,
+  dueStatus,
+  formatTaskPath,
+  ancestorPath,
+  isTreeView,
+  type TaskRecord,
+  type TaskView,
+} from "../lib/taskTree";
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
 
@@ -44,15 +54,21 @@ interface TaskSummary {
   assignedToName?: string | null;
   dueDate?: string | null;
   status: "open" | "done" | "archived";
+  priority?: "low" | "medium" | "high";
+  parentTaskId?: string | null;
   referredTaskId?: string | null;
   subtasksJson?: string | null;
   subtasks?: Subtask[];
   reminderDate?: string | null;
   remindMemberId?: string | null;
   createdBy?: string | null;
+  createdAt?: number;
+  completedAt?: number | null;
+  childCount?: number;
+  doneChildCount?: number;
 }
 
-type FilterMode = "all" | "mine" | "overdue";
+type FilterMode = "todo" | "priority" | "due" | "recent" | "mine" | "completed";
 
 /* ── Helpers ─────────────────────────────────────────────────────────────────── */
 
@@ -65,39 +81,20 @@ function parseSubtasks(json?: string | null): Subtask[] {
   }
 }
 
-function dueStatus(date?: string | null): { label: string; tone: "danger" | "warning" | "success" | "neutral" } | null {
-  if (!date) return null;
-  const parts = date.split("-").map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
-  const [y, m, d] = parts;
-  const target = Date.UTC(y, m - 1, d);
-  const n = new Date();
-  const today = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate());
-  const days = Math.round((target - today) / 86_400_000);
-  if (days < 0) return { tone: "danger", label: "Overdue" };
-  if (days === 0) return { tone: "danger", label: "Due today" };
-  if (days <= 3) return { tone: "warning", label: `${days}d left` };
-  if (days <= 7) return { tone: "warning", label: `${days}d left` };
-  if (days <= 30) return { tone: "neutral", label: formatDate(date) };
-  return { tone: "neutral", label: formatDate(date) };
-}
-
 function formatDate(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function isOverdue(date?: string | null): boolean {
-  if (!date) return false;
-  const parts = date.split("-").map(Number);
-  if (parts.length !== 3) return false;
-  const [y, m, d] = parts;
-  const target = Date.UTC(y, m - 1, d);
-  const n = new Date();
-  const today = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate());
-  return target < today;
-}
+const FILTER_LABELS: Record<FilterMode, string> = {
+  todo: "To do",
+  priority: "Priority",
+  due: "Due",
+  recent: "Recent",
+  mine: "Mine",
+  completed: "Done",
+};
 
 /* ── Summary Bar ─────────────────────────────────────────────────────────────── */
 
@@ -180,16 +177,17 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
 function FilterChips({
   active,
   onChange,
-  overdueCount,
 }: {
   active: FilterMode;
   onChange: (m: FilterMode) => void;
-  overdueCount: number;
 }) {
-  const chips: { id: FilterMode; label: string; icon: typeof Filter }[] = [
-    { id: "all", label: "All Tasks", icon: ListChecks },
-    { id: "mine", label: "My Tasks", icon: User },
-    { id: "overdue", label: `Overdue${overdueCount > 0 ? ` (${overdueCount})` : ""}`, icon: Clock },
+  const chips: { id: FilterMode; label: string; icon: typeof ListChecks }[] = [
+    { id: "todo", label: "To do", icon: ListChecks },
+    { id: "priority", label: "Priority", icon: Sparkles },
+    { id: "due", label: "Due", icon: Clock },
+    { id: "recent", label: "Recent", icon: Calendar },
+    { id: "mine", label: "Mine", icon: User },
+    { id: "completed", label: "Done", icon: CheckCircle2 },
   ];
 
   return (
@@ -212,15 +210,25 @@ function TaskRow({
   onToggle,
   pending,
   onEdit,
+  expanded = false,
+  hasVisibleChildren = false,
+  onToggleExpand,
+  path,
+  todayIso,
 }: {
   task: TaskSummary;
   allTasks: TaskSummary[];
   onToggle: (t: TaskSummary) => void;
   pending: boolean;
   onEdit: (id: string) => void;
+  expanded?: boolean;
+  hasVisibleChildren?: boolean;
+  onToggleExpand?: () => void;
+  path?: string;
+  todayIso: string;
 }) {
   const isDone = task.status === "done";
-  const due = dueStatus(task.dueDate);
+  const due = dueStatus(task.dueDate, todayIso);
   const subtasks =
     task.subtasks && Array.isArray(task.subtasks)
       ? task.subtasks
@@ -237,6 +245,26 @@ function TaskRow({
       className="group flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-white/[0.03] cursor-pointer"
       onClick={() => onEdit(task.id)}
     >
+      {hasVisibleChildren ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand?.();
+          }}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+          className="shrink-0 mt-0.5 flex size-7 items-center justify-center rounded-lg text-fg-subtle hover:bg-white/5"
+        >
+          {expanded ? (
+            <ChevronDown className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+        </button>
+      ) : (
+        <span className="size-7 shrink-0" aria-hidden="true" />
+      )}
       {/* Checkbox */}
       <button
         onClick={(e) => {
@@ -290,7 +318,11 @@ function TaskRow({
             </span>
           )}
 
-          {/* Referred task link */}
+          {path && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-fg-subtle truncate max-w-[180px]">
+              {path}
+            </span>
+          )}
           {referredTask && (
             <span className="inline-flex items-center gap-1 text-[11px] text-m3-purple">
               <Link2 className="size-3" />
@@ -307,7 +339,16 @@ function TaskRow({
           )}
         </div>
 
-        {/* Subtask progress */}
+        {/* Nested-task progress */}
+        {(task.childCount ?? 0) > 0 && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[11px] font-medium text-vault-300">
+              {task.doneChildCount ?? 0}/{task.childCount} nested
+            </span>
+          </div>
+        )}
+
+        {/* JSON checklist progress */}
         {hasSubtasks && (
           <div className="mt-2 flex items-center gap-2">
             <div className="h-1.5 flex-1 rounded-full bg-line overflow-hidden max-w-[140px]">
@@ -377,19 +418,34 @@ function TasksEmptyState({ onAdd }: { onAdd: () => void }) {
 export function Tasks() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { families, user } = useAuth();
-  const activeFamilyId = families[0]?.id;
-  const [showDone, setShowDone] = useState(false);
+  const { families, user, activeFamilyId } = useAuth();
+  const familyId = activeFamilyId ?? families[0]?.id;
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FilterMode>("all");
+  const [filter, setFilter] = useState<FilterMode>("todo");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [now] = useState(() => Math.floor(Date.now() / 1000));
+  const [todayIso] = useState(() => {
+    const n = new Date();
+    return `${n.getUTCFullYear()}-${String(n.getUTCMonth() + 1).padStart(2, "0")}-${String(n.getUTCDate()).padStart(2, "0")}`;
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["tasks", activeFamilyId],
+    queryKey: ["tasks", familyId],
     queryFn: () =>
       api<{ tasks: TaskSummary[] }>(
-        activeFamilyId ? `/tasks?familyId=${activeFamilyId}` : "/tasks",
+        familyId ? `/tasks?familyId=${familyId}` : "/tasks",
       ),
   });
+
+  const { data: membersData } = useQuery({
+    queryKey: ["family-members", familyId],
+    queryFn: () => api<{ members: { id: string; userId: string | null }[] }>(
+      familyId ? `/families/${familyId}/members` : "/families/me/members",
+    ),
+    enabled: Boolean(familyId),
+  });
+  const myMemberId =
+    membersData?.members.find((m) => m.userId === user?.id)?.id ?? null;
 
   const toggle = useMutation({
     mutationFn: (t: TaskSummary) =>
@@ -400,44 +456,80 @@ export function Tasks() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
-  const allTasks = data?.tasks ?? [];
+  const allTasks = useMemo(() => data?.tasks ?? [], [data]);
 
-  // Filters + search
-  const filtered = useMemo(() => {
-    let result = allTasks;
+  const records: TaskRecord[] = useMemo(
+    () =>
+      attachChildCounts(
+        allTasks.map((t) => ({
+          id: t.id,
+          title: t.title,
+          notes: t.notes,
+          assignedToMemberId: t.assignedToMemberId,
+          assignedToName: t.assignedToName,
+          dueDate: t.dueDate,
+          status: t.status,
+          priority: t.priority ?? "medium",
+          parentTaskId: t.parentTaskId ?? null,
+          createdAt: t.createdAt ?? 0,
+          updatedAt: t.createdAt ?? 0,
+          completedAt: t.completedAt ?? null,
+          childCount: t.childCount ?? 0,
+          doneChildCount: t.doneChildCount ?? 0,
+        })),
+      ),
+    [allTasks],
+  );
 
-    // Text search
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.notes?.toLowerCase().includes(q),
-      );
-    }
+  const viewed = useMemo(() => {
+    const base = applyTaskView(records, {
+      view: filter as TaskView,
+      myMemberId,
+      nowSecs: now,
+      todayIso,
+    });
+    if (!search.trim()) return base;
+    const q = search.toLowerCase();
+    return base.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.notes ?? "").toLowerCase().includes(q),
+    );
+  }, [records, filter, myMemberId, now, todayIso, search]);
 
-    // Tab filter
-    if (filter === "mine") {
-      result = result.filter((t) => t.createdBy === user?.id);
-    } else if (filter === "overdue") {
-      result = result.filter(
-        (t) => t.status === "open" && isOverdue(t.dueDate),
-      );
-    }
+  const byId = useMemo(
+    () => new Map(allTasks.map((t) => [t.id, t])),
+    [allTasks],
+  );
+  const forest = useMemo(() => buildForest(viewed), [viewed]);
+  const tree = isTreeView(filter as TaskView);
 
-    return result;
-  }, [allTasks, search, filter, user?.id]);
-
-  const open = filtered.filter((t) => t.status === "open");
-  const done = filtered.filter((t) => t.status === "done");
-  const overdueCount = allTasks.filter(
-    (t) => t.status === "open" && isOverdue(t.dueDate),
-  ).length;
-
-  // Totals for progress (unfiltered)
   const totalAll = allTasks.length;
   const doneAll = allTasks.filter((t) => t.status === "done").length;
   const openAll = allTasks.filter((t) => t.status === "open").length;
+
+  const rows = useMemo(() => {
+    if (!tree) {
+      return viewed.map((v) => byId.get(v.id)).filter(Boolean) as TaskSummary[];
+    }
+    const list: TaskSummary[] = [];
+    const walk = (nodes: typeof forest) => {
+      for (const n of nodes) {
+        const raw = byId.get(n.id);
+        if (raw) {
+          list.push({
+            ...raw,
+            childCount: n.childCount,
+            doneChildCount: n.doneChildCount,
+            parentTaskId: n.parentTaskId,
+          });
+        }
+        if (!collapsed.has(n.id) && n.children.length) walk(n.children);
+      }
+    };
+    walk(forest);
+    return list;
+  }, [tree, viewed, byId, forest, collapsed]);
 
   return (
     <>
@@ -453,78 +545,67 @@ export function Tasks() {
               ))}
             </div>
           </div>
-        ) : allTasks.length === 0 ? (
+        ) : allTasks.filter((t) => t.status !== "archived").length === 0 ? (
           <TasksEmptyState onAdd={() => navigate("/tasks/new")} />
         ) : (
           <>
-            {/* Summary Bar */}
             <TaskSummaryBar open={openAll} done={doneAll} total={totalAll} />
-
-            {/* Search */}
             <SearchBar value={search} onChange={setSearch} />
+            <FilterChips active={filter} onChange={setFilter} />
 
-            {/* Filter Chips */}
-            <FilterChips active={filter} onChange={setFilter} overdueCount={overdueCount} />
-
-            {/* Open Tasks */}
             <section className="space-y-2 mb-5">
               <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase flex items-center gap-1.5">
                 <ListTodo className="size-3.5" />
-                To do ({open.length})
+                {FILTER_LABELS[filter]} ({viewed.length})
               </h3>
-              {open.length === 0 ? (
+              {rows.length === 0 ? (
                 <div className="card-premium px-5 py-4 text-center">
                   <p className="text-sm text-fg-muted">
-                    {filter !== "all"
-                      ? "No tasks match this filter."
-                      : "All tasks completed! 🎉"}
+                    {filter === "todo"
+                      ? "All tasks completed! 🎉"
+                      : "No tasks match this filter."}
                   </p>
                 </div>
               ) : (
                 <div className="card-premium divide-y divide-line overflow-hidden">
-                  {open.map((t) => (
-                    <TaskRow
-                      key={t.id}
-                      task={t}
-                      allTasks={allTasks}
-                      onToggle={toggle.mutate}
-                      pending={toggle.isPending}
-                      onEdit={(id) => navigate(`/tasks/${id}/edit`)}
-                    />
-                  ))}
+                  {rows.map((t) => {
+                    const depth = tree ? ancestorPath(viewed, t.id).length : 0;
+                    const hasKids = viewed.some((v) => v.parentTaskId === t.id);
+                    return (
+                      <div
+                        key={t.id}
+                        className={depth > 0 ? "border-l border-vault-500/25" : undefined}
+                        style={{ paddingLeft: Math.min(depth, 6) * 14 }}
+                      >
+                        <TaskRow
+                          task={t}
+                          allTasks={allTasks}
+                          onToggle={toggle.mutate}
+                          pending={toggle.isPending}
+                          onEdit={(id) => navigate(`/tasks/${id}/edit`)}
+                          expanded={!collapsed.has(t.id)}
+                          hasVisibleChildren={hasKids}
+                          todayIso={todayIso}
+                          onToggleExpand={() =>
+                            setCollapsed((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(t.id)) next.delete(t.id);
+                              else next.add(t.id);
+                              return next;
+                            })
+                          }
+                          path={
+                            !tree
+                              ? formatTaskPath(ancestorPath(records, t.id))
+                              : undefined
+                          }
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>
-
-            {/* Completed Tasks */}
-            {done.length > 0 && (
-              <section className="space-y-2">
-                <button
-                  onClick={() => setShowDone((s) => !s)}
-                  className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase flex items-center gap-1.5 tappable"
-                >
-                  <CheckCircle2 className="size-3.5 text-vault-400" />
-                  Completed ({done.length})
-                  <ChevronDown
-                    className={`size-3.5 transition-transform duration-200 ${showDone ? "rotate-180" : ""}`}
-                  />
-                </button>
-                {showDone && (
-                  <div className="card-premium divide-y divide-line overflow-hidden animate-[fadeIn_200ms_ease-out]">
-                    {done.map((t) => (
-                      <TaskRow
-                        key={t.id}
-                        task={t}
-                        allTasks={allTasks}
-                        onToggle={toggle.mutate}
-                        pending={toggle.isPending}
-                        onEdit={(id) => navigate(`/tasks/${id}/edit`)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
           </>
         )}
       </Page>
@@ -532,3 +613,4 @@ export function Tasks() {
     </>
   );
 }
+
