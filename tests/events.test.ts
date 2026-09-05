@@ -38,6 +38,7 @@ describe("/api/events: 401 without session", () => {
     { method: "PATCH",  path: "/api/events/evt-1" },
     { method: "DELETE", path: "/api/events/evt-1" },
     { method: "POST",   path: "/api/events/evt-1/cancel" },
+    { method: "POST",   path: "/api/events/evt-1/sync-calendar" },
     { method: "POST",   path: "/api/events/evt-1/attendees" },
     { method: "DELETE", path: "/api/events/evt-1/attendees/mem-1" },
   ];

@@ -8,7 +8,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -42,6 +42,13 @@ interface EventDetail {
   attendees: Attendee[];
   createdAt: number;
   updatedAt: number;
+  googleCalendarEventId?: string | null;
+}
+
+interface CalendarSyncState {
+  status?: string;
+  message?: string;
+  googleCalendarEventId?: string | null;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -54,7 +61,10 @@ const TYPE_LABELS: Record<string, string> = {
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
+  const calendarFromSave = (location.state as { calendar?: CalendarSyncState } | null)
+    ?.calendar;
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["events", id],
@@ -68,6 +78,17 @@ export function EventDetailPage() {
       return { event: { ...res.event, attendees } };
     },
     enabled: Boolean(id),
+  });
+
+  const syncCalendar = useMutation({
+    mutationFn: () =>
+      api<{
+        event: EventDetail;
+        calendar: CalendarSyncState;
+      }>(`/events/${id}/sync-calendar`, { method: "POST" }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["events", id] });
+    },
   });
 
   const cancelMutation = useMutation({
@@ -178,11 +199,35 @@ export function EventDetailPage() {
           )}
         </Card>
 
-        <Card className="space-y-2 p-4">
+        <Card className="space-y-3 p-4">
           <p className="text-xs font-semibold text-fg-muted">Phone calendar</p>
           <p className="text-sm text-fg-subtle">
-            New events sync to Google Calendar on save (sign in again once to grant calendar access). You can also download an .ics file.
+            {syncCalendar.data?.calendar?.message
+              ?? calendarFromSave?.message
+              ?? (ev.googleCalendarEventId
+                ? "This event is on your Google Calendar."
+                : "Not on Google Calendar yet. Enable Calendar API on the Cloud project, connect Calendar in Settings, then tap Sync.")}
           </p>
+          {(syncCalendar.data?.calendar?.status === "needs_reconnect"
+            || syncCalendar.data?.calendar?.status === "needs_api_enabled"
+            || calendarFromSave?.status === "needs_reconnect"
+            || calendarFromSave?.status === "needs_api_enabled"
+            || !ev.googleCalendarEventId) && (
+            <a
+              href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(`/calendar/events/${ev.id}`)}`}
+              className="block text-center text-xs font-medium text-vault-400"
+            >
+              Reconnect Google Calendar
+            </a>
+          )}
+          <Button
+            variant="secondary"
+            fullWidth
+            loading={syncCalendar.isPending}
+            onClick={() => syncCalendar.mutate()}
+          >
+            Sync to Google Calendar
+          </Button>
           <a
             href={`/api/calendar/events/${ev.id}/ics`}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"

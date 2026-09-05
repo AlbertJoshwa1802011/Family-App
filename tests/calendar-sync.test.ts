@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildCalendar, icsEscape } from "../worker/lib/ics";
-import { toGcalBody } from "../worker/lib/googleCalendar";
+import { toGcalBody, calendarStatusMessage } from "../worker/lib/googleCalendar";
+import { classifyGoogleApiError } from "../worker/lib/google";
 
 describe("icsEscape", () => {
   it("escapes commas, semicolons and newlines", () => {
@@ -76,5 +77,31 @@ describe("toGcalBody", () => {
       googleCalendarEventId: null,
     });
     expect((body.start as { date: string }).date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("classifyGoogleApiError", () => {
+  it("treats Calendar/People ACCESS_NOT_CONFIGURED as api_disabled", () => {
+    expect(
+      classifyGoogleApiError(
+        403,
+        '{"error":{"errors":[{"reason":"accessNotConfigured"}],"message":"Google Calendar API has not been used in project 123 before or it is disabled."}}',
+      ),
+    ).toBe("api_disabled");
+    expect(
+      classifyGoogleApiError(403, "People API has not been used in project X"),
+    ).toBe("api_disabled");
+  });
+
+  it("treats other 403s as missing OAuth scope", () => {
+    expect(classifyGoogleApiError(403, "no calendar scope")).toBe("auth");
+    expect(classifyGoogleApiError(401, "invalid token")).toBe("auth");
+    expect(classifyGoogleApiError(500, "boom")).toBe("other");
+  });
+});
+
+describe("calendarStatusMessage", () => {
+  it("tells the user to enable the Calendar API", () => {
+    expect(calendarStatusMessage("needs_api_enabled")).toMatch(/Calendar API/i);
   });
 });

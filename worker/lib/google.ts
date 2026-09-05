@@ -1,9 +1,9 @@
 /**
  * Shared Google OAuth scope names and per-user access-token refresh.
  *
- * Drive, Gmail, and People API all mint access tokens from the same refresh
- * token in KV (`user:refresh_token:{userId}`). After incremental consent we
- * store the granted scope list at `user:google_scopes:{userId}`.
+ * Drive, Gmail, People, and Calendar APIs all mint access tokens from the same
+ * refresh token in KV (`user:refresh_token:{userId}`). After incremental consent
+ * we store the granted scope list at `user:google_scopes:{userId}`.
  */
 import type { Env } from "../types";
 
@@ -44,6 +44,40 @@ export function refreshKey(userId: string): string {
 
 export function accessKey(userId: string): string {
   return `user:access_token:${userId}`;
+}
+
+/** Legacy calendar-only access-token cache. Dropped after unifying on accessKey(). */
+export function gcalAccessKey(userId: string): string {
+  return `user:gcal_access_token:${userId}`;
+}
+
+export async function clearUserGoogleAccessCache(env: Env, userId: string): Promise<void> {
+  await env.KV.delete(accessKey(userId));
+  await env.KV.delete(gcalAccessKey(userId));
+}
+
+/**
+ * Distinguish "API not enabled on the Cloud project" from a missing OAuth
+ * scope. Google returns 403 for both; the body is the only signal.
+ */
+export function classifyGoogleApiError(
+  status: number,
+  body: string,
+): "api_disabled" | "auth" | "other" {
+  if (status === 401) return "auth";
+  if (status !== 403) return "other";
+  const text = body.toLowerCase();
+  if (
+    text.includes("accessnotconfigured") ||
+    text.includes("access_not_configured") ||
+    text.includes("has not been used") ||
+    text.includes("is disabled") ||
+    text.includes("service_disabled") ||
+    text.includes("access not configured")
+  ) {
+    return "api_disabled";
+  }
+  return "auth";
 }
 
 export async function storeGrantedScopes(

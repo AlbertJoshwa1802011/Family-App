@@ -213,6 +213,86 @@ describe("Event edit hydration + notify", () => {
     expect(body.notifications.some((n) => n.type === "event_cancelled")).toBe(true);
   });
 
+  it("Calendar API disabled (403 ACCESS_NOT_CONFIGURED) is needs_api_enabled", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }));
+      }
+      if (url.includes("calendar/v3")) {
+        return new Response(
+          "Google Calendar API has not been used in project 1 before or it is disabled.",
+          { status: 403 },
+        );
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Disabled API",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      calendar: { status: string; message: string };
+    };
+    expect(created.calendar.status).toBe("needs_api_enabled");
+    expect(created.calendar.message).toMatch(/Calendar API/i);
+  });
+
+  it("POST /events/:id/sync-calendar retries a Google write", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }));
+      }
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "POST") {
+        return new Response(JSON.stringify({ id: "gcal-retry" }), { status: 200 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Later sync",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as { event: { id: string } };
+
+    const retry = await authed(
+      env,
+      "POST",
+      `/api/events/${created.event.id}/sync-calendar`,
+      alice.cookie,
+    );
+    expect(retry.status).toBe(200);
+    const body = (await retry.json()) as {
+      calendar: { status: string; googleCalendarEventId: string | null };
+    };
+    expect(body.calendar.status).toBe("synced");
+    expect(body.calendar.googleCalendarEventId).toBe("gcal-retry");
+  });
+
   it("stores the Google Calendar id when upsert succeeds", async () => {
     const { env, sqlite } = createTestEnv({
       GOOGLE_CLIENT_ID: "cid",
