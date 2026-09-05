@@ -389,7 +389,7 @@ export function Tasks() {
         }
       />
       <Page className="space-y-4">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-wrap gap-2">
           {VIEW_CHIPS.map((chip) => (
             <button
               key={chip.id}
@@ -397,7 +397,7 @@ export function Tasks() {
               onClick={() => setView(chip.id)}
               aria-pressed={view === chip.id}
               className={cn(
-                "min-h-9 shrink-0 rounded-full border px-3.5 text-sm font-medium transition-colors",
+                "min-h-9 shrink-0 rounded-full border px-3 text-xs font-medium transition-colors",
                 view === chip.id
                   ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
                   : "border-line bg-surface text-fg-muted hover:text-fg",
