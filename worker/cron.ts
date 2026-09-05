@@ -4,12 +4,14 @@ import { getDb, type Db } from "./db/client";
 import { schema } from "./db/client";
 import {
   REMINDER_SCAN_DAYS,
+  TASK_WINDOWS,
   daysUntilIso,
   daysUntilUnix,
   dueReminderWindow,
   eventReminderText,
   expiryReminderText,
   parseWindows,
+  taskReminderText,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
 import { sendEmail } from "./lib/email";
@@ -71,6 +73,7 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
 interface RunStats {
   docsScanned: number;
   eventsScanned: number;
+  tasksScanned: number;
   inAppSent: number;
   emailsSent: number;
 }
@@ -85,6 +88,9 @@ interface RunStats {
  *     in-app notification + (when enabled) a Resend email.
  *  3. Record reminders_log rows per channel for idempotent dedupe.
  *  4. Same for upcoming events via event_reminders_log.
+ *  5. Open tasks with a due date: dedicated windows [7, 2, 1] via
+ *     task_reminders_log. Assigned tasks notify the assignee (when they have
+ *     an account); unassigned / dependent-assigned tasks notify the family.
  *
  * Every subject is wrapped in try/catch so one bad row can't abort the run.
  */
@@ -94,7 +100,13 @@ export async function runExpiryReminders(env: Env): Promise<void> {
   const horizon = isoDaysAhead(nowMs, REMINDER_SCAN_DAYS);
   const appUrl = env.APP_URL ?? "";
 
-  const stats: RunStats = { docsScanned: 0, eventsScanned: 0, inAppSent: 0, emailsSent: 0 };
+  const stats: RunStats = {
+    docsScanned: 0,
+    eventsScanned: 0,
+    tasksScanned: 0,
+    inAppSent: 0,
+    emailsSent: 0,
+  };
   const recipientCache = new Map<string, Recipient[]>();
 
   async function recipientsFor(familyId: string): Promise<Recipient[]> {
@@ -261,9 +273,95 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     }
   }
 
+  // ── Tasks ─────────────────────────────────────────────────────────────────────
+  const dueTasks = await db
+    .select()
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.status, "open"),
+        isNotNull(schema.tasks.dueDate),
+        lte(schema.tasks.dueDate, horizon),
+      ),
+    );
+
+  for (const task of dueTasks) {
+    stats.tasksScanned++;
+    try {
+      const daysUntil = daysUntilIso(task.dueDate!, nowMs);
+      if (daysUntil === null) continue;
+      const window = dueReminderWindow(daysUntil, TASK_WINDOWS);
+      if (window === null) continue;
+
+      const all = await recipientsFor(task.familyId);
+      let recipients = all;
+      if (task.assignedToMemberId) {
+        const assignee = await db
+          .select({ userId: schema.familyMembers.userId })
+          .from(schema.familyMembers)
+          .where(eq(schema.familyMembers.id, task.assignedToMemberId))
+          .get();
+        if (assignee?.userId) {
+          recipients = all.filter((r) => r.userId === assignee.userId);
+        }
+      }
+
+      const text = taskReminderText(task.title, daysUntil);
+      const link = "/tasks";
+
+      for (const r of recipients) {
+        if (
+          await recordReminderOnce(db, "task_in_app", {
+            taskId: task.id,
+            userId: r.userId,
+            windowDays: window,
+            channel: "in_app",
+          })
+        ) {
+          await createNotification(db, {
+            userId: r.userId,
+            familyId: task.familyId,
+            type: "task",
+            title: text.title,
+            body: text.body,
+            link,
+          });
+          stats.inAppSent++;
+        }
+
+        if (
+          r.emailEnabled &&
+          r.email &&
+          (await recordReminderOnce(db, "task_email", {
+            taskId: task.id,
+            userId: r.userId,
+            windowDays: window,
+            channel: "email",
+          }))
+        ) {
+          const ok = await sendEmail(env, {
+            to: r.email,
+            subject: text.title,
+            html: reminderEmail({
+              heading: text.title,
+              body: text.body,
+              ctaLabel: "View tasks",
+              ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
+            }),
+          });
+          if (ok) stats.emailsSent++;
+          else await unrecordReminder(db, "task_email", task.id, r.userId, window);
+        }
+      }
+    } catch (err) {
+      console.error(`[cron] task ${task.id} reminder failed:`, err);
+    }
+  }
+
   console.log(
     `[cron] reminders done: docs=${stats.docsScanned} events=${stats.eventsScanned} ` +
-      `in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
+      `tasks=${stats.tasksScanned} in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
   );
 }
 
@@ -279,6 +377,20 @@ type EventLog = {
   windowDays: number;
   channel: "in_app" | "email";
 };
+type TaskLog = {
+  taskId: string;
+  userId: string;
+  windowDays: number;
+  channel: "in_app" | "email";
+};
+
+type ReminderKind =
+  | "doc_in_app"
+  | "doc_email"
+  | "event_in_app"
+  | "event_email"
+  | "task_in_app"
+  | "task_email";
 
 /**
  * Atomically claims a (subject, user, window, channel) slot in the dedupe log.
@@ -288,8 +400,8 @@ type EventLog = {
  */
 async function recordReminderOnce(
   db: Db,
-  kind: "doc_in_app" | "doc_email" | "event_in_app" | "event_email",
-  log: DocLog | EventLog,
+  kind: ReminderKind,
+  log: DocLog | EventLog | TaskLog,
 ): Promise<boolean> {
   if (kind.startsWith("doc")) {
     const l = log as DocLog;
@@ -298,6 +410,21 @@ async function recordReminderOnce(
       .values({
         id: crypto.randomUUID(),
         documentId: l.documentId,
+        userId: l.userId,
+        windowDays: l.windowDays,
+        channel: l.channel,
+      })
+      .onConflictDoNothing()
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
+  }
+  if (kind.startsWith("task")) {
+    const l = log as TaskLog;
+    const res = await db
+      .insert(schema.taskRemindersLog)
+      .values({
+        id: crypto.randomUUID(),
+        taskId: l.taskId,
         userId: l.userId,
         windowDays: l.windowDays,
         channel: l.channel,
@@ -324,7 +451,7 @@ async function recordReminderOnce(
 /** Removes an email dedupe row so a failed send is retried next run. */
 async function unrecordReminder(
   db: Db,
-  kind: "doc_email" | "event_email",
+  kind: "doc_email" | "event_email" | "task_email",
   subjectId: string,
   userId: string,
   windowDays: number,
@@ -338,6 +465,17 @@ async function unrecordReminder(
           eq(schema.remindersLog.userId, userId),
           eq(schema.remindersLog.windowDays, windowDays),
           eq(schema.remindersLog.channel, "email"),
+        ),
+      );
+  } else if (kind === "task_email") {
+    await db
+      .delete(schema.taskRemindersLog)
+      .where(
+        and(
+          eq(schema.taskRemindersLog.taskId, subjectId),
+          eq(schema.taskRemindersLog.userId, userId),
+          eq(schema.taskRemindersLog.windowDays, windowDays),
+          eq(schema.taskRemindersLog.channel, "email"),
         ),
       );
   } else {

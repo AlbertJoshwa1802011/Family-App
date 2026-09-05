@@ -14,3 +14,11 @@ RESEND_API_KEY=""
 
 # Secret used to sign sessions and hash invite tokens (use a long random value).
 SESSION_SECRET=""
+
+# Gemini API key for the in-app family assistant (preferred). Optional: without
+# Gemini or Anthropic, the assistant returns 503. Paste from Google AI Studio.
+GEMINI_API_KEY=""
+
+# Claude API key for document category suggestions + assistant fallback.
+# Optional: without it, category heuristics still work.
+ANTHROPIC_API_KEY=""

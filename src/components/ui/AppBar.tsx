@@ -1,6 +1,7 @@
 import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { AssistantButton } from "../AssistantButton";
 
 export function AppBar({
   title,
@@ -28,6 +29,7 @@ export function AppBar({
           {title}
         </h1>
         {trailing}
+        <AssistantButton />
       </div>
     </header>
   );

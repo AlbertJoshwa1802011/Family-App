@@ -19,6 +19,8 @@ import { Tasks } from "./pages/Tasks";
 import { TaskDetailPage } from "./pages/TaskDetail";
 import { Contacts } from "./pages/Contacts";
 import { Chat } from "./pages/Chat";
+import { Assistant } from "./pages/Assistant";
+import { Expenses } from "./pages/Expenses";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
@@ -85,6 +87,8 @@ export default function App() {
           <Route path="/tasks/:id" element={<TaskDetailPage />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/chat" element={<Chat />} />
+          <Route path="/assistant" element={<Assistant />} />
+          <Route path="/expenses" element={<Expenses />} />
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/family/members/:id" element={<MemberProfile />} />
           <Route path="/notifications" element={<Notifications />} />

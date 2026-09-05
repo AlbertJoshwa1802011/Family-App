@@ -124,6 +124,9 @@ describe("cross-family isolation matrix", () => {
       await req("POST", "/api/contacts", alice.cookie, { familyId: famA, name: "Dr A" })
     ).json() as { contact: { id: string } };
     await req("POST", "/api/chat", alice.cookie, { familyId: famA, body: "A-secret" });
+    const expense = await (
+      await req("POST", "/api/expenses", alice.cookie, { familyId: famA, amount: 12, note: "A-spend" })
+    ).json() as { expense: { id: string } };
 
     const denied: [string, string][] = [
       ["GET", `/api/documents?familyId=${famA}`],
@@ -136,6 +139,9 @@ describe("cross-family isolation matrix", () => {
       ["GET", `/api/contacts?familyId=${famA}`],
       ["GET", `/api/contacts/${contact.contact.id}`],
       ["GET", `/api/chat?familyId=${famA}`],
+      ["GET", `/api/expenses?familyId=${famA}`],
+      ["GET", `/api/expenses/${expense.expense.id}`],
+      ["GET", `/api/assistant?familyId=${famA}`],
       ["GET", `/api/families/${famA}`],
       ["GET", `/api/families/${famA}/members`],
       ["GET", `/api/families/${famA}/activity`],
@@ -168,6 +174,8 @@ describe("cross-family isolation matrix", () => {
       ["/api/tasks", { familyId: famA, title: "sneak" }],
       ["/api/contacts", { familyId: famA, name: "sneak" }],
       ["/api/chat", { familyId: famA, body: "sneak" }],
+      ["/api/expenses", { familyId: famA, amount: 1 }],
+      ["/api/assistant", { familyId: famA, message: "sneak" }],
     ] as const) {
       const res = await req("POST", path, bob.cookie, body);
       expect(res.status, path).toBe(404);

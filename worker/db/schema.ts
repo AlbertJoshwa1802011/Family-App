@@ -502,3 +502,80 @@ export const digestLog = sqliteTable(
   },
   (t) => [uniqueIndex("uq_digest_user_period").on(t.userId, t.periodKey)],
 );
+
+// ── Expenses ─────────────────────────────────────────────────────────────────
+// Family spending log. Amount is stored in integer cents so we never do
+// floating-point money math. "Add 100 for snacks" → 10000 cents of `currency`.
+
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    category: text("category").notNull().default("other"),
+    note: text("note"),
+    spentOn: text("spent_on").notNull(), // ISO yyyy-mm-dd
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_expense_family_spent").on(t.familyId, t.spentOn)],
+);
+
+// ── Task reminder dedupe ─────────────────────────────────────────────────────
+// Parallel to reminders_log / event_reminders_log. Daily cron fires at the
+// tightest of [7, 2, 1] days before a task's due date (plus overdue).
+
+export const taskRemindersLog = sqliteTable(
+  "task_reminders_log",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    windowDays: integer("window_days").notNull(),
+    channel: text("channel", { enum: ["in_app", "email"] }).notNull(),
+    sentAt: integer("sent_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_task_reminder").on(t.taskId, t.userId, t.windowDays, t.channel),
+  ],
+);
+
+// ── Family assistant thread ──────────────────────────────────────────────────
+// Per (family, user) conversation with the in-app AI. Soft-private: only the
+// asking user reads their own thread. actions_json records tools the model
+// actually ran (so the UI can show "Added expense · snacks · ₹100").
+
+export const assistantMessages = sqliteTable(
+  "assistant_messages",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    body: text("body").notNull(),
+    actionsJson: text("actions_json"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_assistant_family_user_created").on(
+      t.familyId,
+      t.userId,
+      t.createdAt,
+    ),
+  ],
+);

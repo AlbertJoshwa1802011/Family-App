@@ -145,6 +145,16 @@ POST   /notifications/:id/read
 GET    /reminder-prefs ; PUT /reminder-prefs
 ```
 
+## Google Drive vs Google Cloud Storage
+
+Documents stay in the **family owner's Google Drive** (`drive.file`), not a
+GCS bucket. Drive is the 5 TB already attached to their Google account — no
+GCP project, service account, or object-storage bill. GCS is a different
+product (project-owned buckets, IAM, egress fees) and would not use that
+family storage. Structured data the assistant reads (members, tasks, events,
+expenses, document *metadata*) lives in **Cloudflare D1**. File bytes never
+enter the model prompt.
+
 ## Cron: Daily Expiry Reminders (`scheduled`, `0 8 * * *`)
 
 > **Range, not equality.** Cloudflare cron is best-effort; "expiring exactly N days out" silently
@@ -159,6 +169,9 @@ GET    /reminder-prefs ; PUT /reminder-prefs
    email; record in `reminders_log` (dedupe / idempotent re-runs).
 3. Throttle email + Drive calls (app-wide token bucket — see below); wrap in `ctx.waitUntil`.
 4. Health check: ping Drive once; on `invalid_grant` raise an owner alert (refresh-token SPOF).
+5. Open tasks with a `due_date` use dedicated windows **[7, 2, 1]** (`task_reminders_log`).
+   Assigned tasks notify the assignee (when they have an account); unassigned tasks notify
+   the family. Same in-app + Resend email path as document/event reminders.
 
 ## Drive Throughput & Lifecycle
 

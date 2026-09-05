@@ -26,7 +26,7 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 270+ tests; must stay green
+npm run test           # vitest run — 358 tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
@@ -189,7 +189,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **270 tests across 18 files**, all green.
+same depth. Current baseline: **358 tests across 23 files**, all green.
 
 **Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
 built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
@@ -234,10 +234,11 @@ tests.
 worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
-  cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
-  db/schema.ts          ★ single source of truth for all 21 tables
-  lib/                   crypto, session, audit, drive, reminders (pure windowing), email (Resend), notify
-  routes/               auth, families, documents, notifications, events, tasks, contacts
+  cron.ts               runExpiryReminders() — range-based scan + per-window dedupe (docs+events+tasks)
+  db/schema.ts          ★ single source of truth for all 26 tables
+  lib/                   crypto, session, audit, drive, reminders, email, notify, assistant, expenses
+  routes/               auth, families, documents, notifications, events, tasks, contacts,
+                        chat, calendar, expenses, assistant
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
@@ -245,8 +246,8 @@ src/
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
-                         Tasks, TaskDetail, Contacts, Family, Settings, Login, NotFound
-migrations/             generated SQL (0000–0003) + meta/ snapshots
+                         Tasks, TaskDetail, Contacts, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
+migrations/             generated SQL (0000–0006) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
 docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
 public/_headers         CSP + security headers for static assets
@@ -289,6 +290,14 @@ email templates (`worker/lib/emailTemplates.ts` — email-client-safe: tables, i
 light palette) + Monday weekly digest (`worker/lib/digest.ts`, `digest_log` dedupe); Instagram
 style bottom nav (Home/Docs/Chat/Activity+badge/Family; Settings behind Family's gear).
 Friendly API error copy lives in `src/lib/api.ts` (`ApiError.code` keeps the machine code).
+
+**Assistant + expenses (done):** in-app assistant (`/assistant`) prefers
+Gemini (`GEMINI_API_KEY`) and falls back to Claude. It loads a
+visibility-filtered D1 snapshot (you, family, members, docs, tasks, events,
+expenses, stats) and can write via tools (add expense/task/event/contact,
+complete a task). Family expenses (`/expenses`) store integer cents. Daily cron
+now also reminds open tasks at 7/2/1 days (email + in-app). Documents remain on
+the owner's Google Drive — not GCS.
 
 Remaining build order: Phase 4 (offline/biometric/full-text search) → Phase 5 rest (a11y,
 component + E2E browser tests) → Phase 6 (push notifications/OCR/shared-drive). See
