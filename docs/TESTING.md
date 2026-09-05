@@ -10,7 +10,7 @@ suite guarantees. Read alongside `CLAUDE.md §7` (philosophy) and `docs/DEPLOYME
 ```bash
 npm run typecheck   # tsc project refs + worker + node configs
 npm run lint        # eslint (incl. react-hooks/purity)
-npm run test        # vitest — 303 tests across 20 files
+npm run test        # vitest — 321 tests across 21 files
 npm run build       # tsc -b && vite build (catches PWA/plugin breakage)
 ```
 
@@ -49,8 +49,8 @@ Files: `integration-flows.test.ts` (success paths), `authz-matrix.test.ts`
 `mentions-remind.test.ts`, `email-digest.test.ts` (fetch-stubbed Resend),
 `search-categorize-calendar.test.ts`, `regression-deep.test.ts` (session
 lifecycle, cross-family isolation matrix, trashed surfaces, unicode/limits),
-`expenses.test.ts`, `assistant.test.ts` (tools + mocked Claude loop + task
-cron windows).
+`expenses.test.ts`, `assistant.test.ts` (tools + mocked tool loop + task
+cron windows), `gemini.test.ts` (Gemini REST adapter + fetch-stubbed HTTP).
 
 ### Layer 2.5: Live application testing (real runtime, real users)
 `npm run dev` + `npm run dev:seed` (two users with session cookies, no OAuth
@@ -107,6 +107,9 @@ zero 500s.
 | **Reminder pipeline**: expiring doc → cron run → in-app notification for every active member → second run dedupes → mark read works | `integration-flows` |
 | Private-doc reminders go ONLY to the doc owner | `integration-flows` |
 | Reminder prefs PUT persists, normalizes windows; GET returns defaults | `integration-flows` |
+| Assistant: Gemini preferred over Anthropic; 503 without either key; snacks expense via stubbed generateContent | `gemini`, `assistant` |
+| Assistant tools write family-scoped expenses/tasks/events; private docs omitted from member snapshot; threads are per-user | `assistant` |
+| Task due emails/notifications at 7, 2, and 1 days; assigned tasks notify only the assignee | `assistant` |
 
 ### Boundaries & regressions
 

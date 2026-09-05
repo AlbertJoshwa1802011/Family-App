@@ -36,7 +36,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   cannot_modify_owner: "The family owner's role can't be changed.",
   ai_not_configured:
-    "The family assistant isn't set up yet — ask the owner to add an Anthropic API key.",
+    "The family assistant isn't set up yet — ask the owner to add a Gemini API key.",
   ai_unavailable: "The assistant had a hiccup — please try again in a moment.",
   internal_error: "Something went wrong on our side — please try again.",
 };

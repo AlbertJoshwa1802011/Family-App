@@ -26,7 +26,7 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 303 tests; must stay green
+npm run test           # vitest run — 321 tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
@@ -182,7 +182,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **303 tests across 20 files**, all green.
+same depth. Current baseline: **321 tests across 21 files**, all green.
 
 **Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
 built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
@@ -284,7 +284,8 @@ light palette) + Monday weekly digest (`worker/lib/digest.ts`, `digest_log` dedu
 style bottom nav (Home/Docs/Chat/Activity+badge/Family; Settings behind Family's gear).
 Friendly API error copy lives in `src/lib/api.ts` (`ApiError.code` keeps the machine code).
 
-**Assistant + expenses (done):** in-app Claude assistant (`/assistant`) loads a
+**Assistant + expenses (done):** in-app assistant (`/assistant`) prefers
+Gemini (`GEMINI_API_KEY`) and falls back to Claude. It loads a
 visibility-filtered D1 snapshot (you, family, members, docs, tasks, events,
 expenses, stats) and can write via tools (add expense/task/event/contact,
 complete a task). Family expenses (`/expenses`) store integer cents. Daily cron

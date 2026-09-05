@@ -119,7 +119,7 @@ export function AssistantThread({
             description={
               configured
                 ? "I already know your family — documents, tasks, events, and spending. Try “add 100 for snacks” or “what’s expiring?”"
-                : "The assistant needs an Anthropic API key on the server before it can chat. You can still browse the rest of the app."
+                : "The assistant needs a Gemini API key on the server before it can chat (Anthropic works as a fallback). You can still browse the rest of the app."
             }
           />
         ) : (

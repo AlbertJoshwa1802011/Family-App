@@ -16,7 +16,7 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 3 | ✅ Complete | Reminder cron (range + dedupe), in-app notifications, Resend email, prefs |
 | Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
 | Premium batch | ✅ Complete | Family chat + @mentions, tag-to-remind, dependents + member profiles, search + AI categories, ICS calendar feed, HTML email reports + weekly digest, Instagram-style nav |
-| Assistant + expenses | ✅ Complete | In-app Claude assistant (D1 context + tools), family expenses, task due-date emails at 7/2/1 days |
+| Assistant + expenses | ✅ Complete | In-app Gemini assistant (Claude fallback; D1 context + tools), family expenses, task due-date emails at 7/2/1 days |
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
@@ -120,7 +120,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
-| GET/POST | `/assistant?familyId` | private Claude assistant; D1 snapshot + tools · RL 20/10min · needs `ANTHROPIC_API_KEY` |
+| GET/POST | `/assistant?familyId` | private Gemini assistant (Claude fallback); D1 snapshot + tools · RL 20/10min · needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
 | GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
 
@@ -134,7 +134,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 **POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
 
-**POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `ANTHROPIC_API_KEY`.
+**POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`. Gemini is preferred when both are set. GET includes `provider: "gemini" | "anthropic" | null`.
 
 ---
 
@@ -225,7 +225,7 @@ member profiles; they are excluded from notification/mention delivery (no accoun
 
 ## 6. Test Coverage Map
 
-**303 tests across 20 files** — see `docs/TESTING.md` for the authoritative
+**321 tests across 21 files** — see `docs/TESTING.md` for the authoritative
 catalog (contract, integration-on-real-D1, authz matrix, CSRF/rate-limit,
 pure-unit, stress). The table below is the historical Phase-0.5 snapshot.
 

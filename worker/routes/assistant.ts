@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { checkRateLimit } from "../lib/rateLimit";
 import {
+  assistantProvider,
   isAssistantConfigured,
   loadAssistantHistory,
   runAssistantTurn,
@@ -40,6 +41,7 @@ assistantRoutes.get("/", requireSession, async (c) => {
   return c.json({
     messages,
     configured: isAssistantConfigured(c.env),
+    provider: assistantProvider(c.env),
   });
 });
 

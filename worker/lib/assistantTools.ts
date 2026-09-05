@@ -1,5 +1,5 @@
 /**
- * Claude tool definitions + server-side executors for the family assistant.
+ * Assistant tool definitions + server-side executors (Gemini or Claude).
  * Every write is family-scoped and goes through the same D1 tables as the
  * REST API. The model never talks to Drive, email, or other families.
  */

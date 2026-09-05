@@ -1,10 +1,14 @@
 /**
- * Family assistant — Claude + D1 context + tools.
+ * Family assistant — Gemini (preferred) or Claude fallback + D1 context + tools.
  *
  * The model is given a visibility-filtered snapshot of the caller's family
  * plus a catalogue of every in-app surface, then allowed to call tools that
  * write through the same tables as the REST API. No Drive bytes, no other
  * families, no secrets ever enter the prompt.
+ *
+ * Provider pick: GEMINI_API_KEY wins when both secrets are set (Google OAuth +
+ * Drive already in the stack). Anthropic remains for category suggestion and
+ * as an assistant fallback.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import type { Message, MessageParam, TextBlock, ToolUseBlock } from "@anthropic-ai/sdk/resources/messages";
@@ -19,14 +23,23 @@ import {
   type ToolAction,
   type ToolContext,
 } from "./assistantTools";
+import { geminiComplete } from "./gemini";
 
-const MODEL = "claude-opus-4-8";
+const CLAUDE_MODEL = "claude-opus-4-8";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 4;
 const HISTORY_LIMIT = 16;
 
+export type AssistantProvider = "gemini" | "anthropic";
+
+export function assistantProvider(env: Env): AssistantProvider | null {
+  if (env.GEMINI_API_KEY?.trim()) return "gemini";
+  if (env.ANTHROPIC_API_KEY?.trim()) return "anthropic";
+  return null;
+}
+
 export function isAssistantConfigured(env: Env): boolean {
-  return Boolean(env.ANTHROPIC_API_KEY);
+  return assistantProvider(env) !== null;
 }
 
 export interface AssistantTurn {
@@ -78,14 +91,21 @@ async function defaultComplete(
   env: Env,
   args: { system: string; tools: typeof ASSISTANT_TOOLS; messages: MessageParam[] },
 ): Promise<Message> {
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  return client.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: args.system,
-    tools: args.tools,
-    messages: args.messages,
-  });
+  const provider = assistantProvider(env);
+  if (provider === "gemini") {
+    return geminiComplete(env.GEMINI_API_KEY!, args);
+  }
+  if (provider === "anthropic") {
+    const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    return client.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: args.system,
+      tools: args.tools,
+      messages: args.messages,
+    });
+  }
+  throw new Error("ai_not_configured");
 }
 
 function textOf(message: Message): string {

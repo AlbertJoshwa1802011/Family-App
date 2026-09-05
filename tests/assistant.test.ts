@@ -89,7 +89,7 @@ describe("assistant HTTP contract", () => {
     ).toBe(404);
   });
 
-  it("503 ai_not_configured when ANTHROPIC_API_KEY is missing", async () => {
+  it("503 ai_not_configured when Gemini and Anthropic keys are both missing", async () => {
     const res = await req("POST", "/api/assistant", member.cookie, {
       familyId,
       message: "add 100 for snacks",
@@ -101,9 +101,14 @@ describe("assistant HTTP contract", () => {
   it("GET returns empty history and configured:false without a key", async () => {
     const res = await req("GET", `/api/assistant?familyId=${familyId}`, member.cookie);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { messages: unknown[]; configured: boolean };
+    const body = (await res.json()) as {
+      messages: unknown[];
+      configured: boolean;
+      provider: string | null;
+    };
     expect(body.messages).toEqual([]);
     expect(body.configured).toBe(false);
+    expect(body.provider).toBeNull();
   });
 });
 
@@ -169,9 +174,47 @@ describe("assistant tools (no LLM)", () => {
     expect(contact.ok).toBe(true);
   });
 
+  it("list_expenses returns family rows and can filter by category", async () => {
+    await executeAssistantTool(
+      "add_expense",
+      { amount: 40, category: "food", note: "chai" },
+      ctx(),
+    );
+    await executeAssistantTool(
+      "add_expense",
+      { amount: 250, category: "transport", note: "uber" },
+      ctx(),
+    );
+    const all = await executeAssistantTool("list_expenses", {}, ctx());
+    expect(all.ok).toBe(true);
+    const listed = all.data as { expenses: { note: string; amount: number }[] };
+    expect(listed.expenses).toHaveLength(2);
+
+    const food = await executeAssistantTool("list_expenses", { category: "food" }, ctx());
+    const foodRows = (food.data as { expenses: { note: string }[] }).expenses;
+    expect(foodRows.map((r) => r.note)).toEqual(["chai"]);
+  });
+
   it("rejects unknown tools and invalid expense input", async () => {
     expect((await executeAssistantTool("explode", {}, ctx())).ok).toBe(false);
     expect((await executeAssistantTool("add_expense", { amount: -1 }, ctx())).ok).toBe(false);
+    expect((await executeAssistantTool("add_expense", { amount: 0 }, ctx())).ok).toBe(false);
+    expect(
+      (await executeAssistantTool("add_task", { title: "", dueDate: "tomorrow" }, ctx())).ok,
+    ).toBe(false);
+  });
+
+  it("add_task rejects an assignee from another family", async () => {
+    const otherUser = seedUser(t.sqlite);
+    const otherFam = seedFamily(t.sqlite, otherUser.id);
+    const other = seedActor(t.sqlite, otherFam.id, "owner");
+    const result = await executeAssistantTool(
+      "add_task",
+      { title: "Spy", assignedToMemberId: other.memberId },
+      ctx(),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("invalid_member_ids");
   });
 
   it("complete_task cannot touch another family's task", async () => {
@@ -224,6 +267,55 @@ describe("assistant family snapshot visibility", () => {
     );
     expect(ownerSnap?.you.email).toBe(owner.email);
     expect(ownerSnap?.family.name).toBe("Test Family");
+  });
+
+  it("includes this-month expenses in stats and omits another family's spend", async () => {
+    const nowMs = Date.UTC(2026, 8, 5);
+    await executeAssistantTool(
+      "add_expense",
+      { amount: 100, category: "food", note: "snacks", spentOn: "2026-09-05" },
+      { db: getDb(t.env), familyId, userId: member.userId, role: "member", nowMs },
+    );
+    const otherUser = seedUser(t.sqlite);
+    const otherFam = seedFamily(t.sqlite, otherUser.id);
+    const other = seedActor(t.sqlite, otherFam.id, "owner");
+    await executeAssistantTool(
+      "add_expense",
+      { amount: 999, category: "travel", note: "secret trip", spentOn: "2026-09-05" },
+      {
+        db: getDb(t.env),
+        familyId: otherFam.id,
+        userId: other.userId,
+        role: "owner",
+        nowMs,
+      },
+    );
+
+    const snap = await loadFamilySnapshot(
+      getDb(t.env),
+      { familyId, userId: member.userId, role: "member" },
+      nowMs,
+    );
+    expect(snap?.stats.expenseCountThisMonth).toBe(1);
+    expect(snap?.stats.expenseTotalThisMonth).toBe(100);
+    expect(snap?.recentExpenses.map((e) => e.note)).toEqual(["snacks"]);
+  });
+
+  it("GET history is private per user even in the same family", async () => {
+    t.sqlite
+      .prepare(
+        `INSERT INTO assistant_messages (id, family_id, user_id, role, body, created_at)
+         VALUES (?, ?, ?, 'user', 'milo private', unixepoch())`,
+      )
+      .run(crypto.randomUUID(), familyId, member.userId);
+
+    const mine = await req("GET", `/api/assistant?familyId=${familyId}`, member.cookie);
+    const mineBody = (await mine.json()) as { messages: { body: string }[] };
+    expect(mineBody.messages.map((m) => m.body)).toEqual(["milo private"]);
+
+    const theirs = await req("GET", `/api/assistant?familyId=${familyId}`, owner.cookie);
+    const theirsBody = (await theirs.json()) as { messages: { body: string }[] };
+    expect(theirsBody.messages).toEqual([]);
   });
 });
 
@@ -291,6 +383,60 @@ describe("assistant Claude loop (injected complete)", () => {
     expect(turn.actions).toEqual([]);
     expect(turn.reply).toBe("You have no open tasks.");
   });
+
+  it("runs two tools in one round (expense + task) then confirms", async () => {
+    let round = 0;
+    const complete: CompleteFn = async ({ messages }) => {
+      round++;
+      const last = messages[messages.length - 1];
+      const isToolResult =
+        Array.isArray(last.content) &&
+        last.content.some(
+          (b) => typeof b === "object" && b !== null && "type" in b && b.type === "tool_result",
+        );
+      if (!isToolResult) {
+        return fakeMessage(
+          [
+            {
+              type: "tool_use",
+              id: "toolu_e",
+              name: "add_expense",
+              input: { amount: 80, category: "groceries", note: "milk" },
+            },
+            {
+              type: "tool_use",
+              id: "toolu_t",
+              name: "add_task",
+              input: { title: "Buy more milk", dueDate: "2026-09-12" },
+            },
+          ],
+          "tool_use",
+        );
+      }
+      return fakeMessage(
+        [{ type: "text", text: "Logged ₹80 for milk and added a reminder to restock." }],
+        "end_turn",
+      );
+    };
+
+    const turn = await runAssistantTurn({
+      env: t.env,
+      db: getDb(t.env),
+      familyId,
+      userId: member.userId,
+      role: "member",
+      message: "spent 80 on milk, remind me to buy more",
+      complete,
+    });
+
+    expect(round).toBe(2);
+    expect(turn.actions.map((a) => a.tool).sort()).toEqual(["add_expense", "add_task"]);
+    expect(turn.reply).toContain("₹80");
+
+    const tasks = await req("GET", `/api/tasks?familyId=${familyId}`, member.cookie);
+    const taskBody = (await tasks.json()) as { tasks: { title: string }[] };
+    expect(taskBody.tasks.some((tk) => tk.title === "Buy more milk")).toBe(true);
+  });
 });
 
 describe("task due-date reminders", () => {
@@ -301,7 +447,29 @@ describe("task due-date reminders", () => {
     expect(dueReminderWindow(5, TASK_WINDOWS)).toBe(7);
     expect(dueReminderWindow(2, TASK_WINDOWS)).toBe(2);
     expect(dueReminderWindow(1, TASK_WINDOWS)).toBe(1);
+    expect(dueReminderWindow(7, TASK_WINDOWS)).toBe(7);
     expect(dueReminderWindow(10, TASK_WINDOWS)).toBeNull();
+    expect(TASK_WINDOWS).toEqual([7, 2, 1]);
+  });
+
+  it("cron notifies at the 7-day window for an unassigned task", async () => {
+    const due = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
+    expect(
+      (
+        await req("POST", "/api/tasks", member.cookie, {
+          familyId,
+          title: "Passport photos",
+          dueDate: due,
+        })
+      ).status,
+    ).toBe(201);
+
+    await runExpiryReminders(t.env);
+    const mine = await req("GET", "/api/notifications", member.cookie);
+    const mineBody = (await mine.json()) as { notifications: { type: string; title: string }[] };
+    expect(mineBody.notifications.some((n) => n.title.toLowerCase().includes("passport"))).toBe(
+      true,
+    );
   });
 
   it("cron notifies the family for an unassigned task due in 2 days, then dedupes", async () => {
