@@ -333,7 +333,11 @@ async function completeTask(raw: unknown, ctx: ToolContext): Promise<ToolResult>
 
   await ctx.db
     .update(schema.tasks)
-    .set({ status: "done", updatedAt: Math.floor(ctx.nowMs / 1000) })
+    .set({
+      status: "done",
+      completedAt: task.completedAt ?? Math.floor(ctx.nowMs / 1000),
+      updatedAt: Math.floor(ctx.nowMs / 1000),
+    })
     .where(eq(schema.tasks.id, task.id));
 
   return {

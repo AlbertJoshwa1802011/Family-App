@@ -10,7 +10,7 @@ suite guarantees. Read alongside `CLAUDE.md §7` (philosophy) and `docs/DEPLOYME
 ```bash
 npm run typecheck   # tsc project refs + worker + node configs
 npm run lint        # eslint (incl. react-hooks/purity)
-npm run test        # vitest — 321 tests across 21 files
+npm run test        # vitest — 358 tests across 23 files
 npm run build       # tsc -b && vite build (catches PWA/plugin breakage)
 ```
 
@@ -101,7 +101,8 @@ zero 500s.
 | Create document with all fields → list → get → update → **clear fields with null** → trash → audit-logged | `integration-flows` |
 | Record file v1, v2 → version increments, currentFileId advances | `integration-flows` |
 | Create event with attendees → range query finds it → cancel keeps it visible as cancelled | `integration-flows` |
-| Create task → toggle done → unassign via null → delete | `integration-flows` |
+| Create task → nest subtasks → toggle done (leaves To-do / appears in Completed) → unassign via null → cascade-delete descendants | `integration-flows`, `tasks` |
+| Task views: todo / priority / due / recent / mine / completed; search includes ancestors; depth cap; cycle reject | `tasks`, `taskTree` |
 | Contact create → update → delete | `integration-flows` |
 | Invite → accept with matching email → new member can read family docs | `integration-flows` |
 | **Reminder pipeline**: expiring doc → cron run → in-app notification for every active member → second run dedupes → mark read works | `integration-flows` |

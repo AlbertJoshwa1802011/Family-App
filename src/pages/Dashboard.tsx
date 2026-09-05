@@ -162,6 +162,15 @@ export function Dashboard() {
     enabled: Boolean(activeFamily),
   });
 
+  const { data: tasksData } = useQuery({
+    queryKey: ["tasks", activeFamily?.id, "todo"],
+    queryFn: () =>
+      api<{ tasks: { id: string }[] }>(
+        `/tasks?familyId=${activeFamily!.id}&view=todo`,
+      ),
+    enabled: Boolean(activeFamily),
+  });
+
   const docs = docsData?.documents ?? [];
   const expiring = docs
     .filter((d) => d.expiryDate && daysUntil(d.expiryDate, nowMs) <= 30)
@@ -217,8 +226,8 @@ export function Dashboard() {
           />
           <StatCard
             icon={ListTodo}
-            label="Tasks"
-            value="→"
+            label="Open tasks"
+            value={tasksData ? String(tasksData.tasks.length) : "—"}
             accent="bg-success/15 text-success"
             to="/tasks"
           />

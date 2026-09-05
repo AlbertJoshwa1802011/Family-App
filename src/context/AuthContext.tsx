@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
 export interface User {
@@ -39,6 +39,8 @@ interface AuthValue {
   setActiveFamilyId: (id: string) => void;
   isLoading: boolean;
   isAuthenticated: boolean;
+  /** Revoke the server session, drop cached PII, and hard-navigate to login. */
+  signOut: () => Promise<void>;
 }
 
 const ACTIVE_FAMILY_KEY = "fv.activeFamilyId";
@@ -46,6 +48,7 @@ const ACTIVE_FAMILY_KEY = "fv.activeFamilyId";
 const AuthContext = createContext<AuthValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["me"],
     queryFn: () => api<MeResponse>("/auth/me"),
@@ -62,6 +65,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredFamilyId(id);
   }, []);
 
+  const signOut = useCallback(async () => {
+    try {
+      // Empty JSON body so Content-Type: application/json is well-formed.
+      await api("/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Still drop local state — a failed revoke must not strand the UI
+      // in a signed-in Settings screen with no feedback.
+    }
+    localStorage.removeItem(ACTIVE_FAMILY_KEY);
+    setStoredFamilyId(null);
+    // Instantly flip isAuthenticated so <Protected> doesn't keep rendering
+    // family screens from the previous /auth/me payload (staleTime is 30s).
+    qc.setQueryData<MeResponse>(["me"], { user: null, families: [] });
+    qc.removeQueries({
+      predicate: (query) => query.queryKey[0] !== "me",
+    });
+    // Hard navigation clears in-memory PII on a shared phone and avoids
+    // Login bouncing back home if any observer still held old auth data.
+    window.location.replace("/login");
+  }, [qc]);
+
   const families = data?.families ?? [];
   const activeFamily =
     families.find((f) => f.id === storedFamilyId) ?? families[0] ?? null;
@@ -73,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveFamilyId,
     isLoading,
     isAuthenticated: Boolean(data?.user),
+    signOut,
   };
 
   return <AuthContext value={value}>{children}</AuthContext>;

@@ -30,6 +30,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_member_ids: "That person isn't part of this family.",
   invalid_document_ids: "That document isn't part of this family.",
   invalid_event_id: "That event isn't part of this family.",
+  invalid_parent_id: "That parent task isn't part of this family.",
+  max_task_depth: "That's as deep as subtasks can go — try grouping under a higher task.",
+  task_cycle: "A task can't be nested under itself or one of its own subtasks.",
   drive_not_configured:
     "File storage isn't connected yet — ask the family owner to finish Google Drive setup.",
   drive_error: "Google Drive had a hiccup — please try again in a moment.",
@@ -52,13 +55,16 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  // Spread `options` first so `credentials` / merged `headers` cannot be
+  // overwritten by a caller (the previous order dropped Content-Type whenever
+  // `options.headers` was passed).
   const res = await fetch(`/api${path}`, {
+    ...options,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   if (!res.ok) {

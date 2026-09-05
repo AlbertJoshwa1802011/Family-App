@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Home, ShieldCheck } from "lucide-react";
+import { Home, LogOut, ShieldCheck } from "lucide-react";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { api } from "../lib/api";
@@ -12,10 +12,11 @@ import { useAuth } from "../context/AuthContext";
  * family-scoped), so this is the mandatory first step.
  */
 export function CreateFamily() {
-  const { user, setActiveFamilyId } = useAuth();
+  const { user, setActiveFamilyId, signOut } = useAuth();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
@@ -92,6 +93,21 @@ export function CreateFamily() {
         You'll be the owner. Invite family members afterwards from the Family
         tab — you control who sees what.
       </p>
+
+      <Button
+        type="button"
+        variant="ghost"
+        fullWidth
+        loading={signingOut}
+        leadingIcon={<LogOut className="size-4" />}
+        className="mt-8"
+        onClick={() => {
+          setSigningOut(true);
+          void signOut();
+        }}
+      >
+        Sign out
+      </Button>
     </div>
   );
 }

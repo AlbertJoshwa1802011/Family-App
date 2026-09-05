@@ -61,7 +61,34 @@ describe("session lifecycle", () => {
   it("logout revokes the session server-side (cookie replay fails)", async () => {
     const cookie = seedSession(t.sqlite, alice.userId);
     expect((await req("GET", "/api/families", cookie)).status).toBe(200);
-    await req("POST", "/api/auth/logout", cookie);
+    const logout = await req("POST", "/api/auth/logout", cookie, {});
+    expect(logout.status).toBe(200);
+    const setCookie = logout.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/Max-Age=0/i);
+    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+    expect((await req("GET", "/api/families", cookie)).status).toBe(401);
+    const me = await req("GET", "/api/auth/me", cookie);
+    expect(me.status).toBe(200);
+    expect(((await me.json()) as { user: unknown }).user).toBeNull();
+  });
+
+  it("logout with a browser Origin header still revokes the session", async () => {
+    const cookie = seedSession(t.sqlite, alice.userId);
+    const res = await app.request(
+      "/api/auth/logout",
+      {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: "http://localhost:5173",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      },
+      t.env,
+    );
+    expect(res.status).toBe(200);
     expect((await req("GET", "/api/families", cookie)).status).toBe(401);
   });
 

@@ -59,3 +59,16 @@ export async function eventInFamily(
     .get();
   return Boolean(row);
 }
+
+export async function taskInFamily(
+  db: Db,
+  familyId: string,
+  taskId: string,
+): Promise<boolean> {
+  const row = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.familyId, familyId)))
+    .get();
+  return Boolean(row);
+}

@@ -26,7 +26,7 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 321 tests; must stay green
+npm run test           # vitest run — 358 tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
@@ -121,6 +121,13 @@ All primary keys are **text UUIDs** generated in app code (`crypto.randomUUID()`
 - `status` = lifecycle: `active | cancelled | trashed`. Cancelled stays visible (strikethrough +
   badge); trashed is filtered out of all lists. Never conflate the two.
 
+### Tasks: complete vs archive vs nested
+- `status` = lifecycle: `open | done | archived`. Completing a task (`done`) sets `completedAt` and
+  removes it from the To-do view — leftover open subtasks are promoted to roots. Archive hides it
+  from Completed too. `priority` is `low | medium | high` (default medium). Nested via
+  `parentTaskId`, max depth 5. Deleting a task explicitly deletes descendants (D1 cascades are
+  advisory). List views: `todo | priority | due | recent | mine | completed`.
+
 ### `eventMonthKey()`
 Returns `"${year}-${month_index}"` with a **0-indexed** month (June → `"2026-5"`). Used only for
 grouping; the visible label uses `Intl.DateTimeFormat`. A test pins the format — don't switch to
@@ -182,7 +189,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **321 tests across 21 files**, all green.
+same depth. Current baseline: **358 tests across 23 files**, all green.
 
 **Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
 built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
@@ -239,8 +246,8 @@ src/
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
-                         Tasks, Contacts, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
-migrations/             generated SQL (0000–0005) + meta/ snapshots
+                         Tasks, TaskDetail, Contacts, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
+migrations/             generated SQL (0000–0006) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
 docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
 public/_headers         CSP + security headers for static assets
@@ -270,7 +277,7 @@ on a real D1 adapter (`tests/helpers/testEnv.ts`).
 
 **Frontend flows (done):** `activeFamily` in AuthContext (persisted, switchable) — every list
 query passes `familyId`; CreateFamily onboarding gate for zero-family users; DocumentForm +
-rebuilt DocumentDetail (Drive upload/download, versions); Tasks/Contacts composers; Family page
+rebuilt DocumentDetail (Drive upload/download, versions); Tasks with nested subtasks, complete/archive, and planning views (todo / priority / due / recent / mine / completed); Contacts composers; Family page
 invite flow + `/invite/:token` accept page; Dashboard real stats.
 
 **Premium batch (done):** family chat (`chat_messages`, paginated, soft-delete, @mention →

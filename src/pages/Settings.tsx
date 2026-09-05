@@ -185,8 +185,8 @@ function CalendarFeedCard() {
 }
 
 export function Settings() {
-  const { user } = useAuth();
-  const qc = useQueryClient();
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
 
   return (
     <>
@@ -253,10 +253,11 @@ export function Settings() {
         <Button
           variant="danger"
           fullWidth
+          loading={signingOut}
           leadingIcon={<LogOut className="size-4" />}
-          onClick={async () => {
-            await api("/auth/logout", { method: "POST" });
-            await qc.invalidateQueries({ queryKey: ["me"] });
+          onClick={() => {
+            setSigningOut(true);
+            void signOut();
           }}
         >
           Sign out
