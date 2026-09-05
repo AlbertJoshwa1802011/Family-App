@@ -235,7 +235,7 @@ Named groups — add tests in the matching file (or a new `tests/<area>.test.ts`
 | Ship slice (local only) | `npm run test:ship` | Home, tasks, Contacts, Face ID, cron, email, upload (`worker.test.ts`) |
 | Regression slice (local only) | `npm run test:regression` | Events, church settlements, expenses, Google Calendar, bubble nav (`tests/regression-v16.test.ts`) |
 | Auth | `npx vitest run tests/auth.test.ts` | Session, OAuth |
-| Money | `npx vitest run tests/expenses.test.ts tests/funds.test.ts tests/money.test.ts tests/finance-api.test.ts` | Spending, funds, commitments |
+| Money | `npx vitest run tests/expenses.test.ts tests/funds.test.ts tests/money.test.ts tests/finance-api.test.ts tests/spend-clarity.test.ts` | Spending, funds, commitments, calendar/donut clarity |
 | A single file | `npx vitest run tests/<name>.test.ts` | Fastest loop while editing that area |
 
 Agents inherit this habit because (1) this file is read first, (2) `npm run gate` is the commit bar, (3) CI and production deploy fail otherwise. There is no optional path.

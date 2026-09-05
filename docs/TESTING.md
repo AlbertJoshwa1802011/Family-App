@@ -53,6 +53,9 @@ These cases lock the bugs this branch fixed. They live in
 - Built-in categories have `#` colours.
 - `POST /expenses` with `categoryId: null` still creates the row (add is not blocked).
 - `GET /categories` without `familyId` → 400.
+- `GET /expenses?view=mine` lists only the caller's books (same rule as summary).
+- `GET /expenses?q=` matches merchant/description; `categoryId=none` is uncategorized.
+- `GET /expenses/summary` includes `byDay` for the month heat-map.
 
 ### Bubble nav
 - Clamp stays inside the padded viewport.
