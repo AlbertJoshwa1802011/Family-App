@@ -72,6 +72,29 @@ describe("3. POST /api/auth/logout", () => {
     // Hono's deleteCookie sets Max-Age=0 or expires in the past
     expect(setCookie).toMatch(/sid/);
   });
+
+  it("clearing Set-Cookie matches the session cookie flags (Safari/iOS)", async () => {
+    const res = await app.request("/api/auth/logout", { method: "POST" });
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    // Browsers ignore a Max-Age=0 overwrite that omits Secure/SameSite/Path
+    // when the original sid was set with those flags.
+    expect(setCookie).toMatch(/sid=/i);
+    expect(setCookie).toMatch(/Max-Age=0/i);
+    expect(setCookie).toMatch(/Path=\//i);
+    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+  });
+
+  it("accepts an empty JSON object body (the SPA logout payload)", async () => {
+    const res = await app.request("/api/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

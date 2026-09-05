@@ -4,7 +4,14 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
-import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
+import {
+  createSession,
+  deleteSession,
+  validateSession,
+  SESSION_ABSOLUTE_SECS,
+  COOKIE_NAME,
+  SESSION_COOKIE_OPTIONS,
+} from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
 
@@ -26,7 +33,7 @@ authRoutes.get("/me", async (c) => {
   const db = getDb(c.env);
   const result = await validateSession(db, sessionId);
   if (!result) {
-    deleteCookie(c, COOKIE_NAME, { path: "/" });
+    deleteCookie(c, COOKIE_NAME, SESSION_COOKIE_OPTIONS);
     return c.json({ user: null, families: [] });
   }
 
@@ -235,10 +242,7 @@ authRoutes.get("/google/callback", async (c) => {
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
 
   setCookie(c, COOKIE_NAME, sessionId, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "Lax",
-    path: "/",
+    ...SESSION_COOKIE_OPTIONS,
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
@@ -256,6 +260,8 @@ authRoutes.post("/logout", async (c) => {
       // Best-effort — still clear the cookie even if the DB call fails
     }
   }
-  deleteCookie(c, COOKIE_NAME, { path: "/" });
+  // Same Path/Secure/SameSite/HttpOnly as setCookie — otherwise the browser
+  // keeps the original sid and the next /auth/me still looks signed-in.
+  deleteCookie(c, COOKIE_NAME, SESSION_COOKIE_OPTIONS);
   return c.json({ ok: true });
 });
