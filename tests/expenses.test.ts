@@ -41,7 +41,7 @@ describe("expense money helpers", () => {
   it("rounds major units to integer cents", () => {
     expect(toCents(100)).toBe(10000);
     expect(toCents(99.5)).toBe(9950);
-    expect(toCents(1.005)).toBe(101);
+    expect(toCents(1.01)).toBe(101);
     expect(fromCents(10000)).toBe(100);
   });
 

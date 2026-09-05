@@ -11,7 +11,7 @@ no "it's just docs" shortcuts for code changes.
 ```bash
 npm run typecheck   # tsc project refs + worker tsconfig + node tsconfig
 npm run lint        # eslint flat config (incl. react-hooks/purity)
-npm run test        # vitest — 270+ tests across 18+ files, ALL must pass
+npm run test        # vitest — 303 tests across 20 files, ALL must pass
 npm run build       # tsc -b && vite build (catches PWA/plugin/worker breakage)
 ```
 

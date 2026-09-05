@@ -224,7 +224,7 @@ member profiles; they are excluded from notification/mention delivery (no accoun
 
 ## 6. Test Coverage Map
 
-**270+ tests across 18+ files** — see `docs/TESTING.md` for the authoritative
+**303 tests across 20 files** — see `docs/TESTING.md` for the authoritative
 catalog (contract, integration-on-real-D1, authz matrix, CSRF/rate-limit,
 pure-unit, stress). The table below is the historical Phase-0.5 snapshot.
 
