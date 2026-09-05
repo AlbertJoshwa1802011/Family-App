@@ -151,3 +151,33 @@ preview URL). Then Money → Set up Face ID. Forgot PIN: “Email a reset code�
 goes to the **Google address you signed in with**.
 
 PIN reset email needs §3 (Gmail or Resend) working.
+
+## 9. “Google hasn’t verified this app” / uncertified on every login
+
+Two separate things cause that screen.
+
+**A. The app was forcing a full consent screen on every sign-in** (fixed in
+code). After this deploy, **Continue with Google** only asks you to pick an
+account. Calendar / Contacts / Gmail still show consent when you tap Connect
+in Settings — that is expected.
+
+**B. The OAuth consent screen is still in Testing, or you request restricted
+scopes.** Google Cloud Console → **APIs & Services → OAuth consent screen**:
+
+1. User type: **External**.
+2. Fill App name, user support email, developer contact, and a privacy policy
+   URL (a public page is enough for a family app).
+3. Scopes for everyday login: `openid`, `email`, `profile`, and
+   `drive.file` (non-sensitive). Do **not** add `calendar.events`, `gmail.send`,
+   or `contacts` as default login scopes.
+4. Click **Publish app** → **Confirm**.
+
+After publish, login with only those non-sensitive scopes should **not** show
+the uncertified warning.
+
+Connecting **Calendar** (sensitive) or **Contacts / Gmail** (restricted) will
+still show “unverified” until you complete
+[Google app verification](https://support.google.com/cloud/answer/9110914).
+That is a one-time Connect flow, not every login. For a family-only app you can
+tap Advanced → Continue during those Connect steps.
+

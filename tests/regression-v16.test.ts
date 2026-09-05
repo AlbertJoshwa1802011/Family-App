@@ -68,19 +68,28 @@ afterEach(() => {
 });
 
 describe("OAuth scopes (Google Calendar)", () => {
-  it("google/start asks for calendar.events and keeps granted Drive scopes", async () => {
+  it("plain login does not request calendar.events or force consent", async () => {
     const { env } = createTestEnv({ GOOGLE_CLIENT_ID: "cid.apps.googleusercontent.com" });
     const res = await app.request("/api/auth/google/start", {}, env);
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const loc = res.headers.get("location") ?? "";
+    const decoded = decodeURIComponent(loc);
     expect(loc).toContain("accounts.google.com");
-    expect(decodeURIComponent(loc)).toContain(
-      "https://www.googleapis.com/auth/calendar.events",
-    );
-    expect(decodeURIComponent(loc)).toContain(
-      "https://www.googleapis.com/auth/drive.file",
-    );
+    expect(decoded).not.toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(decoded).toContain("https://www.googleapis.com/auth/drive.file");
     expect(loc).toContain("include_granted_scopes=true");
+    expect(loc).toContain("prompt=select_account");
+    expect(loc).not.toContain("prompt=consent");
+  });
+
+  it("connect=calendar requests calendar.events with prompt=consent", async () => {
+    const { env } = createTestEnv({ GOOGLE_CLIENT_ID: "cid.apps.googleusercontent.com" });
+    const res = await app.request("/api/auth/google/start?connect=calendar", {}, env);
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const loc = res.headers.get("location") ?? "";
+    const decoded = decodeURIComponent(loc);
+    expect(decoded).toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(loc).toContain("prompt=consent");
   });
 });
 

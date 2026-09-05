@@ -149,6 +149,10 @@ authRoutes.get("/google/start", async (c) => {
   const connect = c.req.query("connect") ?? "";
   const extra = extraScopesFromConnect(connect);
   const returnTo = c.req.query("returnTo") || "/";
+  // Force the consent screen only when requesting extra scopes (Calendar,
+  // Contacts, Gmail) or when the client asks for a fresh refresh token.
+  // prompt=consent on every login re-shows Google's "unverified app" warning.
+  const forceConsent = extra.length > 0 || c.req.query("consent") === "1";
 
   // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
   const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
@@ -168,7 +172,7 @@ authRoutes.get("/google/start", async (c) => {
     response_type: "code",
     scope: [...LOGIN_SCOPES, ...extra].join(" "),
     access_type: "offline",
-    prompt: extra.length > 0 ? "consent" : "consent",
+    prompt: forceConsent ? "consent" : "select_account",
     include_granted_scopes: "true",
     state,
     code_challenge: codeChallenge,

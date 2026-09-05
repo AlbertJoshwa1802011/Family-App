@@ -21,8 +21,10 @@ export const LOGIN_SCOPES = [
   GOOGLE_SCOPES.openid,
   GOOGLE_SCOPES.email,
   GOOGLE_SCOPES.profile,
+  // drive.file is non-sensitive. Do NOT put calendar.events / gmail.send /
+  // contacts here — those are sensitive or restricted and make Google show
+  // "unverified app" on every sign-in until the Cloud project is verified.
   GOOGLE_SCOPES.driveFile,
-  GOOGLE_SCOPES.calendarEvents,
 ] as const;
 
 export const STORAGE_CONNECT_SCOPES = [
