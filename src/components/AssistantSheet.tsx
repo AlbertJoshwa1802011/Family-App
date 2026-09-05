@@ -22,7 +22,7 @@ export function AssistantSheet() {
       <button
         type="button"
         className="absolute inset-0 bg-black/55"
-        aria-label="Close assistant"
+        aria-label="Dismiss assistant overlay"
         onClick={() => setOpen(false)}
       />
       <div
