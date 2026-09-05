@@ -37,8 +37,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | Table | Purpose | Migration |
 |---|---|---|
 | `users` | Google-authenticated accounts | 0000 |
-| `families` | Family group with Drive folder | 0000 |
-| `family_members` | Membership + role (owner/admin/member) + status | 0000 |
+| `families` | Family group; `owner_user_id` = Drive credential holder (not kept in lockstep with membership `role`) | 0000 |
+| `family_members` | Membership + role (owner/admin/member) + status. Elevated authz = owner **or** admin; `role=owner` mainly means peer-protected | 0000 |
 | `invites` | Email invites with hashed token (single-use) | 0000 |
 | `sessions` | Opaque session IDs (single source of truth) | 0000 |
 | `documents` | Document metadata with visibility + status | 0000 |
