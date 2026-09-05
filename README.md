@@ -56,13 +56,14 @@ npm run dev
 | `npm run test:regression` | Events, church, expenses, calendar, nav contracts |
 | `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron, uploads |
 | `npm run test` / `test:watch` | Full Vitest suite / watch |
+| `npm run test:catalog` | ≥1000 cases per module (`tests/catalog/`) |
 | `npm run db:generate` | After editing `worker/db/schema.ts` |
 | `npm run db:migrate:local` / `db:migrate:remote` | Apply D1 migrations |
 | `npm run deploy` | Build + wrangler deploy (normally CI) |
 
 See `docs/OPS.md` for Google redirect URIs, Drive upload, Gmail/Resend, church
-token, Contacts verification, and Face ID. See `docs/TESTING.md` for the test
-catalog.
+token, Contacts verification, and Face ID. See `docs/TESTING.md` for the
+regression catalog and the per-module 1000-case grids (`npm run test:catalog`).
 
 ## Production secrets
 
