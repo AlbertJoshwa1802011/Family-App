@@ -37,6 +37,8 @@ const screens = [
   ["/documents", "documents"],
   ["/documents/new", "document-form"],
   ["/chat", "chat"],
+  ["/assistant", "assistant"],
+  ["/expenses", "expenses"],
   ["/notifications", "activity"],
   ["/calendar", "calendar"],
   ["/tasks", "tasks"],

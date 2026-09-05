@@ -166,7 +166,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
 unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
 the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Expenses and the Assistant are in
-the Dashboard "Quick access" grid. Active state: `text-vault-300` +
+the Dashboard "Quick access" grid. A **sparkles icon in the AppBar** on every
+family screen opens the assistant as a sheet (stay on the current page). Active state: `text-vault-300` +
 `strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
 
 ### Key Libraries
