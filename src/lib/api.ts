@@ -52,13 +52,16 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  // Spread `options` first so `credentials` / merged `headers` cannot be
+  // overwritten by a caller (the previous order dropped Content-Type whenever
+  // `options.headers` was passed).
   const res = await fetch(`/api${path}`, {
+    ...options,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   if (!res.ok) {
