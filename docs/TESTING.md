@@ -10,7 +10,7 @@ suite guarantees. Read alongside `CLAUDE.md §7` (philosophy) and `docs/DEPLOYME
 ```bash
 npm run typecheck   # tsc project refs + worker + node configs
 npm run lint        # eslint (incl. react-hooks/purity)
-npm run test        # vitest — 270+ tests across 18+ files
+npm run test        # vitest — 303 tests across 20 files
 npm run build       # tsc -b && vite build (catches PWA/plugin breakage)
 ```
 
