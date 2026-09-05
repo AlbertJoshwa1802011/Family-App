@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Home } from "lucide-react";
+import { Home, LogOut } from "lucide-react";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Spinner } from "../components/ui/Spinner";
@@ -22,8 +22,9 @@ export function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { setActiveFamilyId } = useAuth();
+  const { setActiveFamilyId, signOut } = useAuth();
   const fired = useRef(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const accept = useMutation({
     mutationFn: () =>
@@ -73,6 +74,22 @@ export function AcceptInvite() {
             >
               Go home
             </Button>
+            {errorKey === "invite_email_mismatch" && (
+              <Button
+                type="button"
+                variant="ghost"
+                fullWidth
+                className="mt-2"
+                loading={signingOut}
+                leadingIcon={<LogOut className="size-4" />}
+                onClick={() => {
+                  setSigningOut(true);
+                  void signOut();
+                }}
+              >
+                Sign out and try another account
+              </Button>
+            )}
           </>
         ) : (
           <>

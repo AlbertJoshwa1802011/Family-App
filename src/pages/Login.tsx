@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/Button";
+import { api } from "../lib/api";
 
 function GoogleIcon() {
   return (
@@ -30,6 +31,8 @@ function GoogleIcon() {
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
@@ -50,22 +53,40 @@ export function Login() {
       </p>
 
       <Button
+        type="button"
         size="lg"
         variant="white"
         fullWidth
-        loading={isLoading}
+        loading={isLoading || starting}
         leadingIcon={<GoogleIcon />}
-        onClick={() => {
-          // Phase 1: kick off Google OAuth (Auth Code + PKCE).
-          window.location.href = "/api/auth/google/start";
+        onClick={async () => {
+          // POST so PKCE verifier/state are minted server-side; a GET hits the
+          // API 404 catch-all (the start route is POST-only).
+          setStarting(true);
+          setError("");
+          try {
+            const { url } = await api<{ url: string }>("/auth/google/start", {
+              method: "POST",
+              body: "{}",
+            });
+            window.location.assign(url);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Could not start sign-in.");
+            setStarting(false);
+          }
         }}
         className="mt-10 max-w-xs"
       >
         Continue with Google
       </Button>
+      {error && (
+        <p className="mt-3 max-w-xs text-xs text-danger" role="alert">
+          {error}
+        </p>
+      )}
 
       <p className="mt-8 text-xs text-fg-subtle">
-        Phase 0 scaffold · sign-in activates in Phase 1
+        Sign in with the Google account you use for this family.
       </p>
     </div>
   );
