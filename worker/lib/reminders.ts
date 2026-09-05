@@ -12,6 +12,9 @@
 
 export const DEFAULT_WINDOWS = [30, 7, 1];
 
+/** Task due-date windows: 7 days, 2 days, and 1 day (plus overdue → 1). */
+export const TASK_WINDOWS = [7, 2, 1];
+
 /** Largest horizon we scan for upcoming deadlines (days). Bounds the query. */
 export const REMINDER_SCAN_DAYS = 90;
 
@@ -116,5 +119,26 @@ export function eventReminderText(
   return {
     title: `Upcoming: ${title}`,
     body: `"${title}" is in ${daysUntil} day${daysUntil === 1 ? "" : "s"}.`,
+  };
+}
+
+/** Human label + body for a pending-task reminder. */
+export function taskReminderText(
+  title: string,
+  daysUntil: number,
+): { title: string; body: string } {
+  if (daysUntil < 0) {
+    const ago = Math.abs(daysUntil);
+    return {
+      title: `Overdue: ${title}`,
+      body: `"${title}" was due ${ago} day${ago === 1 ? "" : "s"} ago.`,
+    };
+  }
+  if (daysUntil === 0) {
+    return { title: `Due today: ${title}`, body: `"${title}" is due today.` };
+  }
+  return {
+    title: `Task due soon: ${title}`,
+    body: `"${title}" is due in ${daysUntil} day${daysUntil === 1 ? "" : "s"}.`,
   };
 }

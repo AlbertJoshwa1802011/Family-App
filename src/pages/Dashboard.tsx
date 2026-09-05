@@ -7,7 +7,9 @@ import {
   FileText,
   ListTodo,
   Plus,
+  Sparkles,
   Users,
+  Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
@@ -176,6 +178,21 @@ export function Dashboard() {
           <h2 className="text-xl font-semibold text-white">{firstName} 👋</h2>
         </div>
 
+        <Link
+          to="/assistant"
+          className="flex items-center gap-3 rounded-2xl border border-vault-500/30 bg-vault-500/10 px-4 py-3.5 transition-colors hover:bg-vault-500/15"
+        >
+          <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/20 text-vault-300">
+            <Sparkles className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-fg">Ask the assistant</span>
+            <span className="block text-xs text-fg-muted">
+              “Add 100 for snacks” · stats · reminders
+            </span>
+          </span>
+        </Link>
+
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             icon={FileText}
@@ -273,6 +290,24 @@ export function Dashboard() {
                 <Contact className="size-5" />
               </span>
               <span className="text-sm font-medium text-fg">Contacts</span>
+            </Link>
+            <Link
+              to="/expenses"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-warning/15 text-warning">
+                <Wallet className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Expenses</span>
+            </Link>
+            <Link
+              to="/assistant"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
+            >
+              <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/15 text-vault-300">
+                <Sparkles className="size-5" />
+              </span>
+              <span className="text-sm font-medium text-fg">Assistant</span>
             </Link>
           </div>
         </section>

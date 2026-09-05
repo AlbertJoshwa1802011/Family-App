@@ -41,7 +41,9 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put SESSION_SECRET      # long random string
 npx wrangler secret put RESEND_API_KEY      # optional; email is a no-op without it
 npx wrangler secret put ANTHROPIC_API_KEY   # optional; AI category suggestions
-                                            # (keyword heuristics work without it)
+                                            # + in-app family assistant
+                                            # (heuristics still work without it;
+                                            #  /api/assistant returns 503)
 ```
 
 Local dev equivalents go in `.dev.vars` (gitignored):

@@ -13,6 +13,7 @@ import {
   eventReminderText,
   expiryReminderText,
   parseWindows,
+  taskReminderText,
 } from "../worker/lib/reminders";
 
 const TODAY = Date.UTC(2026, 5, 9); // 2026-06-09 00:00 UTC, in ms
@@ -169,5 +170,13 @@ describe("eventReminderText", () => {
   it("phrases an upcoming event", () => {
     expect(eventReminderText("Trip", 3).body).toContain("3 days");
     expect(eventReminderText("Trip", 1).body).toContain("1 day");
+  });
+});
+
+describe("taskReminderText", () => {
+  it("phrases overdue, today, and upcoming tasks", () => {
+    expect(taskReminderText("Visa", -1).title).toContain("Overdue");
+    expect(taskReminderText("Visa", 0).title).toContain("today");
+    expect(taskReminderText("Visa", 7).body).toContain("7 days");
   });
 });

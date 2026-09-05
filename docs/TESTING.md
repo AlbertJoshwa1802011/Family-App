@@ -48,7 +48,9 @@ Files: `integration-flows.test.ts` (success paths), `authz-matrix.test.ts`
 (security), `security-hardening.test.ts` (CSRF + rate limits), `chat.test.ts`,
 `mentions-remind.test.ts`, `email-digest.test.ts` (fetch-stubbed Resend),
 `search-categorize-calendar.test.ts`, `regression-deep.test.ts` (session
-lifecycle, cross-family isolation matrix, trashed surfaces, unicode/limits).
+lifecycle, cross-family isolation matrix, trashed surfaces, unicode/limits),
+`expenses.test.ts`, `assistant.test.ts` (tools + mocked Claude loop + task
+cron windows).
 
 ### Layer 2.5: Live application testing (real runtime, real users)
 `npm run dev` + `npm run dev:seed` (two users with session cookies, no OAuth

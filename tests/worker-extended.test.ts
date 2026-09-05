@@ -111,6 +111,16 @@ describe("1. Worker baseline", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
+  it("x-content-type-options: nosniff on GET /api/expenses", async () => {
+    const res = await app.request("/api/expenses");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("x-content-type-options: nosniff on GET /api/assistant", async () => {
+    const res = await app.request("/api/assistant");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   it("x-content-type-options: nosniff on GET /api/notifications", async () => {
     const res = await app.request("/api/notifications");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
@@ -212,6 +222,16 @@ describe("3. Correct HTTP methods on stub routes", () => {
 
   it("GET /api/contacts → 401 (requires session)", async () => {
     const res = await app.request("/api/contacts");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/expenses → 401 (requires session)", async () => {
+    const res = await app.request("/api/expenses");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/assistant → 401 (requires session)", async () => {
+    const res = await app.request("/api/assistant");
     expect(res.status).toBe(401);
   });
 });
@@ -337,6 +357,10 @@ describe("7. Auth enforcement on event/task/contact routes", () => {
     { method: "POST",  path: "/api/contacts",        body: { familyId: "f-1", name: "Alice" } },
     { method: "POST",  path: "/api/contacts",        body: { name: "" } },             // would fail Zod
     { method: "PATCH", path: "/api/contacts/some-id", body: { email: "bad" } },        // would fail Zod
+    { method: "POST",  path: "/api/expenses",        body: { familyId: "f-1", amount: 10 } },
+    { method: "POST",  path: "/api/expenses",        body: { amount: -1 } },
+    { method: "POST",  path: "/api/assistant",       body: { familyId: "f-1", message: "hi" } },
+    { method: "POST",  path: "/api/assistant",       body: { message: "" } },
   ];
 
   for (const { method, path, body } of cases) {

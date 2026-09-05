@@ -16,6 +16,7 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 3 | ✅ Complete | Reminder cron (range + dedupe), in-app notifications, Resend email, prefs |
 | Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
 | Premium batch | ✅ Complete | Family chat + @mentions, tag-to-remind, dependents + member profiles, search + AI categories, ICS calendar feed, HTML email reports + weekly digest, Instagram-style nav |
+| Assistant + expenses | ✅ Complete | In-app Claude assistant (D1 context + tools), family expenses, task due-date emails at 7/2/1 days |
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
@@ -25,11 +26,12 @@ the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (21 tables, 4 migrations)
+## 2. Database Schema (26 tables, 6 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
-`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents).
+`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
+`0004` (chat_messages + digest_log), `0005` (expenses + assistant_messages + task_reminders_log).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -57,6 +59,11 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `contacts` | Emergency contacts per family | 0002 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
+| `digest_log` | Dedupe for Monday weekly digest | 0004 |
+| `chat_messages` | Family chat (soft-delete) | 0004 |
+| `expenses` | Family spending log (integer cents) | 0005 |
+| `task_reminders_log` | Dedupe for task due-date reminders | 0005 |
+| `assistant_messages` | Per-user assistant thread | 0005 |
 
 ### Key Design Decisions
 
@@ -112,6 +119,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | tasks (assignee/related family-scope-validated; null clears) |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
+| GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
+| GET/POST | `/assistant?familyId` | private Claude assistant; D1 snapshot + tools · RL 20/10min · needs `ANTHROPIC_API_KEY` |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
 | GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
 
@@ -123,7 +132,9 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
-**POST /documents:** `familyId` required; `title` min 1/max 300; `visibility` enum `["family","private"]`; `expiryDate`/`issuedDate` regex `^\d{4}-\d{2}-\d{2}$`.
+**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
+
+**POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -143,6 +154,9 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/calendar/events/:id/edit` | `EventForm` | Yes |
 | `/tasks` | `Tasks` | Yes |
 | `/contacts` | `Contacts` | Yes |
+| `/chat` | `Chat` | Yes |
+| `/assistant` | `Assistant` | Yes |
+| `/expenses` | `Expenses` | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
@@ -151,7 +165,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
 unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
-the gear on the Family tab (profile-style); Calendar, Tasks and Contacts are in
+the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Expenses and the Assistant are in
 the Dashboard "Quick access" grid. Active state: `text-vault-300` +
 `strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
 
