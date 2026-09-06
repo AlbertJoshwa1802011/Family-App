@@ -32,9 +32,11 @@ npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
 npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth needed)
 npm run dev:screenshots # Playwright mobile screenshots of every screen → screenshots/
+npm run dev:record      # Playwright video walkthrough (motion review) → recordings/
 ```
 
 **Definition of done for any change:** `typecheck` ✅, `lint` ✅, `test` ✅, `build` ✅.
+(`typecheck` also compiles `tsconfig.test.json` — the component tests.)
 If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` ✅.
 
 **Project skills** (`.claude/skills/`) encode the house workflows — invoke them instead
@@ -229,7 +231,14 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **358 tests across 23 files**, all green.
+same depth. Current baseline: **622 tests across 28 files**, all green.
+
+**Component & design-system tests** (`tests/*.test.tsx`, `tests/design-system.test.ts`)
+run in jsdom via a per-file `// @vitest-environment jsdom` docblock, with the shared
+harness in `tests/helpers/render.tsx`. `design-system.test.ts` parses `src/index.css`
+instead of rendering — jsdom has no `@layer` ordering or `backdrop-filter`, so the
+cascade/stacking rules in §3 can only be enforced against the stylesheet. Interactions
+use `fireEvent` (no `user-event` dependency). See `docs/TEST_RECORD.md`.
 
 **Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
 built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new

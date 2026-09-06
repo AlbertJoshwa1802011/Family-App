@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc -b && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "tsc -b && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
@@ -20,7 +20,8 @@
     "dev:screenshots": "node scripts/dev-screenshots.mjs",
     "db:migrate:local": "wrangler d1 migrations apply family-vault-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply family-vault-db --remote",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "dev:record": "node scripts/dev-record.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",

@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node", "vitest/globals"]
+  },
+  // Scoped to the component tests. The older worker suites (*.test.ts) predate
+  // this config and need Cloudflare's ambient types to compile; adding them here
+  // is a separate cleanup, tracked in docs/TESTING.md.
+  "include": ["tests/**/*.test.tsx", "tests/setup", "tests/helpers/render.tsx"]
+}

@@ -69,6 +69,22 @@ timezone-stable fixtures via `Date.UTC()`. `stress.test.ts` runs 20k mixed
 concurrent requests against the pipeline and asserts a throughput floor and
 zero 500s.
 
+### Layer 4: Component & design-system tests (jsdom)
+`ui-primitives`, `ui-forms`, `ui-navigation`, `ui-regressions` (`*.test.tsx`) render
+the UI with `@testing-library/react`. They opt into a DOM per-file with a
+`// @vitest-environment jsdom` docblock so the worker suites keep running in fast
+plain Node. Shared harness: `tests/helpers/render.tsx` (`renderUi`, `classes`,
+`expectGlass`, `calcFraction`).
+
+`design-system.test.ts` is deliberately **not** a rendering test — it parses
+`src/index.css` and the component sources. jsdom has no layout, no `@layer`
+ordering and no `backdrop-filter`, so the cascade and stacking invariants of the
+liquid-glass system can only be asserted against the stylesheet itself. See
+`docs/TEST_RECORD.md` for the defects these guard against.
+
+Interactions use `fireEvent`; `@testing-library/user-event` is intentionally not
+a dependency (see §5).
+
 ---
 
 ## 3. Test-case catalog — what the suite guarantees
@@ -124,9 +140,10 @@ zero 500s.
 
 ## 4. High-value cases still worth adding (next)
 
-1. **Component tests** (`@testing-library/react` is installed): DocumentForm
-   validation, CreateFamily onboarding, EventForm hydration on edit,
-   AcceptInvite error states.
+1. **Component tests** — *partly done*. The UI primitives, form controls, nav
+   chrome and design-system contracts are covered (264 cases). Still worth
+   adding: DocumentForm validation, CreateFamily onboarding, EventForm
+   hydration on edit, AcceptInvite error states — i.e. the *page-level* flows.
 2. **E2E (Playwright)** against `npm run dev`: login-stubbed cookie → create
    family → add document → upload (mock Drive) → see expiry badge → reminder
    notification appears. The dev server runs real workerd + local D1.
@@ -137,6 +154,12 @@ zero 500s.
 5. **Session lifecycle**: idle-window slide, absolute expiry, purge cron.
 6. **Concurrency**: two simultaneous file records on one document (currentFileId
    must settle on the later version).
+7. **Typecheck the worker suites**: `tsconfig.test.json` currently covers only
+   `*.test.tsx` plus the helpers. The older `*.test.ts` files need Cloudflare's
+   ambient types and a few Anthropic SDK fixture updates (18 pre-existing
+   errors) before they can join `npm run typecheck`.
+8. **Automated accessibility pass** (axe): roles, labels, tap targets and
+   reduced-motion are asserted today, but colour contrast is still eyeballed.
 
 ---
 
@@ -149,3 +172,11 @@ zero 500s.
 - Never assert on wall-clock timing; use seeded dates relative to `Date.now()`.
 - Keep the D1 adapter honest: use explicit aliased field selections in drizzle
   queries (see the header comment in `tests/helpers/testEnv.ts`).
+- Component tests assert the **contract** — the shared `.lq` recipe, variant and
+  tone maps, roles, labels, tap-target minimums, prop names — not pixel output.
+  A reimplementation that keeps the contract should keep passing.
+- Prefer `fireEvent` over adding `@testing-library/user-event`; the suite's rule
+  is no new test dependencies (same reason `testEnv.ts` adapts `node:sqlite`
+  rather than pulling in a D1 mock).
+- Assert sliding-pill geometry with `calcFraction()`, never the literal `calc()`
+  string — jsdom normalises `index / count` into a decimal.
