@@ -17,12 +17,18 @@ import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { formatEventTime, eventTypeColor } from "../lib/eventTime";
+
+type Rsvp = "invited" | "accepted" | "declined" | "tentative";
 
 interface Attendee {
   memberId: string;
   userId: string;
   name: string | null;
+  displayName: string | null;
+  memberType: "user" | "dependent";
+  rsvp: Rsvp;
   picture: string | null;
   email: string | null;
 }
@@ -39,9 +45,40 @@ interface EventDetail {
   allDay: boolean;
   status: "active" | "cancelled" | "trashed";
   createdBy: string;
-  attendees: Attendee[];
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * The API returns attendees as a SIBLING of event, not nested inside it.
+ * This page used to type them onto EventDetail and read `ev.attendees`, which
+ * is always undefined at runtime — `undefined.length` white-screened the whole
+ * page. api<T>() is an unchecked cast, so TypeScript could not catch it and no
+ * test rendered the component. Model the envelope exactly instead.
+ */
+interface EventDetailResponse {
+  event: EventDetail;
+  attendees: Attendee[];
+  rsvpSummary: Record<Rsvp, number>;
+  canEdit: boolean;
+}
+
+const RSVP_LABEL: Record<Rsvp, string> = {
+  accepted: "Going",
+  declined: "Not going",
+  tentative: "Maybe",
+  invited: "No reply",
+};
+
+const RSVP_TONE: Record<Rsvp, "success" | "danger" | "warning" | "neutral"> = {
+  accepted: "success",
+  declined: "danger",
+  tentative: "warning",
+  invited: "neutral",
+};
+
+function attendeeLabel(a: Attendee): string {
+  return a.name ?? a.displayName ?? a.email ?? "Member";
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -55,11 +92,26 @@ export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { user } = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ["events", id],
-    queryFn: () => api<{ event: EventDetail }>(`/events/${id}`),
+    queryFn: () => api<EventDetailResponse>(`/events/${id}`),
     enabled: Boolean(id),
+  });
+
+  // Answering an invitation is always the attendee's own right, so this is not
+  // gated on canEdit — a member who may not move the event can still say
+  // whether they are coming.
+  const rsvpMutation = useMutation({
+    mutationFn: (status: Rsvp) =>
+      api(`/events/${id}/rsvp`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["events"] });
+    },
   });
 
   const cancelMutation = useMutation({
@@ -95,6 +147,12 @@ export function EventDetailPage() {
   const ev = data?.event;
   if (!ev) return null;
 
+  const attendees = data?.attendees ?? [];
+  const summary = data?.rsvpSummary;
+  const canEdit = data?.canEdit ?? false;
+  // Which row is mine? Only a real user account can answer for itself.
+  const me = attendees.find((a) => a.userId === user?.id);
+
   const colors = eventTypeColor(ev.type);
 
   return (
@@ -103,7 +161,7 @@ export function EventDetailPage() {
         title={TYPE_LABELS[ev.type] ?? "Event"}
         back
         trailing={
-          ev.status === "active" ? (
+          ev.status === "active" && canEdit ? (
             <button
               onClick={() => navigate(`/calendar/events/${id}/edit`)}
               className="flex size-9 items-center justify-center rounded-xl text-fg-muted hover:text-fg"
@@ -152,24 +210,61 @@ export function EventDetailPage() {
           )}
         </Card>
 
+        {/* Your invitation — shown only if you are actually on the guest list */}
+        {me && ev.status === "active" && (
+          <section className="space-y-2">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              Are you going?
+            </h3>
+            <Card className="p-3">
+              <div className="flex gap-2">
+                {(["accepted", "tentative", "declined"] as const).map((s) => (
+                  <Button
+                    key={s}
+                    variant={me.rsvp === s ? "primary" : "ghost"}
+                    fullWidth
+                    disabled={rsvpMutation.isPending}
+                    onClick={() => rsvpMutation.mutate(s)}
+                  >
+                    {RSVP_LABEL[s]}
+                  </Button>
+                ))}
+              </div>
+              {me.rsvp === "invited" && (
+                <p className="mt-2 text-xs text-fg-subtle">
+                  You have not replied yet.
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
+
         {/* Attendees */}
-        {ev.attendees.length > 0 && (
+        {attendees.length > 0 && (
           <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
               <Users className="size-3.5" />
-              Attendees ({ev.attendees.length})
+              Attendees ({attendees.length})
+              {summary && summary.accepted > 0 && (
+                <span className="font-normal normal-case">
+                  · {summary.accepted} going
+                </span>
+              )}
             </h3>
             <Card className="p-3">
-              <div className="flex flex-wrap gap-3">
-                {ev.attendees.map((a) => (
+              <div className="flex flex-col gap-2.5">
+                {attendees.map((a) => (
                   <div key={a.memberId} className="flex items-center gap-2">
                     <Avatar
-                      name={a.name}
+                      name={attendeeLabel(a)}
                       email={a.email}
                       src={a.picture}
                       className="size-8"
                     />
-                    <span className="text-sm text-fg">{a.name ?? a.email ?? "Member"}</span>
+                    <span className="flex-1 truncate text-sm text-fg">
+                      {attendeeLabel(a)}
+                    </span>
+                    <Badge tone={RSVP_TONE[a.rsvp]}>{RSVP_LABEL[a.rsvp]}</Badge>
                   </div>
                 ))}
               </div>
@@ -186,7 +281,7 @@ export function EventDetailPage() {
           Add to my calendar
         </a>
 
-        {ev.status === "active" && (
+        {ev.status === "active" && canEdit && (
           <section className="space-y-2 pt-2">
             <Button
               variant="ghost"
