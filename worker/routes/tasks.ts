@@ -6,6 +6,7 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { notifyTaskAssigned, notifyTaskUnassigned } from "../lib/scheduleNotify";
 import {
   allDocumentsInFamily,
   allMembersInFamily,
@@ -73,6 +74,16 @@ type TaskRow = typeof schema.tasks.$inferSelect;
 
 interface AssigneeName {
   assignedToName: string | null;
+}
+
+/** Display name used in "X assigned you ..." notification copy. */
+async function taskActorName(db: ReturnType<typeof getDb>, userId: string): Promise<string> {
+  const row = await db
+    .select({ name: schema.users.name, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  return row?.name ?? row?.email ?? "A family member";
 }
 
 async function assigneeNames(
@@ -292,6 +303,18 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     .where(eq(schema.tasks.id, taskId))
     .get();
 
+  // Tell the person the job was handed to. Assigning work to someone who is
+  // never told is the same failure as scheduling an event they never hear about.
+  if (data.assignedToMemberId) {
+    await notifyTaskAssigned(
+      db,
+      c.env,
+      { id: taskId, familyId: data.familyId, title: data.title, dueDate: data.dueDate },
+      [data.assignedToMemberId],
+      { userId, name: await taskActorName(db, userId) },
+    );
+  }
+
   const all = [...familyTasks, task!];
   const [presented] = await decorate(db, data.familyId, all, [task!]);
   return c.json({ task: presented }, 201);
@@ -417,6 +440,26 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
     .from(schema.tasks)
     .where(eq(schema.tasks.id, taskId))
     .get();
+
+  // Reassignment tells BOTH sides: the new owner picks it up, the old one stops.
+  if (
+    updates.assignedToMemberId !== undefined &&
+    updates.assignedToMemberId !== task.assignedToMemberId
+  ) {
+    const actor = { userId, name: await taskActorName(db, userId) };
+    const summary = {
+      id: taskId,
+      familyId: task.familyId,
+      title: updatedTask!.title,
+      dueDate: updatedTask!.dueDate,
+    };
+    if (updates.assignedToMemberId) {
+      await notifyTaskAssigned(db, c.env, summary, [updates.assignedToMemberId], actor);
+    }
+    if (task.assignedToMemberId) {
+      await notifyTaskUnassigned(db, c.env, summary, [task.assignedToMemberId], actor);
+    }
+  }
 
   const all = familyTasks.map((t) => (t.id === taskId ? updatedTask! : t));
   const [presented] = await decorate(db, task.familyId, all, [updatedTask!]);

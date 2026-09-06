@@ -70,6 +70,38 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
   }));
 }
 
+/**
+ * User ids of an event's non-declined attendees, or null when the event has no
+ * attendee rows at all (meaning "the whole family"). Dependents contribute no
+ * user id, so an event only for a child returns an empty set — nobody to email,
+ * which is correct: their guardians see it on the shared calendar.
+ */
+async function attendeeUserIdsFor(
+  db: Db,
+  eventId: string,
+): Promise<Set<string> | null> {
+  const rows = await db
+    .select({
+      userId: schema.familyMembers.userId,
+      rsvp: schema.eventAttendees.rsvp,
+    })
+    .from(schema.eventAttendees)
+    .innerJoin(
+      schema.familyMembers,
+      eq(schema.eventAttendees.memberId, schema.familyMembers.id),
+    )
+    .where(eq(schema.eventAttendees.eventId, eventId));
+
+  if (rows.length === 0) return null; // no guest list → family-wide
+
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (r.rsvp === "declined") continue;
+    if (r.userId) ids.add(r.userId);
+  }
+  return ids;
+}
+
 interface RunStats {
   docsScanned: number;
   eventsScanned: number;
@@ -216,7 +248,18 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     try {
       const daysUntil = daysUntilUnix(ev.startAt, nowMs);
       if (daysUntil < 0) continue; // past events don't remind
-      const recipients = await recipientsFor(ev.familyId);
+
+      // Attendee-scoped: an event with a named guest list concerns those people,
+      // not the whole household — mirrors how private documents only remind
+      // their owner. An event with NO attendees is a family-wide affair and
+      // still reminds everyone. Declined attendees are dropped: saying no ends
+      // the obligation. Dependents have no account, so they resolve to nobody.
+      const all = await recipientsFor(ev.familyId);
+      const attendeeUserIds = await attendeeUserIdsFor(db, ev.id);
+      const recipients =
+        attendeeUserIds === null
+          ? all
+          : all.filter((r) => attendeeUserIds.has(r.userId));
 
       for (const r of recipients) {
         const window = dueReminderWindow(daysUntil, r.windows);

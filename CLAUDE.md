@@ -222,6 +222,10 @@ by a forced `skipWaiting`. A "new version" toast handles updates.
 | ESLint: "Cannot call impure function" | `Date.now()` in render | `useState(() => Date.now())` |
 | Migration apply fails: "no such column" | drizzle-kit table-recreation `INSERT...SELECT` lists new cols | Edit the just-generated migration's INSERT to copy only old columns; new ones take defaults. Validate with the python script. Only safe pre-production. |
 | `.partial()` throws on a refined Zod schema | `.refine()` returns ZodEffects, which has no `.partial()` | Call `.partial()` on the base ZodObject, then `.refine()` |
+| A PATCH silently wipes fields the caller never sent | **`.partial()` does not cancel `.default()`** — Zod still fills the default when the key is absent, so every partial update arrives carrying `[]` / `"other"` / `false`. With replace-semantics handlers this deletes real data (it wiped every event attendee on a rename). | Keep defaults OFF the shared field set. Define a default-free `xFieldsSchema`, `.extend()` it with defaults for CREATE, and `.partial()` the default-free one for UPDATE (see `worker/routes/events.ts`) |
+| A partial update leaves `endAt` before `startAt` | A `.refine()` comparing two fields only fires when BOTH are in the payload | Validate the **merged** state (patch over stored row) in the handler, not just the patch |
+| Page crashes on a field the type says exists | `api<T>()` is an unchecked cast, so a wrong envelope type is invisible to `tsc` (`EventDetail` read `ev.attendees` when the API returns `{event, attendees}`) | Model the response envelope exactly; destructure siblings rather than typing them onto the nested object |
+| Optimistic concurrency never triggers | `updatedAt` has one-second granularity — two saves in the same second both look current | Use a monotonic `version` counter (`events.version`), not a timestamp |
 
 ---
 
@@ -231,7 +235,10 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **622 tests across 28 files**, all green.
+same depth. Current baseline: **774 tests across 36 files**, all green.
+Multi-user scheduling has its own cast fixture in `tests/helpers/family.ts` (owner,
+admin, plain member, dependent, invited-inactive, removed, outsider) — multi-user bugs
+live in the members people forget. Use it for anything touching shared family data.
 
 **Component & design-system tests** (`tests/*.test.tsx`, `tests/design-system.test.ts`)
 run in jsdom via a per-file `// @vitest-environment jsdom` docblock, with the shared
@@ -285,7 +292,8 @@ worker/
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
   cron.ts               runExpiryReminders() — range-based scan + per-window dedupe (docs+events+tasks)
   db/schema.ts          ★ single source of truth for all 26 tables
-  lib/                   crypto, session, audit, drive, reminders, email, notify, assistant, expenses
+  lib/                   crypto, session, audit, drive, reminders, email, notify, assistant,
+                        expenses, scheduleNotify (who to tell), conflicts (double-booking)
   routes/               auth, families, documents, notifications, events, tasks, contacts,
                         chat, calendar, expenses, assistant
 src/
@@ -348,6 +356,23 @@ complete a task). Family expenses (`/expenses`) store integer cents. Daily cron
 now also reminds open tasks at 7/2/1 days (email + in-app). Documents remain on
 the owner's Google Drive — not GCS.
 
+**Multi-user scheduling (done):** the app's specialty — one member arranging something
+for another — is now enforced end to end. `worker/lib/scheduleNotify.ts` notifies the
+people an action affects (`event_invite`, `event_rescheduled`, `event_cancelled`,
+`event_uninvited`, `event_rsvp`, `task_assigned`, `task_unassigned`), never the actor,
+never dependents (no account) or inactive members. `event_attendees.rsvp` +
+`POST /events/:id/rsvp` make attendance a state the attendee owns — answering is always
+your own right, even without edit permission; only a **dependent** may be answered for.
+`canMutateEvent` opens *creating* to every member but restricts changing/cancelling/
+deleting to the creator or an admin/owner (`GET /events/:id` returns `canEdit`).
+`worker/lib/conflicts.ts` reports double-bookings **advisorily** (half-open intervals;
+a clash needs a shared attendee) and backs `GET /events/availability` free/busy. Event
+reminders are attendee-scoped (family-wide only when there is no guest list; declined
+attendees dropped). `events.version` + `expectedVersion` give opt-in optimistic
+concurrency → `409`. See `docs/TEST_PLAN_MULTIUSER.md` for the full model, the evidence
+that produced it, and what is still open.
+
 Remaining build order: Phase 4 (offline/biometric/full-text search) → Phase 5 rest (a11y,
-component + E2E browser tests) → Phase 6 (push notifications/OCR/shared-drive). See
-`docs/FEATURES.md §5`, `docs/TESTING.md §4`, and the segmentation roadmap in `docs/PLAN.md`.
+component + E2E browser tests — incl. the two-context Playwright scheduling test) →
+Phase 6 (push notifications/OCR/shared-drive). See `docs/FEATURES.md §5`,
+`docs/TESTING.md §4`, and the segmentation roadmap in `docs/PLAN.md`.

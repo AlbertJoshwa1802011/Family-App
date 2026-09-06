@@ -212,6 +212,43 @@ export function seedActor(
   return { userId: user.id, memberId: member.id, cookie, email: user.email };
 }
 
+/**
+ * A managed dependent: a child or elderly relative with NO Google account.
+ * userId is null, so they can be scheduled for but never notified and never
+ * sign in — the case most likely to crash naive multi-user code.
+ */
+export function seedDependent(
+  sqlite: DatabaseSync,
+  familyId: string,
+  displayName = "Dependent",
+): { id: string } {
+  const id = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO family_members (id, family_id, user_id, member_type, display_name, role, status)
+       VALUES (?, ?, NULL, 'dependent', ?, 'member', 'active')`,
+    )
+    .run(id, familyId, displayName);
+  return { id };
+}
+
+/** A member row in a non-active state (invited / removed) for authz tests. */
+export function seedInactiveActor(
+  sqlite: DatabaseSync,
+  familyId: string,
+  status: "invited" | "removed",
+): { userId: string; memberId: string; cookie: string } {
+  const user = seedUser(sqlite);
+  const memberId = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO family_members (id, family_id, user_id, member_type, role, status)
+       VALUES (?, ?, ?, 'user', 'member', ?)`,
+    )
+    .run(memberId, familyId, user.id, status);
+  return { userId: user.id, memberId, cookie: seedSession(sqlite, user.id) };
+}
+
 export function seedDocument(
   sqlite: DatabaseSync,
   opts: {

@@ -9,12 +9,13 @@ commands shown; nothing here is transcribed by hand.
 |---|---|
 | `npm run typecheck` | ✅ (app + worker + node + **tests**) |
 | `npm run lint` | ✅ 0 errors, 0 warnings |
-| `npm run test` | ✅ **624 passed / 624**, 28 files |
+| `npm run test` | ✅ **774 passed / 774**, 36 files (after merging `main`) |
 | `npm run build` | ✅ client + worker |
 | Schema changes | none — no migration required |
 
 Baseline before this work was **358 tests across 23 files**. The redesign adds
-**266 tests across 5 new files**.
+**266 tests across 5 new files**. After merging the multi-user scheduling work
+that landed on the base branch, the combined suite is **774 across 36 files**.
 
 ## What was added
 

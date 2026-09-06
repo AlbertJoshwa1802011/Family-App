@@ -105,10 +105,16 @@ export function EventForm() {
     enabled: isEdit,
   });
 
-  // Fetch family members for attendee picker
+  // Fetch family members for attendee picker.
+  // MUST be scoped to the active family: a user who belongs to two families was
+  // previously shown the first family's members, and the create then failed
+  // server-side with invalid_member_ids. familyId is in the query key too, so
+  // switching families does not serve a stale picker from cache.
   const { data: membersData } = useQuery({
-    queryKey: ["family-members"],
-    queryFn: () => api<{ members: Member[] }>("/families/me/members"),
+    queryKey: ["family-members", activeFamily?.id],
+    queryFn: () =>
+      api<{ members: Member[] }>(`/families/me/members?familyId=${activeFamily!.id}`),
+    enabled: Boolean(activeFamily),
   });
   const members = membersData?.members ?? [];
 
@@ -337,7 +343,8 @@ export function EventForm() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-fg-subtle">
-                Tagged members will be notified when the event is created.
+                Tagged members are notified as soon as you save, and again if
+                you move or cancel the event.
               </p>
             </Card>
           )}
