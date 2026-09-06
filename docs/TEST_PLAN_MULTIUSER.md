@@ -24,6 +24,9 @@ what other members see and are told when someone acts. That is exactly the gap t
 
 ## 1. Verified behaviour (executed, not assumed)
 
+> **Update — all findings in §1.2 are now fixed.** See §7 for what changed and
+> which suite pins each behaviour. §1 is kept as the original evidence.
+
 Each row below was run as a real request against the actual worker with seeded
 multi-user sessions (`tests/helpers/testEnv.ts`, real migrations).
 
@@ -55,7 +58,10 @@ sound. This is a good foundation.
 | **D** | Plain `member` **reschedules** the owner's event | 403 | **200 — allowed** |
 | **K** | Event reminder for an event only the child attends | attendee-scoped | **every family member is reminded** |
 | **L** | Two members PATCH the same event concurrently | 409 on one | **200 / 200 — last write wins, silently** |
-| **P** | `GET /events?member=<id>` — "what is on *my* calendar" | filtered | **filter ignored, all events returned** |
+| **Q** | `PATCH /events/:id` changing only the title | other fields untouched | **wiped every attendee, reset `type` to "other", cleared `allDay`** |
+| **R** | `PATCH` moving `startAt` past the stored `endAt` | 400 | **accepted — event ended before it began** |
+| **S** | Opening any event's detail page in the browser | renders | **crashed: read `ev.attendees`, but the API returns `attendees` beside `event`** |
+| **P** | `GET /events?member=<id>` — "what is on *my* calendar" | filtered | **no such filter existed** (documents had one; events did not) |
 | **J** | `GET /families/me/members?familyId=<B>` for a user in two families | family B's members | **returns the *first* family's members** |
 
 ### 1.3 The three findings that matter most
@@ -225,40 +231,134 @@ picker, RSVP control, and conflict warning.
 
 ---
 
-## 5. Execution order
+## 5. What was implemented
 
-| Phase | Work | Why first |
+Phases 0–8 of the original order are done. Phase 9 (Playwright two-context UI)
+remains open.
+
+### 5.1 Notifications — the core fix
+
+`worker/lib/scheduleNotify.ts` (new). Every scheduling act that changes someone
+else's obligations now reaches them in-app and by email (email best-effort, per
+`reminder_prefs`, and a failure never fails the request):
+
+| Trigger | Notification type | Who hears |
 |---|---|---|
-| **0** | Lock the §2 semantics | every assertion below depends on it |
-| **1** | Write S3 + S1 **as failing tests** against today's code | encodes the intent; red is the spec |
-| **2** | Fix: notify on invite / reschedule / cancel / un-invite / task assign | closes the promise the UI already makes (finding 1) |
-| **3** | Fix: `createdBy`-or-admin guard on event mutations | closes finding 3 |
-| **4** | Schema: `event_attendees.status` + `POST /events/:id/rsvp` (`db-migration` skill) | closes finding 2 |
-| **5** | S6 — make reminders attendee-scoped | correctness follows from RSVP existing |
-| **6** | S4 conflicts (advisory) + free-busy endpoint | the differentiating feature |
-| **7** | S5 concurrency + `updatedAt` precondition → 409 | hardening once semantics are stable |
-| **8** | S7 multi-family, incl. the `me/members` fix | narrower blast radius |
-| **9** | S10 live + Playwright two-context | last — needs the UI built |
+| Added to an event | `event_invite` | the new attendees |
+| Event moved | `event_rescheduled` | all attendees + the creator |
+| Event cancelled or deleted | `event_cancelled` | all attendees |
+| Dropped from the guest list | `event_uninvited` | the removed member |
+| An attendee answers | `event_rsvp` | the organizer |
+| Task assigned | `task_assigned` | the new assignee |
+| Task reassigned away | `task_unassigned` | the previous assignee |
 
-Phases 2 and 3 are small, self-contained, and remove the two defects a real family would hit on
-day one. They are the recommended starting point.
+Invariants held everywhere: the actor is never notified of their own action;
+dependents (no account) are skipped; invited/removed members are skipped;
+re-adding an existing attendee notifies nobody twice.
 
-**Definition of done per phase** (`gate` skill): `typecheck` ✅ `lint` ✅ `test` ✅ `build` ✅,
-plus `db:generate` + `validate_migrations.py` for phase 4.
+### 5.2 RSVP
+
+`event_attendees` gains `rsvp` (`invited|accepted|declined|tentative`, default
+`invited`) and `rsvpAt` — migration `0007_salty_sway.sql`, additive.
+`POST /events/:id/rsvp` answers. Answering is the attendee's own right and is
+deliberately *not* behind the edit permission; answering *for* someone else is
+allowed only for dependents, whose guardian speaks for them. Dependents are
+seeded `accepted` on being scheduled. `GET /events/:id` returns per-attendee
+status plus an `rsvpSummary` count.
+
+### 5.3 Permissions
+
+`canMutateEvent`: creating stays open to every active member; changing,
+cancelling, deleting or re-guest-listing an event requires its creator or an
+admin/owner, else `403`. `GET /events/:id` returns `canEdit` so the client can
+hide controls the server would reject.
+
+### 5.4 Conflicts and availability
+
+`worker/lib/conflicts.ts` (new). Create/update responses carry a `conflicts`
+array — **advisory, never blocking**. Half-open intervals, so back-to-back is
+not a clash; all-day events span the UTC day; an absent `endAt` occupies 30
+minutes; cancelled, trashed and declined attendances hold nobody's time; a
+clash requires a *shared* attendee. `GET /events/availability` returns free/busy
+per member for a range.
+
+### 5.5 Reminders
+
+Event reminders are attendee-scoped, mirroring private documents. An event with
+no attendees stays family-wide. Declined attendees are dropped.
+
+### 5.6 Concurrency
+
+`events.version` (migration `0008_modern_xorn.sql`) is a monotonic counter;
+`PATCH` accepts `expectedVersion` and returns `409` with `currentVersion` on a
+stale write. **A timestamp could not do this job** — `updatedAt` has one-second
+granularity, so two members saving inside the same second both looked current;
+this was caught by the concurrency suite itself. The precondition is opt-in, so
+omitting it keeps last-write-wins for existing clients.
+
+### 5.7 Bugs found while writing the tests
+
+Three defects the original probe did not reach, all pre-existing:
+
+1. **`PATCH` wiped data on every edit.** `.partial()` was applied to a schema
+   whose fields carried `.default()`. Zod still fills a default when the key is
+   absent, so every patch arrived carrying `attendeeMemberIds: []`,
+   `type: "other"` and `allDay: false` — and since the handler treats a present
+   attendee array as a full replace, **renaming an event deleted its entire
+   guest list and reset its type**. Fixed by splitting the default-free field
+   set (`eventFieldsSchema`) from the create schema. None of the 358 original
+   tests caught this.
+2. **`endAt` could precede `startAt`.** The Zod refine only compares the two
+   fields when both are in the payload, so moving `startAt` alone left the
+   stored `endAt` behind it. The handler now validates the *merged* state.
+3. **The event detail page crashed.** `EventDetail.tsx` read `ev.attendees`,
+   but the API returns `attendees` as a sibling of `event` — `undefined.length`
+   on every event. `api<T>()` is an unchecked cast, so TypeScript could not see
+   it and no test rendered the component.
+
+### 5.8 Frontend
+
+`EventForm` now scopes the attendee picker to the active family (`?familyId=`,
+and `familyId` in the query key so switching families cannot serve a stale
+picker). `EventDetail` unwraps the response envelope correctly, shows per
+attendee RSVP badges and a going-count, offers Going / Maybe / Not going to
+attendees, and hides edit/cancel/delete when `canEdit` is false.
 
 ---
 
-## 6. Coverage targets
+## 6. Coverage delivered
 
-| Area | Now | Target |
+| Area | Before | After |
 |---|---|---|
-| Total tests | 358 | ~520 |
-| Multi-actor scheduling | ~6 | ~130 |
-| RSVP | 0 | ~25 |
-| Conflicts / availability | 0 | ~20 |
-| Concurrency | 0 | ~12 |
-| Notification fan-out | ~10 (cron only) | ~35 |
+| Total tests | 358 | **508** (31 files, all green) |
+| Multi-actor scheduling notifications | 0 | 20 (`scheduling-multiuser.test.ts`) |
+| RSVP | 0 | 24 (`rsvp.test.ts`) |
+| Scheduling authorization | ~6 | 24 (`scheduling-authz.test.ts`) |
+| Conflicts + availability | 0 | 27 (`scheduling-conflicts.test.ts`) |
+| Concurrency + patch integrity | 0 | 14 (`scheduling-concurrency.test.ts`) |
+| Attendee-scoped reminders | 0 | 12 (`scheduling-reminders.test.ts`) |
+| Multi-family scoping | ~2 | 16 (`multi-family.test.ts`) |
+| Task assignment | 0 | 13 (`task-assignment.test.ts`) |
 
-**Exit criteria.** The §4 matrix is green; no scheduling mutation leaves an affected member
-uninformed; no test asserts a behaviour the §2 model does not specify; the full suite runs in
-under 30s so it stays a pre-commit gate.
+`tests/helpers/family.ts` provides the standard cast — owner, admin, plain
+member, dependent, invited-inactive, removed, and an outsider — because
+multi-user bugs live in the members people forget.
+
+Gate at time of writing: `typecheck` ✅ `lint` ✅ `test` ✅ (508) `build` ✅
+`db:generate` ✅ `validate_migrations.py` ✅ (26 tables).
+
+---
+
+## 7. Still open
+
+- **Phase 9 — browser tests.** Two Playwright contexts (Dad and Teen) on one
+  event: Dad reschedules, Teen's view updates; Teen declines, Dad sees it. Plus
+  mobile screenshots of the RSVP control and conflict warning. Needs the
+  `live-test` skill.
+- **Conflict warnings are returned but not yet rendered.** The API reports
+  `conflicts` on create/update; `EventForm` does not display them.
+- **ICS `PARTSTAT`.** The feed does not yet carry attendance status.
+- **Recurring events.** Still unmodelled — every occurrence is a separate row.
+- **Push notifications.** `reminder_prefs.pushEnabled` exists but nothing sends.
+- **A `declined` attendee still sees the event.** Deliberate, but the calendar
+  does not visually distinguish it.

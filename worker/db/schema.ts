@@ -296,6 +296,10 @@ export const events = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
+    // Monotonic edit counter for optimistic concurrency. updatedAt cannot serve
+    // this: it has one-second granularity, so two members saving within the
+    // same second would both appear to hold the current version.
+    version: integer("version").notNull().default(1),
   },
   (t) => [
     index("idx_event_family_start").on(t.familyId, t.startAt),
@@ -313,6 +317,15 @@ export const eventAttendees = sqliteTable(
     memberId: text("member_id")
       .notNull()
       .references(() => familyMembers.id, { onDelete: "cascade" }),
+    // Attendance is a state, not just a tag: being invited is not the same as
+    // coming. Dependents (no Google account) are seeded 'accepted' — a small
+    // child does not RSVP, their guardian answers for them.
+    rsvp: text("rsvp", {
+      enum: ["invited", "accepted", "declined", "tentative"],
+    })
+      .notNull()
+      .default("invited"),
+    rsvpAt: integer("rsvp_at"),
   },
   (t) => [primaryKey({ columns: [t.eventId, t.memberId] })],
 );

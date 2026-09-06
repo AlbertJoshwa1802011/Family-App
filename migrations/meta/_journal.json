@@ -50,6 +50,20 @@
       "when": 1788648532508,
       "tag": "0006_brown_praxagora",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788723524982,
+      "tag": "0007_salty_sway",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788724359836,
+      "tag": "0008_modern_xorn",
+      "breakpoints": true
     }
   ]
 }

@@ -118,7 +118,12 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const db = getDb(c.env);
 
-  // Find user's first active family
+  // ?familyId= scopes the answer to a SPECIFIC family. Without it this returned
+  // whichever family the user happened to join first, so a member of two
+  // families got the wrong attendee picker and the event create then failed
+  // with invalid_member_ids. The param is optional to keep old clients working.
+  const requestedFamilyId = c.req.query("familyId");
+
   const membership = await db
     .select({ familyId: schema.familyMembers.familyId })
     .from(schema.familyMembers)
@@ -126,10 +131,14 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
       and(
         eq(schema.familyMembers.userId, userId),
         eq(schema.familyMembers.status, "active"),
+        ...(requestedFamilyId
+          ? [eq(schema.familyMembers.familyId, requestedFamilyId)]
+          : []),
       ),
     )
     .get();
 
+  // Asked about a family you are not an active member of → empty, never a peek.
   if (!membership) return c.json({ members: [] });
 
   const members = await db
