@@ -132,10 +132,10 @@ export function AssistantThread({
               >
                 <div
                   className={cn(
-                    "max-w-[85%] rounded-2xl px-3.5 py-2",
+                    "max-w-[85%] rounded-bubble px-3.5 py-2",
                     mine
-                      ? "rounded-br-md bg-vault-600 text-white"
-                      : "rounded-bl-md border border-line bg-surface text-fg",
+                      ? "lq lq-primary rounded-br-md"
+                      : "lq lq-flat rounded-bl-md text-fg",
                   )}
                 >
                   <p className="text-sm break-words whitespace-pre-wrap">{m.body}</p>
@@ -166,7 +166,7 @@ export function AssistantThread({
         )}
         {send.isPending && (
           <div className="mt-3 flex">
-            <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-3.5 py-2 text-sm text-fg-muted">
+            <div className="lq lq-flat rounded-bubble rounded-bl-md px-3.5 py-2 text-sm text-fg-muted">
               Thinking…
             </div>
           </div>
@@ -185,7 +185,7 @@ export function AssistantThread({
               type="button"
               onClick={() => send.mutate(s)}
               disabled={send.isPending}
-              className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-fg-muted hover:border-vault-500 hover:text-fg"
+              className="lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-medium text-fg-muted hover:text-fg"
             >
               {s}
             </button>
@@ -195,7 +195,7 @@ export function AssistantThread({
 
       <form
         onSubmit={handleSend}
-        className="flex items-center gap-2 border-t border-line bg-ink-950 pt-3"
+        className="flex items-center gap-2 pt-3"
       >
         <input
           type="text"
@@ -205,13 +205,13 @@ export function AssistantThread({
           aria-label="Message the assistant"
           maxLength={2000}
           disabled={!configured}
-          className="min-h-11 flex-1 rounded-full border border-line bg-surface px-4 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none disabled:opacity-50"
+          className="lq lq-field min-h-11 flex-1 rounded-full px-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none disabled:opacity-50"
         />
         <button
           type="submit"
           disabled={!configured || !draft.trim() || send.isPending}
           aria-label="Send"
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-vault-600 text-white transition-colors hover:bg-vault-500 disabled:opacity-40"
+          className="lq lq-raised lq-primary lq-press flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
         >
           <SendHorizontal className="size-5" />
         </button>
@@ -230,8 +230,10 @@ function ActionChip({
   onNavigate?: () => void;
 }) {
   const className = cn(
-    "block rounded-lg px-2 py-1 text-xs font-medium",
-    mine ? "bg-white/15 text-white" : "bg-vault-500/15 text-vault-300",
+    "block rounded-full px-2.5 py-1 text-xs font-semibold",
+    mine
+      ? "bg-white/20 text-white"
+      : "lq lq-flat lq-tint text-vault-300 [--lq-tint:var(--color-vault-400)]",
   );
   if (action.href) {
     return (

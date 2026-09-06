@@ -11,6 +11,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
 import { useAuth } from "../context/AuthContext";
@@ -26,7 +27,7 @@ interface DocumentSummary {
 function DocSkeleton() {
   return (
     <div className="flex min-h-14 items-center gap-3 px-4 py-3">
-      <Skeleton className="size-10 rounded-xl" />
+      <Skeleton className="size-10 rounded-full" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-3.5 w-2/3" />
         <Skeleton className="h-3 w-1/3" />
@@ -67,33 +68,33 @@ export function Documents() {
       <AppBar title="Documents" />
       <Page className="space-y-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-fg-subtle" />
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 z-1 size-4 -translate-y-1/2 text-fg-subtle" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, category, notes…"
             aria-label="Search documents"
-            className="w-full rounded-xl border border-line bg-surface py-3 pr-10 pl-10 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={`${inputCls} pr-10 pl-10`}
           />
           {search && (
             <button
               onClick={() => setSearch("")}
               aria-label="Clear search"
-              className="absolute top-1/2 right-3 -translate-y-1/2 text-fg-subtle hover:text-fg"
+              className="absolute top-1/2 right-3 z-1 -translate-y-1/2 text-fg-subtle hover:text-fg"
             >
               <X className="size-4" />
             </button>
           )}
         </div>
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <DocSkeleton key={i} />
             ))}
           </Card>
         ) : docs.length > 0 ? (
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             {docs.map((doc) => {
               const status = expiryStatus(doc.expiryDate);
               return (
@@ -101,15 +102,21 @@ export function Documents() {
                   key={doc.id}
                   to={`/documents/${doc.id}`}
                   leading={
-                    <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
+                    <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
                       <FileText className="size-5" aria-hidden="true" />
                     </span>
                   }
                   title={
-                    <span className="inline-flex items-center gap-1.5">
-                      {doc.title}
+                    // `text-overflow: ellipsis` only applies to inline text in
+                    // the overflowing block, so the title text carries its own
+                    // `truncate` rather than relying on ListItem's wrapper.
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate">{doc.title}</span>
                       {doc.visibility === "private" && (
-                        <Lock className="size-3.5 text-fg-subtle" aria-label="Private" />
+                        <Lock
+                          className="size-3.5 shrink-0 text-fg-subtle"
+                          aria-label="Private"
+                        />
                       )}
                     </span>
                   }

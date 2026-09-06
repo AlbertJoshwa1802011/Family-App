@@ -102,7 +102,7 @@ export function Chat() {
       <AppBar title={`${activeFamily?.name ?? "Family"} chat`} />
       {/* Full-height column: scrollable thread + composer, clearing the fixed
           bottom nav (~4.5rem) and the sticky app bar (3.5rem). */}
-      <div className="mx-auto flex h-[calc(100dvh-8rem)] max-w-md flex-col px-4">
+      <div className="mx-auto flex h-[calc(100dvh-10rem)] max-w-md flex-col px-4">
         <div className="flex-1 space-y-1 overflow-y-auto py-4 pb-2">
           {isLoading ? (
             <div className="space-y-3" aria-busy="true">
@@ -155,10 +155,10 @@ export function Chat() {
                     )}
                     <div
                       className={cn(
-                        "max-w-[75%] rounded-2xl px-3.5 py-2",
+                        "max-w-[75%] rounded-bubble px-3.5 py-2",
                         mine
-                          ? "rounded-br-md bg-vault-600 text-white"
-                          : "rounded-bl-md border border-line bg-surface text-fg",
+                          ? "lq lq-primary rounded-br-md"
+                          : "lq lq-flat rounded-bl-md text-fg",
                       )}
                     >
                       {!mine && !sameAuthorAsPrev && (
@@ -203,7 +203,7 @@ export function Chat() {
 
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-2 border-t border-line bg-ink-950 py-3"
+          className="flex items-center gap-2 py-3"
         >
           <input
             type="text"
@@ -212,13 +212,13 @@ export function Chat() {
             placeholder="Message your family…"
             aria-label="Message"
             maxLength={4000}
-            className="min-h-11 flex-1 rounded-full border border-line bg-surface px-4 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className="lq lq-field min-h-11 flex-1 rounded-full px-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
           <button
             type="submit"
             disabled={!draft.trim() || send.isPending}
             aria-label="Send message"
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-vault-600 text-white transition-colors hover:bg-vault-500 disabled:opacity-40"
+            className="lq lq-raised lq-primary lq-press flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
           >
             <SendHorizontal className="size-5" />
           </button>

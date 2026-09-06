@@ -52,7 +52,7 @@ function typeIcon(type: string) {
 function NotificationSkeleton() {
   return (
     <div className="flex items-start gap-3 px-4 py-3">
-      <Skeleton className="size-9 rounded-xl" />
+      <Skeleton className="size-9 rounded-full" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-3.5 w-2/3" />
         <Skeleton className="h-3 w-1/2" />
@@ -101,7 +101,7 @@ export function Notifications() {
       />
       <Page className="space-y-4">
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <NotificationSkeleton key={i} />
             ))}
@@ -113,17 +113,18 @@ export function Notifications() {
             description="Mentions, reminders from family, expiring documents and event alerts will show up here."
           />
         ) : (
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             {notifications.map((n) => {
               const Icon = typeIcon(n.type);
               const inner = (
                 <div className="flex items-start gap-3 px-4 py-3">
                   <span
                     className={cn(
-                      "flex size-9 shrink-0 items-center justify-center rounded-xl",
+                      "lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full",
+                      // read = plain glass, unread = teal-tinted glass
                       n.read
-                        ? "bg-white/5 text-fg-muted"
-                        : "bg-vault-500/15 text-vault-300",
+                        ? "text-fg-subtle"
+                        : "text-vault-300 [--lq-tint:var(--color-vault-400)]",
                     )}
                   >
                     <Icon className="size-5" />

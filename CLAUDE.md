@@ -116,6 +116,46 @@ All primary keys are **text UUIDs** generated in app code (`crypto.randomUUID()`
   Home, Docs, Calendar, Family, Settings. Tasks/Contacts are reached from the Dashboard
   "Quick access" row (keeps the nav uncluttered).
 
+### Liquid Glass design system (`src/index.css`)
+Every translucent surface is built from the same three ingredients, supplied by the
+**`.lq`** class: a tinted gradient fill, a 1px specular rim (`::before`, masked gradient
+border), and an inner sheen pooled at the top (`::after`, `z-index:-1`). Modifiers only
+re-point CSS variables — never re-implement the recipe:
+
+| Class | Use for |
+|---|---|
+| `.lq` | any glass surface (Card, Badge, chips) |
+| `.lq-chrome` | floating chrome: AppBar, BottomNav, Sheet (heavier blur, opaque enough to hide scrolled content) |
+| `.lq-raised` | lifted bubbles: FAB, primary Button, hero cards |
+| `.lq-flat` | dense list rows — drops `backdrop-filter` for scroll performance |
+| `.lq-tint` + `--lq-tint` | colour a surface with any CSS colour |
+| `.lq-primary` / `.lq-danger` / `.lq-white` | coloured button/pill skins |
+| `.lq-field` | inputs — inverts the recipe so light pools at the *bottom* (recessed) |
+| `.lq-press` | liquid press/hover response on tappables |
+
+Rules that have already bitten us:
+1. **The whole `.lq` block lives in `@layer components`.** Unlayered CSS beats every
+   Tailwind utility regardless of specificity — when `.lq` was unlayered it silently
+   overrode `absolute` on the nav's sliding pill and every `bg-*` on a glass element.
+2. **`backdrop-filter` creates a stacking context that paints at the positioned-descendant
+   level.** A glass field will cover an absolutely-positioned sibling icon that precedes it
+   in the DOM (search magnifiers, clear buttons) — give those overlays an explicit `z-1`.
+3. **Don't put a `bg-*` utility on an `.lq` element.** Use `--lq-bg` / `--lq-tint` instead,
+   or the two backgrounds fight.
+4. **`text-overflow: ellipsis` needs inline text.** A `flex`/`inline-flex` title inside
+   ListItem's `truncate` wrapper hard-clips mid-word; put `truncate` on the text node.
+5. Inputs need `[color-scheme:dark]` (already in `inputCls`) or native date-picker glyphs
+   render black on black.
+6. Absolutely-positioned children of an `.lq` element must set an explicit `left`/`right` —
+   the static position is not reliably 0 (the Settings switch knob overflowed its track).
+
+Shared field styling is `inputCls` from **`src/lib/fieldCls.ts`** (kept out of the component
+file so pages importing it don't cross a react-refresh boundary). `src/components/ui/`
+also has `Field`/`Input`/`Textarea`/`Select`, `Chip`, `SegmentedControl` and `Sheet`.
+Motion uses `--ease-liquid` / `--ease-spring`; `.bubble-in` is the entrance animation.
+The ambient drifting colour orbs behind everything are `body::before` — glass needs
+something to refract, so don't remove them.
+
 ### Events: `type` vs `status` are orthogonal
 - `type` = nature: `gathering | appointment | milestone | other` (permanent).
 - `status` = lifecycle: `active | cancelled | trashed`. Cancelled stays visible (strikethrough +

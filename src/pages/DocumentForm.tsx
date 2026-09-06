@@ -6,6 +6,7 @@ import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -47,9 +48,6 @@ interface FormState {
   visibility: "family" | "private";
   subjectMemberId: string;
 }
-
-const inputCls =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 export function DocumentForm() {
   const { id } = useParams<{ id: string }>();
@@ -204,10 +202,10 @@ export function DocumentForm() {
                     setSuggestion(null);
                     set("category", value);
                   }}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                     form.category === value
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10"
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg"
                   }`}
                 >
                   {label}
@@ -221,7 +219,7 @@ export function DocumentForm() {
                   set("category", suggestion);
                   setSuggestion(null);
                 }}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-vault-500/40 bg-vault-500/10 px-3 py-1.5 text-xs font-medium text-vault-300 hover:bg-vault-500/20"
+                className="lq lq-flat lq-tint lq-press mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold text-vault-300 [--lq-tint:var(--color-vault-400)]"
               >
                 <Sparkles className="size-3.5" />
                 Suggested: {CATEGORIES.find((c) => c.value === suggestion)?.label ?? suggestion} — tap to apply
@@ -265,10 +263,10 @@ export function DocumentForm() {
               <button
                 type="button"
                 onClick={() => set("visibility", "family")}
-                className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-sm transition-colors ${
+                className={`lq lq-flat lq-press flex items-center justify-center gap-1.5 rounded-full px-3 py-3 text-[13px] font-semibold whitespace-nowrap ${
                   form.visibility === "family"
-                    ? "border-vault-500/50 bg-vault-500/10 text-vault-300"
-                    : "border-line text-fg-muted hover:bg-white/5"
+                    ? "lq-primary text-white"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 <Users className="size-4 shrink-0" />
@@ -277,10 +275,10 @@ export function DocumentForm() {
               <button
                 type="button"
                 onClick={() => set("visibility", "private")}
-                className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-sm transition-colors ${
+                className={`lq lq-flat lq-press flex items-center justify-center gap-1.5 rounded-full px-3 py-3 text-[13px] font-semibold whitespace-nowrap ${
                   form.visibility === "private"
-                    ? "border-vault-500/50 bg-vault-500/10 text-vault-300"
-                    : "border-line text-fg-muted hover:bg-white/5"
+                    ? "lq-primary text-white"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 <Lock className="size-4 shrink-0" />
@@ -298,10 +296,10 @@ export function DocumentForm() {
                 <button
                   type="button"
                   onClick={() => set("subjectMemberId", "")}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                     !form.subjectMemberId
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10"
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg"
                   }`}
                 >
                   Whole family
@@ -311,10 +309,10 @@ export function DocumentForm() {
                     key={m.id}
                     type="button"
                     onClick={() => set("subjectMemberId", m.id)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                    className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                       form.subjectMemberId === m.id
-                        ? "bg-vault-600 text-white"
-                        : "bg-white/5 text-fg-muted hover:bg-white/10"
+                        ? "lq-primary text-white"
+                        : "text-fg-muted hover:text-fg"
                     }`}
                   >
                     {m.displayName ?? m.name ?? m.email ?? "Member"}

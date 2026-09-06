@@ -21,6 +21,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
@@ -241,7 +242,7 @@ function TreeList({
   walk(forest);
 
   return (
-    <Card className="divide-y divide-line overflow-hidden">
+    <Card className="divide-y divide-white/8 overflow-hidden">
       {rows.map(({ node }) => (
         <TaskRow
           key={node.id}
@@ -397,10 +398,10 @@ export function Tasks() {
               onClick={() => setView(chip.id)}
               aria-pressed={view === chip.id}
               className={cn(
-                "min-h-9 shrink-0 rounded-full border px-3 text-xs font-medium transition-colors",
+                "lq lq-flat lq-press min-h-9 shrink-0 rounded-full px-3.5 text-xs font-semibold",
                 view === chip.id
-                  ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                  : "border-line bg-surface text-fg-muted hover:text-fg",
+                  ? "lq-primary text-white"
+                  : "text-fg-muted hover:text-fg",
               )}
             >
               {chip.label}
@@ -409,21 +410,21 @@ export function Tasks() {
         </div>
 
         <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-fg-subtle" />
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 z-1 size-4 -translate-y-1/2 text-fg-subtle" />
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks and subtasks…"
             aria-label="Search tasks"
-            className="w-full rounded-xl border border-line bg-surface py-3 pr-10 pl-10 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={`${inputCls} pr-10 pl-10`}
           />
           {search && (
             <button
               type="button"
               onClick={() => setSearch("")}
               aria-label="Clear search"
-              className="absolute top-1/2 right-3 -translate-y-1/2 text-fg-subtle hover:text-fg"
+              className="absolute top-1/2 right-3 z-1 -translate-y-1/2 text-fg-subtle hover:text-fg"
             >
               <X className="size-4" />
             </button>
@@ -431,7 +432,7 @@ export function Tasks() {
         </div>
 
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <TaskSkeleton key={i} />
             ))}
@@ -497,7 +498,7 @@ export function Tasks() {
                 pending={toggle.isPending}
               />
             ) : (
-              <Card className="divide-y divide-line overflow-hidden">
+              <Card className="divide-y divide-white/8 overflow-hidden">
                 {viewed.map((t) => (
                   <TaskRow
                     key={t.id}
@@ -569,7 +570,7 @@ function PrioritySections({
             <h4 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
               {g.label} ({items.length})
             </h4>
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {items.map((t) => (
                 <TaskRow
                   key={t.id}
@@ -665,7 +666,7 @@ export function TaskComposer({
             onChange={(e) => setTitle(e.target.value)}
             placeholder={parent ? "e.g. Scan the photo page" : "e.g. Renew car insurance"}
             autoFocus
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -677,7 +678,7 @@ export function TaskComposer({
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              className="w-full rounded-xl border border-line bg-ink-950 px-3 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+              className={inputCls}
             />
           </div>
           <div>
@@ -687,7 +688,7 @@ export function TaskComposer({
             <select
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
-              className="w-full rounded-xl border border-line bg-ink-950 px-3 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+              className={inputCls}
             >
               <option value="">Anyone</option>
               {members.map((m) => (
@@ -710,12 +711,12 @@ export function TaskComposer({
                 onClick={() => setPriority(p)}
                 aria-pressed={priority === p}
                 className={cn(
-                  "min-h-9 flex-1 rounded-xl border text-sm font-medium",
+                  "lq lq-flat lq-press min-h-10 flex-1 rounded-full text-sm font-semibold",
                   priority === p
                     ? p === "high"
-                      ? "border-danger/40 bg-danger/15 text-danger"
-                      : "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                    : "border-line text-fg-muted",
+                      ? "lq-danger text-danger"
+                      : "lq-primary text-white"
+                    : "text-fg-muted",
                 )}
               >
                 {priorityLabel(p)}

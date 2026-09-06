@@ -10,21 +10,21 @@
   --color-vault-700: #0f766e;
 
   /* Surfaces (dark) */
-  --color-ink-950: #070b14;
-  --color-ink-900: #0b1220;
+  --color-ink-950: #05070f;
+  --color-ink-900: #0a1020;
   --color-ink-800: #111a2e;
   --color-ink-700: #1a2540;
   --color-surface: #111a2e;
   --color-surface-2: #16213c;
 
   /* Text */
-  --color-fg: #e6edf6;
-  --color-fg-muted: #94a3b8;
-  --color-fg-subtle: #64748b;
+  --color-fg: #eaf1fa;
+  --color-fg-muted: #9db0c7;
+  --color-fg-subtle: #6b809b;
 
   /* Borders */
-  --color-line: #ffffff14;
-  --color-line-strong: #ffffff24;
+  --color-line: #ffffff1a;
+  --color-line-strong: #ffffff2e;
 
   /* States */
   --color-success: #34d399;
@@ -32,13 +32,219 @@
   --color-danger: #f87171;
   --color-info: #60a5fa;
 
-  /* Radius & elevation */
-  --radius-card: 16px;
-  --shadow-card: 0 1px 2px #0006, 0 10px 30px -14px #000a;
+  /* Bubble radii — squircle-ish, Apple-scale */
+  --radius-card: 24px;
+  --radius-bubble: 24px;
+  --radius-bubble-lg: 32px;
+  --radius-bubble-xl: 40px;
+
+  --shadow-card: 0 1px 1px #ffffff14 inset, 0 8px 32px -12px #000c;
   --shadow-pop: 0 -8px 40px -8px #000a;
 
-  /* Motion */
+  /* Motion — Apple-ish springs */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-liquid: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ---------------------------------------------------------------------------
+   Liquid Glass primitives
+   ---------------------------------------------------------------------------
+   Every translucent surface in the app is built from three stacked ingredients:
+     1. a tinted, low-alpha gradient fill          (the "liquid")
+     2. a 1px specular rim, bright top-left        (light catching the edge)
+     3. an inner sheen pooled at the top           (light refracting inside)
+   `.lq` supplies all three; modifiers tune blur/tint. Keep the rim on ::before
+   and the sheen on ::after — several components rely on that split.
+--------------------------------------------------------------------------- */
+
+:root {
+  --lq-fill: linear-gradient(
+    160deg,
+    #ffffff1c 0%,
+    #ffffff0d 42%,
+    #ffffff05 78%,
+    #ffffff0f 100%
+  );
+  --lq-rim: linear-gradient(
+    140deg,
+    #ffffff66 0%,
+    #ffffff1a 26%,
+    #ffffff00 52%,
+    #ffffff0d 78%,
+    #ffffff3d 100%
+  );
+  --lq-sheen: radial-gradient(
+    130% 80% at 50% -22%,
+    #ffffff26 0%,
+    #ffffff08 42%,
+    transparent 68%
+  );
+  --lq-shadow: 0 10px 34px -14px #000d, 0 2px 8px -4px #0009;
+  --lq-blur: 18px;
+  --lq-bg: #0d1526a6;
+  --lq-tint: #ffffff;
+}
+
+/* Layered so Tailwind utilities still win: an unlayered `.lq` would beat
+   `absolute`, `bg-*` and friends no matter their specificity. */
+@layer components {
+  .lq {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--lq-bg);
+    background-image: var(--lq-fill);
+    box-shadow: var(--lq-shadow);
+    -webkit-backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+    backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+  }
+
+  /* 1px specular rim, drawn as a masked gradient border so it can be a gradient */
+  .lq::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--lq-rim);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* inner sheen — sits above the fill, below the content */
+  .lq::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--lq-sheen);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Floating chrome (app bar, nav, sheets): heavier blur, deeper shadow */
+  .lq-chrome {
+    --lq-blur: 34px;
+    --lq-shadow: 0 8px 40px -10px #000f, 0 1px 0 #ffffff14 inset;
+    --lq-bg: #060a14e0;
+    --lq-rim: linear-gradient(
+      140deg,
+      #ffffff59 0%,
+      #ffffff1a 30%,
+      #ffffff0a 58%,
+      #ffffff14 78%,
+      #ffffff40 100%
+    );
+  }
+
+  /* Raised bubble (FAB, primary actions): brighter rim, lifted shadow */
+  .lq-raised {
+    --lq-shadow: 0 14px 40px -12px #000f, 0 4px 12px -6px #000c;
+    --lq-rim: linear-gradient(
+      140deg,
+      #ffffff8c 0%,
+      #ffffff33 24%,
+      #ffffff00 54%,
+      #ffffff1a 80%,
+      #ffffff59 100%
+    );
+  }
+
+  /* Flat variant for dense lists — skips backdrop-filter for scroll performance */
+  .lq-flat {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    --lq-bg: #101a2ecc;
+  }
+
+  /* Tinted glass — pass any color via --lq-tint */
+  .lq-tint {
+    background-image: linear-gradient(
+        160deg,
+        color-mix(in oklab, var(--lq-tint) 30%, transparent) 0%,
+        color-mix(in oklab, var(--lq-tint) 12%, transparent) 55%,
+        color-mix(in oklab, var(--lq-tint) 4%, transparent) 100%
+      ),
+      var(--lq-fill);
+  }
+
+  /* ---------------------------------------------------------------------------
+     Coloured glass skins. Each only re-points the `.lq` variables, so the rim,
+     sheen and blur recipe stays identical across every tone.
+  --------------------------------------------------------------------------- */
+  .lq-primary {
+    --lq-bg: #0d9488e0;
+    --lq-fill: linear-gradient(
+      160deg,
+      #ffffff59 0%,
+      #ffffff1f 40%,
+      #00000014 72%,
+      #ffffff1a 100%
+    );
+    --lq-shadow: 0 12px 32px -12px #14b8a6cc, 0 2px 10px -6px #000c;
+    color: #fff;
+  }
+  @media (hover: hover) {
+    .lq-primary.lq-press:hover {
+      --lq-bg: #14b8a6e6;
+    }
+  }
+
+  .lq-danger {
+    --lq-bg: #7f1d1d5c;
+    --lq-fill: linear-gradient(160deg, #f8717140 0%, #f871711a 48%, transparent 100%);
+    --lq-shadow: 0 10px 28px -14px #f8717166, 0 2px 8px -4px #0009;
+  }
+  @media (hover: hover) {
+    .lq-danger.lq-press:hover {
+      --lq-bg: #991b1b70;
+    }
+  }
+
+  .lq-white {
+    --lq-bg: #ffffffed;
+    --lq-fill: linear-gradient(160deg, #ffffff 0%, #ffffffcc 55%, #f1f5f9e6 100%);
+    --lq-shadow: 0 12px 32px -14px #ffffff8c, 0 2px 10px -6px #0009;
+    --lq-rim: linear-gradient(140deg, #ffffff 0%, #ffffff80 30%, #94a3b833 70%, #ffffffb3 100%);
+  }
+
+  /* Field glass — recessed rather than raised: the light sits at the bottom. */
+  .lq-field {
+    --lq-bg: #060b1699;
+    --lq-fill: linear-gradient(160deg, #00000026 0%, #ffffff08 62%, #ffffff14 100%);
+    --lq-rim: linear-gradient(140deg, #ffffff2e 0%, #ffffff0d 40%, #ffffff1f 100%);
+    --lq-shadow: inset 0 1px 3px #0009, 0 1px 0 #ffffff0f;
+    --lq-blur: 10px;
+  }
+  .lq-field:focus-within {
+    --lq-rim: linear-gradient(140deg, #2dd4bfb3 0%, #14b8a659 45%, #2dd4bf8c 100%);
+    --lq-shadow: inset 0 1px 3px #0009, 0 0 0 3px #14b8a629;
+  }
+
+  /* Interactive bubbles: liquid press + hover lift */
+  .lq-press {
+    transition:
+      transform 0.42s var(--ease-liquid),
+      box-shadow 0.42s var(--ease-liquid),
+      background-color 0.25s var(--ease-out);
+  }
+  .lq-press:active {
+    transform: scale(0.965);
+    --lq-shadow: 0 4px 14px -8px #000d;
+  }
+  @media (hover: hover) {
+    .lq-press:hover {
+      --lq-bg: #17233cbf;
+    }
+  }
 }
 
 html,
@@ -64,16 +270,72 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Subtle premium backdrop glow */
+/* ---------------------------------------------------------------------------
+   Ambient light field — slow-drifting colour orbs that the glass refracts.
+   Fixed + behind everything, so blurred surfaces always have something to pick
+   up. `-z-10` on the layer keeps it out of the content stacking context.
+--------------------------------------------------------------------------- */
 body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  background:
+    radial-gradient(38% 30% at 18% 8%, #14b8a63d, transparent 68%),
+    radial-gradient(34% 28% at 88% 18%, #6366f138, transparent 70%),
+    radial-gradient(42% 32% at 50% 96%, #0f766e33, transparent 72%),
+    radial-gradient(30% 24% at 82% 72%, #db277733, transparent 70%);
+  filter: blur(20px);
+  animation: orb-drift 26s var(--ease-out) infinite alternate;
+  pointer-events: none;
+}
+
+/* fine grain so large blurred areas don't band */
+body::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(60% 50% at 50% -10%, #0f766e33, transparent 70%),
-    radial-gradient(40% 30% at 90% 10%, #14b8a61f, transparent 70%);
+  opacity: 0.035;
   pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes orb-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-3%, 2%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(2%, -3%, 0) scale(1.03);
+  }
+}
+
+/* Bubble entrance — content rises and settles like a droplet */
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.bubble-in {
+  animation: bubble-in 0.5s var(--ease-spring) both;
+}
+
+/* Slow specular sweep across a highlighted bubble */
+@keyframes lq-sweep {
+  0% {
+    transform: translateX(-120%) rotate(8deg);
+  }
+  100% {
+    transform: translateX(220%) rotate(8deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -81,6 +343,7 @@ body::before {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
@@ -103,18 +366,13 @@ body::before {
 .skeleton {
   position: relative;
   overflow: hidden;
-  background: var(--color-surface-2);
+  background: #ffffff0f;
 }
 .skeleton::after {
   content: "";
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    #ffffff14,
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, #ffffff1f, transparent);
   animation: shimmer 1.4s infinite;
 }

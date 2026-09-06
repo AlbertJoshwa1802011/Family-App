@@ -3,13 +3,14 @@ import { cn } from "../../lib/cn";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "vault";
 
+// Tinted glass pills — the fill is a gradient so each badge reads as a droplet.
 const tones: Record<Tone, string> = {
-  neutral: "bg-white/5 text-fg-muted border-line",
-  success: "bg-success/15 text-success border-success/25",
-  warning: "bg-warning/15 text-warning border-warning/25",
-  danger: "bg-danger/15 text-danger border-danger/25",
-  info: "bg-info/15 text-info border-info/25",
-  vault: "bg-vault-500/15 text-vault-300 border-vault-500/25",
+  neutral: "text-fg-muted [--lq-tint:var(--color-fg-subtle)]",
+  success: "text-success [--lq-tint:var(--color-success)]",
+  warning: "text-warning [--lq-tint:var(--color-warning)]",
+  danger: "text-danger [--lq-tint:var(--color-danger)]",
+  info: "text-info [--lq-tint:var(--color-info)]",
+  vault: "text-vault-300 [--lq-tint:var(--color-vault-400)]",
 };
 
 export function Badge({
@@ -24,7 +25,10 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+        "lq lq-flat lq-tint inline-flex items-center gap-1 rounded-full px-2.5 py-0.5",
+        "[--lq-bg:#080e1acc]",
+        "text-xs font-semibold whitespace-nowrap",
+        "shadow-[0_2px_8px_-4px_#0009]",
         tones[tone],
         className,
       )}

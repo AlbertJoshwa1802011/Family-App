@@ -8,6 +8,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -23,7 +24,7 @@ interface ContactSummary {
 function ContactSkeleton() {
   return (
     <div className="flex min-h-14 items-center gap-3 px-4 py-3">
-      <Skeleton className="size-10 rounded-xl" />
+      <Skeleton className="size-10 rounded-full" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-3.5 w-1/2" />
         <Skeleton className="h-3 w-1/3" />
@@ -52,7 +53,7 @@ export function Contacts() {
       <AppBar title="Emergency contacts" back />
       <Page>
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <ContactSkeleton key={i} />
             ))}
@@ -72,11 +73,11 @@ export function Contacts() {
             }
           />
         ) : (
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             {contacts.map((c) => (
               <div key={c.id} className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
+                  <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
                     <ContactIcon className="size-5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -133,8 +134,6 @@ export function Contacts() {
   );
 }
 
-const fieldCls =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 function ContactComposer({
   familyId,
@@ -194,7 +193,7 @@ function ContactComposer({
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             placeholder="e.g. Dr. Rivera"
             autoFocus
-            className={fieldCls}
+            className={inputCls}
           />
         </div>
         <div>
@@ -208,7 +207,7 @@ function ContactComposer({
               setForm((f) => ({ ...f, relationship: e.target.value }))
             }
             placeholder="e.g. Pediatrician"
-            className={fieldCls}
+            className={inputCls}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -221,7 +220,7 @@ function ContactComposer({
               value={form.phone}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               placeholder="+1 555 010 2000"
-              className={fieldCls}
+              className={inputCls}
             />
           </div>
           <div>
@@ -233,7 +232,7 @@ function ContactComposer({
               value={form.email}
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               placeholder="name@example.com"
-              className={fieldCls}
+              className={inputCls}
             />
           </div>
         </div>

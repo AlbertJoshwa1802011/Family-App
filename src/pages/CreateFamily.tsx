@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Home, LogOut, ShieldCheck } from "lucide-react";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -45,7 +46,7 @@ export function CreateFamily() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-10">
       <div className="mb-8 text-center">
-        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-vault-500/15 text-vault-300">
+        <span className="lq lq-tint lq-raised mx-auto flex size-14 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
           <Home className="size-7" aria-hidden="true" />
         </span>
         <h1 className="mt-4 text-2xl font-bold text-white">
@@ -72,7 +73,7 @@ export function CreateFamily() {
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. The Sharma Family"
             autoFocus
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
           {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
         </Card>
