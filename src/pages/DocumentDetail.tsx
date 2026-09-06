@@ -19,6 +19,7 @@ import { Badge } from "../components/ui/Badge";
 import { Avatar } from "../components/ui/Avatar";
 import { ListItem } from "../components/ui/ListItem";
 import { Skeleton } from "../components/ui/Skeleton";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
 import { useAuth } from "../context/AuthContext";
@@ -154,7 +155,7 @@ export function DocumentDetail() {
       <Page className="space-y-5">
         <Card className="p-5">
           <div className="flex items-start gap-4">
-            <span className="flex size-12 items-center justify-center rounded-2xl bg-vault-500/10 text-vault-300">
+            <span className="lq lq-tint flex size-12 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
               <FileText className="size-6" aria-hidden="true" />
             </span>
             <div className="min-w-0 flex-1">
@@ -195,7 +196,7 @@ export function DocumentDetail() {
             {doc.currentFileId ? (
               <a
                 href={`/api/documents/${doc.id}/files/${doc.currentFileId}/download`}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 text-sm font-medium text-fg hover:border-line-strong"
+                className="lq lq-press inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
               >
                 <Download className="size-4" />
                 Download
@@ -239,7 +240,7 @@ export function DocumentDetail() {
           />
         </Card>
 
-        <Card className="divide-y divide-line overflow-hidden">
+        <Card className="divide-y divide-white/8 overflow-hidden">
           <ListItem
             title="Expiry date"
             trailing={
@@ -347,7 +348,7 @@ function RemindSomeone({ doc }: { doc: DocumentDetailPayload }) {
             onChange={(e) => setNote(e.target.value)}
             placeholder="Optional note — e.g. please renew this before Friday"
             maxLength={500}
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
           {candidates.length === 0 ? (
             <p className="text-xs text-fg-subtle">
@@ -361,7 +362,7 @@ function RemindSomeone({ doc }: { doc: DocumentDetailPayload }) {
                   key={m.id}
                   disabled={remind.isPending}
                   onClick={() => remind.mutate(m)}
-                  className="rounded-full bg-white/5 px-3.5 py-1.5 text-xs font-semibold text-fg-muted transition-colors hover:bg-vault-600 hover:text-white disabled:opacity-50"
+                  className="lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold text-fg-muted hover:text-fg disabled:opacity-50"
                 >
                   {m.name ?? m.email ?? "Member"}
                 </button>
@@ -421,7 +422,7 @@ function Comments({ docId }: { docId: string }) {
       <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
         Notes & comments {comments.length > 0 && `(${comments.length})`}
       </h3>
-      <Card className="divide-y divide-line overflow-hidden">
+      <Card className="divide-y divide-white/8 overflow-hidden">
         {comments.map((cm) => (
           <div key={cm.id} className="group flex items-start gap-3 px-4 py-3">
             <Avatar
@@ -474,7 +475,7 @@ function Comments({ docId }: { docId: string }) {
             placeholder="Add a note — renewal steps, where the original is…"
             aria-label="Add a comment"
             maxLength={2000}
-            className="min-h-10 flex-1 rounded-xl border border-line bg-ink-950 px-3.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className="lq lq-field min-h-10 flex-1 rounded-full px-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
           <Button type="submit" size="md" loading={post.isPending} disabled={!draft.trim()}>
             Post
@@ -502,7 +503,7 @@ function FileVersions({ docId }: { docId: string }) {
       <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
         Files & versions
       </h3>
-      <Card className="divide-y divide-line overflow-hidden">
+      <Card className="divide-y divide-white/8 overflow-hidden">
         {files.map((f) => (
           <ListItem
             key={f.id}

@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
+/** Primary action bubble. Clears the floating bottom nav. */
 export function Fab({
   icon: Icon,
   label,
@@ -16,14 +17,13 @@ export function Fab({
       {...props}
       aria-label={label}
       className={cn(
-        "fixed right-4 bottom-24 z-30 flex size-14 items-center justify-center rounded-full",
-        "bg-vault-600 text-white shadow-[0_10px_30px_-8px_var(--color-vault-600)]",
-        "transition-transform duration-150 ease-out active:scale-90",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
+        "fixed right-5 bottom-28 z-30 flex size-15 items-center justify-center rounded-full",
+        "lq lq-raised lq-primary lq-press",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-300 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         className,
       )}
     >
-      <Icon className="size-6" aria-hidden="true" />
+      <Icon className="size-6.5" strokeWidth={2.2} aria-hidden="true" />
     </button>
   );
 }

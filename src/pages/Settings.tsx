@@ -57,7 +57,7 @@ function ReminderPrefsCard() {
   };
 
   return (
-    <Card className="divide-y divide-line overflow-hidden">
+    <Card className="divide-y divide-white/8 overflow-hidden">
       <ListItem
         leading={<Mail className="size-5 text-fg-muted" />}
         title="Email reminders"
@@ -71,13 +71,14 @@ function ReminderPrefsCard() {
             onClick={() => save.mutate({ emailEnabled: !prefs.emailEnabled })}
             className={cn(
               "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
-              prefs.emailEnabled ? "bg-vault-600" : "bg-white/10",
+              prefs.emailEnabled ? "lq lq-primary" : "lq lq-field",
             )}
           >
             <span
               className={cn(
-                "absolute top-0.5 size-5 rounded-full bg-white transition-transform",
-                prefs.emailEnabled ? "translate-x-5" : "translate-x-0.5",
+                "absolute top-0.5 left-0.5 size-5 rounded-full bg-white",
+                "transition-transform duration-300 ease-[var(--ease-liquid)]",
+                prefs.emailEnabled ? "translate-x-5" : "translate-x-0",
               )}
             />
           </button>
@@ -97,10 +98,8 @@ function ReminderPrefsCard() {
                 disabled={save.isPending}
                 onClick={() => toggleWindow(w)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
-                  on
-                    ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                    : "border-line text-fg-muted hover:bg-white/5",
+                  "lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold disabled:opacity-50",
+                  on ? "lq-primary text-white" : "text-fg-muted hover:text-fg",
                 )}
               >
                 {w}d
@@ -144,7 +143,7 @@ function CalendarFeedCard() {
       {feedUrl ? (
         <>
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-lg bg-ink-950 px-3 py-2 text-xs text-fg-muted">
+            <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
               {feedUrl}
             </code>
             <Button
@@ -227,7 +226,7 @@ export function Settings() {
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Notifications
           </h3>
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             <ListItem
               to="/notifications"
               leading={<Bell className="size-5 text-fg-muted" />}
@@ -241,7 +240,7 @@ export function Settings() {
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             About
           </h3>
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             <ListItem
               leading={<Info className="size-5 text-fg-muted" />}
               title="Version"

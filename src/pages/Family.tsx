@@ -19,6 +19,7 @@ import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -122,8 +123,8 @@ export function FamilyPage() {
           <div className="flex items-center gap-1">
             {canInvite && (
               <Button
-                size="md"
-                leadingIcon={<UserPlus className="size-4" />}
+                size="sm"
+                leadingIcon={<UserPlus className="size-3.5" />}
                 onClick={() => setInviteOpen((v) => !v)}
               >
                 Invite
@@ -151,10 +152,10 @@ export function FamilyPage() {
                 <button
                   key={f.id}
                   onClick={() => setActiveFamilyId(f.id)}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                     f.id === familyId
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10"
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg"
                   }`}
                 >
                   {f.name}
@@ -190,7 +191,7 @@ export function FamilyPage() {
             Members
           </h3>
           {membersLoading ? (
-            <Card className="divide-y divide-line">
+            <Card className="divide-y divide-white/8">
               {Array.from({ length: 3 }).map((_, i) => (
                 <MemberSkeleton key={i} />
               ))}
@@ -212,7 +213,7 @@ export function FamilyPage() {
               }
             />
           ) : (
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {activeMembers.map((m) => (
                 <div key={m.id} className="flex items-center">
                   <Link
@@ -278,13 +279,13 @@ export function FamilyPage() {
               <Activity className="size-3.5" />
               Recent activity
             </h3>
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {activities.slice(0, 10).map((a) => (
                 <div
                   key={a.id}
                   className="flex min-h-12 items-start gap-3 px-4 py-3"
                 >
-                  <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-vault-500/10">
+                  <div className="lq lq-flat lq-tint mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full [--lq-tint:var(--color-vault-400)]">
                     <Activity className="size-3.5 text-vault-400" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -356,7 +357,7 @@ function InviteCard({
           that email, and expires in 7 days.
         </p>
         <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg bg-ink-950 px-3 py-2 text-xs text-fg-muted">
+          <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
             {inviteLink}
           </code>
           <Button
@@ -393,7 +394,7 @@ function InviteCard({
             onChange={(e) => setEmail(e.target.value)}
             placeholder="family.member@example.com"
             autoFocus
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div>
@@ -404,10 +405,10 @@ function InviteCard({
                 key={r}
                 type="button"
                 onClick={() => setRole(r)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                   role === r
-                    ? "bg-vault-600 text-white"
-                    : "bg-white/5 text-fg-muted hover:bg-white/10"
+                    ? "lq-primary text-white"
+                    : "text-fg-muted hover:text-fg"
                 }`}
               >
                 {ROLE_LABELS[r]}
@@ -489,7 +490,7 @@ function AddDependentCard({
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="e.g. Ella"
             autoFocus
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div>
@@ -500,7 +501,7 @@ function AddDependentCard({
             type="date"
             value={dateOfBirth}
             onChange={(e) => setDateOfBirth(e.target.value)}
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         {error && <p className="text-xs text-danger">{error}</p>}

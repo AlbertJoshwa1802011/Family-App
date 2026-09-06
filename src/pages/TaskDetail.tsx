@@ -15,6 +15,7 @@ import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
@@ -212,12 +213,12 @@ export function TaskDetailPage() {
             </h3>
           </div>
           {nested.length === 0 && !adding ? (
-            <p className="rounded-2xl border border-line px-4 py-3 text-sm text-fg-subtle">
+            <p className="lq rounded-bubble px-4 py-3 text-sm text-fg-subtle">
               No subtasks yet. Break this into smaller steps so it stays clear even
               when the family list gets long.
             </p>
           ) : (
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {nested.map((n) => (
                 <Link
                   key={n.id}
@@ -345,7 +346,7 @@ function TaskEditFields({
 
   return (
     <form
-      className="space-y-3 border-t border-line pt-3"
+      className="space-y-3 border-t border-white/8 pt-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (!title.trim()) return;
@@ -366,7 +367,7 @@ function TaskEditFields({
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+          className={inputCls}
         />
       </div>
       <div>
@@ -377,7 +378,7 @@ function TaskEditFields({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+          className={`${inputCls} resize-none`}
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -389,7 +390,7 @@ function TaskEditFields({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="w-full rounded-xl border border-line bg-ink-950 px-3 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div>
@@ -399,7 +400,7 @@ function TaskEditFields({
           <select
             value={assignee}
             onChange={(e) => setAssignee(e.target.value)}
-            className="w-full rounded-xl border border-line bg-ink-950 px-3 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           >
             <option value="">Anyone</option>
             {members.map((m) => (
@@ -422,12 +423,12 @@ function TaskEditFields({
               onClick={() => setPriority(p)}
               aria-pressed={priority === p}
               className={cn(
-                "min-h-9 flex-1 rounded-xl border text-sm font-medium",
+                "lq lq-flat lq-press min-h-10 flex-1 rounded-full text-sm font-semibold",
                 priority === p
                   ? p === "high"
-                    ? "border-danger/40 bg-danger/15 text-danger"
-                    : "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                  : "border-line text-fg-muted",
+                    ? "lq-danger text-danger"
+                    : "lq-primary text-white"
+                  : "text-fg-muted",
               )}
             >
               {priorityLabel(p)}

@@ -108,7 +108,7 @@ export function CalendarPage() {
       <AppBar title="Calendar" />
       <Page className="space-y-6">
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 5 }).map((_, i) => (
               <EventSkeleton key={i} />
             ))}
@@ -121,7 +121,7 @@ export function CalendarPage() {
             action={
               <button
                 onClick={() => navigate("/calendar/events/new")}
-                className="inline-flex items-center gap-2 rounded-full bg-vault-600 px-5 py-2.5 text-sm font-semibold text-white"
+                className="lq lq-raised lq-primary lq-press inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold"
               >
                 <Plus className="size-4" />
                 Add event
@@ -134,7 +134,7 @@ export function CalendarPage() {
               <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
                 {formatMonthYear(monthEvents[0].startAt)}
               </h3>
-              <Card className="divide-y divide-line overflow-hidden">
+              <Card className="divide-y divide-white/8 overflow-hidden">
                 {monthEvents.map((ev) => (
                   <EventRow key={ev.id} event={ev} />
                 ))}

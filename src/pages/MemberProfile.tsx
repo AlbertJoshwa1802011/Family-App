@@ -153,7 +153,7 @@ export function MemberProfile() {
               description={`Documents assigned to ${displayName} (via "Belongs to" when adding a document) will appear here.`}
             />
           ) : (
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {docs.map((doc) => {
                 const status = expiryStatus(doc.expiryDate);
                 return (
@@ -161,7 +161,7 @@ export function MemberProfile() {
                     key={doc.id}
                     to={`/documents/${doc.id}`}
                     leading={
-                      <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
+                      <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
                         <FileText className="size-5" aria-hidden="true" />
                       </span>
                     }

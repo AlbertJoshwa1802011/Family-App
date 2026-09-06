@@ -149,6 +149,25 @@ describe("eventTypeColor", () => {
     expect(colors.bg).not.toContain("purple");
   });
 
+  it("returns a raw CSS tint colour for every known type", () => {
+    // `tint` feeds the liquid-glass `--lq-tint` variable, so it must be a CSS
+    // colour value — never a Tailwind class.
+    for (const type of ["gathering", "appointment", "milestone", "other"]) {
+      const { tint } = eventTypeColor(type);
+      expect(typeof tint).toBe("string");
+      expect(tint.length).toBeGreaterThan(0);
+      expect(tint).toMatch(/^(#[0-9a-f]{3,8}|var\(--[a-z0-9-]+\)|rgb|hsl|oklch)/i);
+      expect(tint).not.toMatch(/^(bg|text|border)-/);
+    }
+  });
+
+  it("distinct event types get distinct tints", () => {
+    const tints = ["gathering", "appointment", "milestone", "other"].map(
+      (t) => eventTypeColor(t).tint,
+    );
+    expect(new Set(tints).size).toBe(tints.length);
+  });
+
   it("all color strings are non-empty Tailwind class strings", () => {
     const colors = eventTypeColor("gathering");
     expect(colors.bg.length).toBeGreaterThan(0);

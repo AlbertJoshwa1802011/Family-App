@@ -9,6 +9,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -65,10 +66,10 @@ export function Expenses() {
       <AppBar title="Expenses" back />
       <Page className="space-y-4">
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex min-h-14 items-center gap-3 px-4 py-3">
-                <Skeleton className="size-10 rounded-xl" />
+                <Skeleton className="size-10 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-3.5 w-1/2" />
                   <Skeleton className="h-3 w-1/3" />
@@ -103,10 +104,10 @@ export function Expenses() {
                 {expenses.length} {expenses.length === 1 ? "entry" : "entries"}
               </div>
             </Card>
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {expenses.map((e) => (
                 <div key={e.id} className="flex min-h-14 items-center gap-3 px-4 py-3">
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
+                  <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
                     <Receipt className="size-5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -199,7 +200,7 @@ function ExpenseComposer({
             onChange={(e) => setAmount(e.target.value)}
             placeholder="100"
             autoFocus
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div>
@@ -211,7 +212,7 @@ function ExpenseComposer({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. outside snacks"
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           />
         </div>
         <div>
@@ -223,7 +224,7 @@ function ExpenseComposer({
             onChange={(e) =>
               setCategory(e.target.value as (typeof CATEGORIES)[number])
             }
-            className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg focus:border-vault-500 focus:outline-none"
+            className={inputCls}
           >
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>

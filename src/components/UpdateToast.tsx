@@ -20,13 +20,13 @@ export function UpdateToast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-0 bottom-24 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-sm items-center gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 shadow-pop"
+      className="lq lq-chrome lq-raised bubble-in fixed inset-x-0 bottom-30 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-sm items-center gap-3 rounded-bubble px-4 py-3"
     >
       <RefreshCw className="size-5 shrink-0 text-vault-300" aria-hidden="true" />
       <span className="flex-1 text-sm text-fg">A new version is available.</span>
       <button
         onClick={() => update()}
-        className="min-h-9 rounded-lg bg-vault-600 px-3 text-sm font-medium text-white transition-transform active:scale-95"
+        className="lq lq-primary lq-press min-h-9 rounded-full px-4 text-sm font-semibold"
       >
         Reload
       </button>

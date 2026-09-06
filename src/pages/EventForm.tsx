@@ -6,6 +6,7 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -194,7 +195,7 @@ export function EventForm() {
               value={form.title}
               onChange={(e) => set("title", e.target.value)}
               placeholder="e.g. Dad's doctor appointment"
-              className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+              className={inputCls}
             />
             {errors.title && (
               <p className="mt-1 text-xs text-danger">{errors.title}</p>
@@ -210,10 +211,10 @@ export function EventForm() {
                   key={value}
                   type="button"
                   onClick={() => set("type", value)}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
                     form.type === value
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10"
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg"
                   }`}
                 >
                   {label}
@@ -232,7 +233,7 @@ export function EventForm() {
                 type="date"
                 value={form.date}
                 onChange={(e) => set("date", e.target.value)}
-                className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                className={inputCls}
               />
               {errors.date && (
                 <p className="mt-1 text-xs text-danger">{errors.date}</p>
@@ -262,7 +263,7 @@ export function EventForm() {
                     type="time"
                     value={form.startTime}
                     onChange={(e) => set("startTime", e.target.value)}
-                    className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                    className={inputCls}
                   />
                 </div>
                 <div>
@@ -273,7 +274,7 @@ export function EventForm() {
                     type="time"
                     value={form.endTime}
                     onChange={(e) => set("endTime", e.target.value)}
-                    className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                    className={inputCls}
                   />
                   {errors.endTime && (
                     <p className="mt-1 text-xs text-danger">{errors.endTime}</p>
@@ -293,7 +294,7 @@ export function EventForm() {
               value={form.location}
               onChange={(e) => set("location", e.target.value)}
               placeholder="e.g. City Hospital, Room 4"
-              className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+              className={inputCls}
             />
           </Card>
 
@@ -307,7 +308,7 @@ export function EventForm() {
               onChange={(e) => set("description", e.target.value)}
               placeholder="Any extra details…"
               rows={3}
-              className="w-full resize-none rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+              className={`${inputCls} resize-none`}
             />
           </Card>
 

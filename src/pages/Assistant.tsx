@@ -5,7 +5,7 @@ export function Assistant() {
   return (
     <>
       <AppBar title="Assistant" back />
-      <div className="mx-auto flex h-[calc(100dvh-8rem)] max-w-md flex-col px-4">
+      <div className="mx-auto flex h-[calc(100dvh-10rem)] max-w-md flex-col px-4">
         <AssistantThread />
       </div>
     </>

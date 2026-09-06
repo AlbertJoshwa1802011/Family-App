@@ -19,7 +19,7 @@ export function Avatar({
   className?: string;
 }) {
   const base = cn(
-    "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+    "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold",
     className,
   );
   if (src) {
@@ -27,13 +27,19 @@ export function Avatar({
       <img
         src={src}
         alt={name ?? "avatar"}
-        className={cn(base, "object-cover")}
+        className={cn(
+          base,
+          "object-cover shadow-[0_0_0_1px_#ffffff26,0_6px_18px_-10px_#000d]",
+        )}
       />
     );
   }
   return (
     <span
-      className={cn(base, "bg-vault-600/30 text-vault-300")}
+      className={cn(
+        base,
+        "lq lq-tint text-vault-200 [--lq-tint:var(--color-vault-400)]",
+      )}
       aria-hidden="true"
     >
       {initials(name, email)}

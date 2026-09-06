@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   CalendarClock,
   CalendarDays,
+  ChevronRight,
   Clock,
   Contact,
   FileText,
@@ -20,7 +21,7 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Badge } from "../components/ui/Badge";
 import { EmptyState } from "../components/ui/EmptyState";
-import { ListItem } from "../components/ui/ListItem";
+import { ListItem, ListIcon } from "../components/ui/ListItem";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type { EventSummary } from "./Calendar";
@@ -39,32 +40,125 @@ interface MemberSummary {
   status: string;
 }
 
+type Tone = "vault" | "warning" | "info" | "success" | "danger";
+
+const toneVar: Record<Tone, string> = {
+  vault: "var(--color-vault-400)",
+  warning: "var(--color-warning)",
+  info: "var(--color-info)",
+  success: "var(--color-success)",
+  danger: "var(--color-danger)",
+};
+
+const toneText: Record<Tone, string> = {
+  vault: "text-vault-300",
+  warning: "text-warning",
+  info: "text-info",
+  success: "text-success",
+  danger: "text-danger",
+};
+
+/** Section heading shared by every block on the dashboard. */
+function SectionTitle({
+  children,
+  action,
+}: {
+  children: string;
+  action?: { to: string; label: string; icon?: LucideIcon };
+}) {
+  const Icon = action?.icon;
+  return (
+    <div className="flex items-center justify-between px-1">
+      <h3 className="text-[13px] font-semibold tracking-wide text-fg-muted uppercase">
+        {children}
+      </h3>
+      {action && (
+        <Link
+          to={action.to}
+          className="lq lq-flat lq-press flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-vault-300"
+        >
+          {Icon && <Icon className="size-3.5" aria-hidden="true" />}
+          {action.label}
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function StatCard({
   icon: Icon,
   label,
   value,
-  accent,
+  tone,
   to,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
-  accent: string;
+  tone: Tone;
   to: string;
 }) {
   return (
-    <Link to={to}>
-      <Card className="p-4 transition-colors hover:bg-white/5">
+    <Link to={to} className="block">
+      <Card
+        interactive
+        tint={toneVar[tone]}
+        className="relative overflow-hidden p-4"
+      >
+        {/* the colour that the glass above it refracts */}
+        <span
+          aria-hidden="true"
+          className="absolute -top-9 -right-7 size-24 rounded-full opacity-25 blur-2xl"
+          style={{ background: toneVar[tone] }}
+        />
         <div
-          className={`flex size-9 items-center justify-center rounded-xl ${accent}`}
+          className={`lq lq-flat lq-tint relative flex size-10 items-center justify-center rounded-full ${toneText[tone]}`}
+          style={{ ["--lq-tint" as string]: toneVar[tone] }}
         >
           <Icon className="size-5" aria-hidden="true" />
         </div>
-        <div className="mt-3 text-2xl font-bold tabular-nums text-white">
+        <div className="relative mt-3 text-[28px] leading-none font-bold tabular-nums text-white">
           {value}
         </div>
-        <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
+        <div className="relative mt-1.5 text-xs font-medium text-fg-muted">
+          {label}
+        </div>
       </Card>
+    </Link>
+  );
+}
+
+/** Circular quick-access bubble with the label beneath it. */
+function QuickBubble({
+  icon: Icon,
+  label,
+  to,
+  tone,
+}: {
+  icon: LucideIcon;
+  label: string;
+  to: string;
+  tone: Tone;
+}) {
+  return (
+    <Link
+      to={to}
+      className="group flex w-15 shrink-0 flex-col items-center gap-2 text-center"
+    >
+      <span className="relative flex size-14 items-center justify-center">
+        <span
+          aria-hidden="true"
+          className="absolute inset-1 rounded-full opacity-35 blur-lg transition-opacity duration-300 group-active:opacity-60"
+          style={{ background: toneVar[tone] }}
+        />
+        <span
+          className={`lq lq-tint lq-raised lq-press relative flex size-14 items-center justify-center rounded-full ${toneText[tone]}`}
+          style={{ ["--lq-tint" as string]: toneVar[tone] }}
+        >
+          <Icon className="size-6" strokeWidth={1.9} aria-hidden="true" />
+        </span>
+      </span>
+      <span className="text-[10px] font-semibold text-fg-muted">{label}</span>
     </Link>
   );
 }
@@ -96,25 +190,18 @@ function UpcomingEventsWidget({ familyId }: { familyId: string }) {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-fg-muted">Upcoming events</h3>
-        <Link
-          to="/calendar/events/new"
-          className="flex items-center gap-1 text-xs text-vault-400 hover:text-vault-300"
-        >
-          <Plus className="size-3.5" />
-          Add
-        </Link>
-      </div>
+      <SectionTitle action={{ to: "/calendar/events/new", label: "Add", icon: Plus }}>
+        Upcoming events
+      </SectionTitle>
       {upcoming.length === 0 ? (
-        <div className="rounded-2xl border border-line px-4 py-3 text-sm text-fg-subtle">
+        <Card className="px-4 py-3.5 text-sm text-fg-subtle">
           No events in the next 30 days.{" "}
-          <Link to="/calendar" className="text-vault-400 underline">
+          <Link to="/calendar" className="font-semibold text-vault-300">
             View calendar
           </Link>
-        </div>
+        </Card>
       ) : (
-        <Card className="divide-y divide-line overflow-hidden">
+        <Card className="divide-y divide-white/8 overflow-hidden">
           {upcoming.map((ev) => {
             const colors = eventTypeColor(ev.type);
             return (
@@ -123,7 +210,8 @@ function UpcomingEventsWidget({ familyId }: { familyId: string }) {
                 to={`/calendar/events/${ev.id}`}
                 leading={
                   <span
-                    className={`flex size-9 items-center justify-center rounded-xl ${colors.bg} ${colors.text}`}
+                    className={`lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full ${colors.text}`}
+                    style={{ ["--lq-tint" as string]: colors.tint }}
                   >
                     <CalendarDays className="size-5" />
                   </span>
@@ -180,26 +268,47 @@ export function Dashboard() {
 
   return (
     <>
-      <AppBar title={activeFamily?.name ?? "Family Vault"} trailing={<NotificationBell />} />
-      <Page className="space-y-6">
-        <div>
-          <p className="text-sm text-fg-muted">Welcome back,</p>
-          <h2 className="text-xl font-semibold text-white">{firstName} 👋</h2>
+      <AppBar
+        title={activeFamily?.name ?? "Family Vault"}
+        trailing={<NotificationBell />}
+      />
+      <Page className="space-y-7">
+        <div className="bubble-in px-1 pt-1">
+          <p className="text-sm font-medium text-fg-muted">Welcome back,</p>
+          <h2 className="mt-0.5 text-[28px] leading-tight font-bold tracking-tight text-white">
+            {firstName} 👋
+          </h2>
         </div>
 
-        <Link
-          to="/assistant"
-          className="flex items-center gap-3 rounded-2xl border border-vault-500/30 bg-vault-500/10 px-4 py-3.5 transition-colors hover:bg-vault-500/15"
-        >
-          <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/20 text-vault-300">
-            <Sparkles className="size-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-fg">Ask the assistant</span>
-            <span className="block text-xs text-fg-muted">
-              “Add 100 for snacks” · stats · reminders
+        {/* Assistant CTA — the brightest bubble on the page, with a slow
+            specular sweep so it reads as lit glass rather than a flat tile. */}
+        <Link to="/assistant" className="block">
+          <Card
+            interactive
+            variant="raised"
+            tint="var(--color-vault-400)"
+            className="bubble-in relative flex items-center gap-3.5 overflow-hidden p-4"
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 bg-linear-to-r from-transparent via-white/12 to-transparent [animation:lq-sweep_5.5s_var(--ease-out)_infinite]"
+            />
+            <span className="lq lq-tint lq-raised relative flex size-11 shrink-0 items-center justify-center rounded-full text-vault-200 [--lq-tint:var(--color-vault-300)]">
+              <Sparkles className="size-5.5" aria-hidden="true" />
             </span>
-          </span>
+            <span className="relative min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold text-white">
+                Ask the assistant
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-fg-muted">
+                “Add 100 for snacks” · stats · reminders
+              </span>
+            </span>
+            <ChevronRight
+              className="relative size-5 shrink-0 text-vault-300"
+              aria-hidden="true"
+            />
+          </Card>
         </Link>
 
         <div className="grid grid-cols-2 gap-3">
@@ -207,36 +316,49 @@ export function Dashboard() {
             icon={FileText}
             label="Documents"
             value={docsData ? String(docs.length) : "—"}
-            accent="bg-vault-500/15 text-vault-300"
+            tone="vault"
             to="/documents"
           />
           <StatCard
             icon={Clock}
             label="Expiring soon"
             value={docsData ? String(expiring.length) : "—"}
-            accent="bg-warning/15 text-warning"
+            tone="warning"
             to="/documents"
           />
           <StatCard
             icon={Users}
             label="Family members"
             value={membersData ? String(memberCount) : "—"}
-            accent="bg-info/15 text-info"
+            tone="info"
             to="/family"
           />
           <StatCard
             icon={ListTodo}
             label="Open tasks"
             value={tasksData ? String(tasksData.tasks.length) : "—"}
-            accent="bg-success/15 text-success"
+            tone="success"
             to="/tasks"
           />
         </div>
 
         <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-fg-muted">
+          <SectionTitle>Quick access</SectionTitle>
+          {/* Bubbles in a scrollable row — edge-bleeding so it's obviously
+              swipeable on a phone. */}
+          <div className="-mx-4 flex justify-between gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <QuickBubble icon={CalendarDays} label="Calendar" to="/calendar" tone="vault" />
+            <QuickBubble icon={ListTodo} label="Tasks" to="/tasks" tone="info" />
+            <QuickBubble icon={Contact} label="Contacts" to="/contacts" tone="danger" />
+            <QuickBubble icon={Wallet} label="Expenses" to="/expenses" tone="warning" />
+            <QuickBubble icon={Sparkles} label="Assistant" to="/assistant" tone="success" />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <SectionTitle action={{ to: "/documents", label: "All" }}>
             Upcoming expiries
-          </h3>
+          </SectionTitle>
           {expiring.length === 0 ? (
             <EmptyState
               icon={CalendarClock}
@@ -244,7 +366,7 @@ export function Dashboard() {
               description="Documents nearing their expiry date will show up here so you can renew in time."
             />
           ) : (
-            <Card className="divide-y divide-line overflow-hidden">
+            <Card className="divide-y divide-white/8 overflow-hidden">
               {expiring.slice(0, 5).map((doc) => {
                 const status = expiryStatus(doc.expiryDate);
                 return (
@@ -252,9 +374,9 @@ export function Dashboard() {
                     key={doc.id}
                     to={`/documents/${doc.id}`}
                     leading={
-                      <span className="flex size-9 items-center justify-center rounded-xl bg-warning/15 text-warning">
+                      <ListIcon tone="warning">
                         <Clock className="size-5" />
-                      </span>
+                      </ListIcon>
                     }
                     title={doc.title}
                     subtitle={doc.category}
@@ -269,57 +391,6 @@ export function Dashboard() {
         </section>
 
         {activeFamily && <UpcomingEventsWidget familyId={activeFamily.id} />}
-
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-fg-muted">Quick access</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Link
-              to="/calendar"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/15 text-vault-300">
-                <CalendarDays className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Calendar</span>
-            </Link>
-            <Link
-              to="/tasks"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-info/15 text-info">
-                <ListTodo className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Tasks</span>
-            </Link>
-            <Link
-              to="/contacts"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-danger/15 text-danger">
-                <Contact className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Contacts</span>
-            </Link>
-            <Link
-              to="/expenses"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-warning/15 text-warning">
-                <Wallet className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Expenses</span>
-            </Link>
-            <Link
-              to="/assistant"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5 transition-colors hover:bg-white/5"
-            >
-              <span className="flex size-9 items-center justify-center rounded-xl bg-vault-500/15 text-vault-300">
-                <Sparkles className="size-5" />
-              </span>
-              <span className="text-sm font-medium text-fg">Assistant</span>
-            </Link>
-          </div>
-        </section>
       </Page>
     </>
   );

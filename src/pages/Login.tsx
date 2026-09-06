@@ -40,7 +40,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="flex size-20 items-center justify-center rounded-3xl bg-vault-600/20 ring-1 ring-vault-500/30">
+      <div className="lq lq-tint lq-raised flex size-22 items-center justify-center rounded-full [--lq-tint:var(--color-vault-400)]">
         <ShieldCheck className="size-10 text-vault-300" aria-hidden="true" />
       </div>
 

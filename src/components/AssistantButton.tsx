@@ -19,10 +19,10 @@ export function AssistantButton() {
       aria-label="Ask the assistant"
       aria-pressed={open}
       className={cn(
-        "flex size-11 items-center justify-center rounded-full transition-colors active:scale-95",
+        "lq-press flex size-10 shrink-0 items-center justify-center rounded-full",
         open
-          ? "bg-vault-500/20 text-vault-300"
-          : "text-vault-300 hover:bg-vault-500/15",
+          ? "lq lq-tint text-vault-200 [--lq-tint:var(--color-vault-400)]"
+          : "text-vault-300 hover:bg-vault-400/15",
       )}
     >
       <Sparkles className="size-5" aria-hidden="true" />

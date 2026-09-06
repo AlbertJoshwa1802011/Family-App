@@ -54,7 +54,7 @@ export function AcceptInvite() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
       <Card className="p-6 text-center">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-vault-500/15 text-vault-300">
+        <span className="lq lq-tint lq-raised mx-auto flex size-12 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
           <Home className="size-6" aria-hidden="true" />
         </span>
         {accept.isError ? (

@@ -164,7 +164,7 @@ export function EventDetailPage() {
           ev.status === "active" && canEdit ? (
             <button
               onClick={() => navigate(`/calendar/events/${id}/edit`)}
-              className="flex size-9 items-center justify-center rounded-xl text-fg-muted hover:text-fg"
+              className="lq-press flex size-10 items-center justify-center rounded-full text-fg-muted hover:bg-white/8 hover:text-fg"
               aria-label="Edit event"
             >
               <Pencil className="size-4" />
@@ -177,7 +177,8 @@ export function EventDetailPage() {
         <Card className="p-4">
           <div className="flex items-start gap-3">
             <div
-              className={`flex size-10 items-center justify-center rounded-xl ${colors.bg} ${colors.text} shrink-0`}
+              className={`lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full ${colors.text}`}
+              style={{ ["--lq-tint" as string]: colors.tint }}
             >
               <CalendarDays className="size-5" />
             </div>
@@ -275,7 +276,7 @@ export function EventDetailPage() {
         {/* Actions */}
         <a
           href={`/api/events/${ev.id}/ics`}
-          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 text-sm font-medium text-fg hover:border-line-strong"
+          className="lq lq-press flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
         >
           <CalendarPlus className="size-4" />
           Add to my calendar
