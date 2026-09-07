@@ -1,4 +1,4 @@
-CREATE TABLE `chat_messages` (
+CREATE TABLE IF NOT EXISTS `chat_messages` (
 	`id` text PRIMARY KEY NOT NULL,
 	`family_id` text NOT NULL,
 	`user_id` text NOT NULL,
@@ -9,4 +9,4 @@ CREATE TABLE `chat_messages` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_chat_family_created` ON `chat_messages` (`family_id`,`created_at`);
+CREATE INDEX IF NOT EXISTS `idx_chat_family_created` ON `chat_messages` (`family_id`,`created_at`);
