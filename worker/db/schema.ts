@@ -1429,3 +1429,23 @@ export const churchSettlements = sqliteTable(
     index("idx_church_settlements_family").on(t.familyId, t.settledAt),
   ],
 );
+
+// ── Family chat ──────────────────────────────────────────────────────────────
+// Soft-deleted messages keep their slot (deleted_at set) but never leak body.
+
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+    deletedAt: integer("deleted_at"),
+  },
+  (t) => [index("idx_chat_family_created").on(t.familyId, t.createdAt)],
+);

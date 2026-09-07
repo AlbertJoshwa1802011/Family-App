@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, UserPlus, Users, X } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Activity, MessageCircle, UserPlus, Users, X } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -99,6 +99,8 @@ export function FamilyPage() {
   const qc = useQueryClient();
   const { families, activeFamilyId } = useAuth();
   const familyId = activeFamilyId ?? families[0]?.id;
+  const familyName =
+    families.find((f) => f.id === familyId)?.name ?? "your family";
   const [searchParams] = useSearchParams();
   const tab = tabFromSearch(searchParams.toString(), "members");
 
@@ -190,6 +192,21 @@ export function FamilyPage() {
             isActive: makeTabActive("/family", t.id, "members"),
           }))}
         />
+
+        <Link
+          to="/chat"
+          className="liquid-bubble liquid-press flex items-center gap-3 rounded-2xl px-4 py-3 transition-colors hover:bg-white/5"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-m3-blue-bg text-m3-blue">
+            <MessageCircle className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-fg">Family chat</span>
+            <span className="block text-xs text-fg-muted">
+              Private messages for everyone in {familyName}
+            </span>
+          </span>
+        </Link>
 
         {inviteSuccess && (
           <div className="rounded-xl bg-success/15 border border-success/30 p-3 text-sm text-success flex items-center gap-2">
