@@ -22,6 +22,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
+import { uploadDocumentFile } from "../lib/uploadDocumentFile";
 import { useAuth } from "../context/AuthContext";
 
 interface DocumentDetailPayload {
@@ -77,41 +78,13 @@ export function DocumentDetail() {
     },
   });
 
-  /**
-   * Upload flow (Worker never sees file bytes):
-   * 1. POST /files/upload-url → Drive resumable session URL
-   * 2. PUT the file straight to Drive
-   * 3. POST /files to record the Drive fileId + metadata in D1
-   */
+  /** Attach / replace the file for this document (versioned in D1). */
   async function handleUpload(file: File) {
+    if (!id) return;
     setUploadError("");
     setUploading(true);
     try {
-      const { uploadUrl } = await api<{ uploadUrl: string }>(
-        `/documents/${id}/files/upload-url`,
-        {
-          method: "POST",
-          body: JSON.stringify({ fileName: file.name, mimeType: file.type || "application/octet-stream" }),
-        },
-      );
-
-      const driveRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!driveRes.ok) throw new Error(`Drive upload failed (${driveRes.status})`);
-      const driveFile = (await driveRes.json()) as { id: string };
-
-      await api(`/documents/${id}/files`, {
-        method: "POST",
-        body: JSON.stringify({
-          driveFileId: driveFile.id,
-          fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
-          sizeBytes: file.size,
-        }),
-      });
+      await uploadDocumentFile(id, file);
       void qc.invalidateQueries({ queryKey: ["document", id] });
     } catch (e) {
       setUploadError((e as Error).message);
