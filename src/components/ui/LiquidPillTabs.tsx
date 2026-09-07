@@ -34,20 +34,20 @@ export function LiquidPillTabs<T extends string>({
       className="-mx-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div
-        className="liquid-pill-track relative w-full overflow-hidden rounded-full"
+        className="liquid-pill-track relative w-full rounded-full p-0.5"
         style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (
           <span
             aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute top-1 bottom-1 rounded-full",
+              "pointer-events-none absolute top-1.5 bottom-1.5 rounded-full",
               "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
               "motion-reduce:transition-none",
             )}
             style={{
-              left: `calc(${activeIndex} * (100% / ${items.length}) + 4px)`,
-              width: `calc(100% / ${items.length} - 8px)`,
+              left: `calc(${activeIndex} * (100% / ${items.length}) + 6px)`,
+              width: `calc(100% / ${items.length} - 12px)`,
               background: `linear-gradient(180deg, ${accentColor}55, ${accentColor}28)`,
               boxShadow: `0 0 22px ${accentColor}55, inset 0 1px 0 rgba(255,255,255,0.35)`,
             }}

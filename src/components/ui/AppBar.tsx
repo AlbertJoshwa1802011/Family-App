@@ -7,8 +7,8 @@ import { cn } from "../../lib/cn";
 
 /**
  * Floating liquid-bubble title bar — same frosted capsule on phone and laptop.
- * A scrim behind it fades scrolled content so the blur always has colour to
- * refract (the ambient orbs on body::before do the rest).
+ * A short scrim sits *behind* the capsule only (not over the first content
+ * row) so Money/Vault titles and hero figures stay fully readable on phones.
  */
 export function AppBar({
   title,
@@ -27,7 +27,7 @@ export function AppBar({
     <header className="pt-safe sticky top-0 z-20">
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 -top-8 -bottom-6 bg-gradient-to-b from-ink-950 via-ink-950/75 to-transparent"
+        className="pointer-events-none absolute inset-x-0 -top-8 bottom-0 bg-gradient-to-b from-ink-950 via-ink-950/70 to-transparent"
       />
       <div className="relative mx-auto w-full max-w-5xl px-3 pt-2 pb-1 sm:px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl">
         <div className="liquid-bubble liquid-chrome flex h-14 items-center gap-1 rounded-full pr-1.5 pl-2">

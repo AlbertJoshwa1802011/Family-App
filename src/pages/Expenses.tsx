@@ -657,13 +657,13 @@ export function Expenses() {
                                 {e.childCount > 0 ? ` · ${e.childCount} sub` : ""}
                               </span>
                             </span>
-                            <span className="flex w-24 shrink-0 items-center justify-end gap-2">
+                            <span className="flex shrink-0 items-center justify-end gap-1.5 pl-2">
                               {e.visibility === "private" ? (
-                                <Lock className="size-3.5 text-fg-subtle" aria-label="Private" />
+                                <Lock className="size-3.5 shrink-0 text-fg-subtle" aria-label="Private" />
                               ) : (
-                                <Users className="size-3.5 text-vault-300" aria-label="Shared" />
+                                <Users className="size-3.5 shrink-0 text-vault-300" aria-label="Shared" />
                               )}
-                              <span className="min-w-[4.5rem] text-right text-sm font-semibold tabular-nums text-fg">
+                              <span className="max-w-[7.5rem] text-right text-sm font-semibold tabular-nums text-fg sm:max-w-none">
                                 {rowAmount(e)}
                               </span>
                             </span>

@@ -5,6 +5,11 @@ export interface SectionSubNavItem {
   /** Path or path+search, e.g. `/documents` or `/documents?tab=expiring`. */
   to: string;
   label: string;
+  /**
+   * Compact label for narrow phones (≤390px). Shown below `sm`; full `label`
+   * from `sm` up. Keeps five Money tabs readable without ellipsis.
+   */
+  shortLabel?: string;
   /** When true, only exact path (no search) matches — for "All" tabs. */
   end?: boolean;
   /** Override active detection (useful for `?tab=` filters). */
@@ -58,21 +63,21 @@ export function SectionSubNav({
   return (
     <nav aria-label={ariaLabel} className="-mx-4 mb-2 px-4">
       <div
-        className="liquid-pill-track relative mx-auto w-full overflow-hidden rounded-full"
+        className="liquid-pill-track relative mx-auto w-full rounded-full p-0.5"
         style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (
           <span
             aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute top-1 bottom-1 rounded-full",
+              "pointer-events-none absolute top-1.5 bottom-1.5 rounded-full",
               !accentColor && "bg-white/18 shadow-inner",
               "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
               "motion-reduce:transition-none",
             )}
             style={{
-              left: `calc(${activeIndex} * (100% / ${count}) + 4px)`,
-              width: `calc(100% / ${count} - 8px)`,
+              left: `calc(${activeIndex} * (100% / ${count}) + 6px)`,
+              width: `calc(100% / ${count} - 12px)`,
               ...(accentColor
                 ? {
                     background: `linear-gradient(180deg, ${accentColor}55, ${accentColor}28)`,
@@ -94,7 +99,7 @@ export function SectionSubNav({
                 className={({ isActive: navActive }) => {
                   const selected = itemIsActive(item, pathname, search, navActive);
                   return cn(
-                    "block min-h-11 truncate rounded-full px-1.5 py-2.5 text-center text-[11px] font-medium transition-colors sm:px-3 sm:text-xs",
+                    "block min-h-11 truncate rounded-full px-1 py-2.5 text-center text-[11px] font-medium transition-colors sm:px-3 sm:text-xs",
                     selected
                       ? accentColor
                         ? "font-semibold"
@@ -107,7 +112,14 @@ export function SectionSubNav({
                   return selected && accentColor ? { color: accentColor } : undefined;
                 }}
               >
-                {item.label}
+                {item.shortLabel ? (
+                  <>
+                    <span className="sm:hidden">{item.shortLabel}</span>
+                    <span className="hidden sm:inline">{item.label}</span>
+                  </>
+                ) : (
+                  item.label
+                )}
               </NavLink>
             </li>
           ))}

@@ -55,6 +55,9 @@ describe("liquid bubble design tokens", () => {
     expect(bar).toContain("liquid-chrome");
     expect(bar).toContain("rounded-full");
     expect(bar).not.toMatch(/border-b border-white\/10 bg-ink-950/);
+    // Scrim must not extend below the bar — that washed out Money/Vault heroes.
+    expect(bar).toContain("bottom-0");
+    expect(bar).not.toContain("-bottom-6");
   });
 
   it("laptop sidebar uses the same liquid-chrome recipe", () => {
@@ -103,6 +106,10 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     for (const label of ["Overview", "Spending", "Funds", "Committed", "Wishlist"]) {
       expect(src).toContain(`label: "${label}"`);
     }
+    // Phone-width short labels so five tabs don't ellipsize to "Commi…" / "Wish…"
+    for (const short of ["Plan", "Spend", "Due", "Wish"]) {
+      expect(src).toContain(`shortLabel: "${short}"`);
+    }
     expect(src).toContain("SectionSubNav");
     expect(src).toContain("MONEY_ACCENT");
     expect(src).toContain("moneyTabForPath");
@@ -113,9 +120,37 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     const src = read("src/components/ui/SectionSubNav.tsx");
     expect(src).toContain("liquid-pill-track");
     expect(src).toContain("gridTemplateColumns");
+    expect(src).toContain("shortLabel");
+    expect(src).toContain("sm:hidden");
+    // overflow-hidden clipped the Money green glow — pad instead
+    expect(src).not.toMatch(/liquid-pill-track[^"]*overflow-hidden/);
     expect(src).not.toMatch(/className="[^"]*min-w-max/);
     expect(read("src/components/ui/LiquidPillTabs.tsx")).toContain("liquid-pill-track");
     expect(read("src/components/ui/LiquidPillTabs.tsx")).toContain("MONEY_ACCENT");
+  });
+
+  it("primary Button is a liquid raised pill, not a flat solid fill", () => {
+    const btn = read("src/components/ui/Button.tsx");
+    expect(btn).toContain("liquid-bubble liquid-primary");
+    expect(btn).not.toMatch(/primary:\s*"bg-vault-600/);
+  });
+
+  it("Vault + DeviceLock use liquid-field inputs (not flat ink boxes)", () => {
+    const vault = read("src/pages/Vault.tsx");
+    expect(vault).toContain("inputCls");
+    expect(vault).toContain("liquid-bubble liquid-raised");
+    expect(vault).not.toMatch(/bg-ink-950 px-3\.5 py-3 pr-10/);
+    expect(vault).not.toMatch(/bg-surface border border-line pl-9/);
+
+    const lock = read("src/components/DeviceLockGate.tsx");
+    expect(lock).toContain("inputCls");
+    expect(lock).not.toMatch(/border border-line bg-ink-950/);
+  });
+
+  it("Spending rows do not clamp amounts into a fixed w-24 column", () => {
+    const spending = read("src/pages/Expenses.tsx");
+    expect(spending).not.toMatch(/className="flex w-24 shrink-0/);
+    expect(spending).toMatch(/tabular-nums/);
   });
 
   it("assistant sheet is an edge-to-edge phone sheet, not a fully-rounded liquid bubble", () => {
