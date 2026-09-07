@@ -488,4 +488,82 @@ describe("notes security", () => {
       ).status,
     ).toBe(404);
   });
+
+  it("member cannot delete or restore another member's family note", async () => {
+    const note = await createNote(owner.cookie, {
+      title: "Shared",
+      visibility: "family",
+    });
+    expect(
+      (await req("DELETE", `/api/notes/${note.id}`, member.cookie)).status,
+    ).toBe(403);
+
+    await req("DELETE", `/api/notes/${note.id}`, owner.cookie);
+    expect(
+      (await req("POST", `/api/notes/${note.id}/restore`, member.cookie))
+        .status,
+    ).toBe(403);
+  });
+
+  it("private notes stay hidden in trash list for other members", async () => {
+    const note = await createNote(member.cookie, {
+      title: "secret trash",
+      visibility: "private",
+    });
+    await req("DELETE", `/api/notes/${note.id}`, member.cookie);
+
+    const other = seedActor(t.sqlite, familyId, "member", {
+      name: "Other Member",
+    });
+    const trash = await req(
+      "GET",
+      `/api/notes?familyId=${familyId}&trashed=1`,
+      other.cookie,
+    );
+    expect(
+      ((await trash.json()) as { notes: unknown[] }).notes,
+    ).toHaveLength(0);
+  });
+
+  it("PATCH rejects cross-family notebookId", async () => {
+    const strangerUser = seedUser(t.sqlite);
+    const otherFamily = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, otherFamily.id, "owner");
+    const foreignNb = await createNotebook(
+      stranger.cookie,
+      "Foreign",
+      otherFamily.id,
+    );
+    const note = await createNote(member.cookie, { title: "mine" });
+
+    const res = await req("PATCH", `/api/notes/${note.id}`, member.cookie, {
+      notebookId: foreignNb.id,
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_notebook_id",
+    );
+  });
+
+  it("search wildcards are neutralized (no match-everything)", async () => {
+    await createNote(owner.cookie, { title: "Psalm", body: "shepherd" });
+    const wild = await req(
+      "GET",
+      `/api/notes?familyId=${familyId}&q=%`,
+      owner.cookie,
+    );
+    expect(wild.status).toBe(200);
+    expect(
+      ((await wild.json()) as { notes: unknown[] }).notes,
+    ).toHaveLength(0);
+
+    const hit = await req(
+      "GET",
+      `/api/notes?familyId=${familyId}&q=shep`,
+      owner.cookie,
+    );
+    expect(
+      ((await hit.json()) as { notes: unknown[] }).notes,
+    ).toHaveLength(1);
+  });
 });

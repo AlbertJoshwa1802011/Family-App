@@ -92,6 +92,19 @@ function isNoteHiddenFrom(
   );
 }
 
+/** Push private-visibility into SQL (defense in depth; don't load hidden bodies). */
+function noteVisibilityWhere(familyId: string, userId: string, role: string) {
+  const base = eq(schema.notes.familyId, familyId);
+  if (role === "owner" || role === "admin") return base;
+  return and(
+    base,
+    or(
+      eq(schema.notes.visibility, "family"),
+      eq(schema.notes.ownerUserId, userId),
+    ),
+  );
+}
+
 function serializeNote(row: typeof schema.notes.$inferSelect) {
   return {
     id: row.id,
@@ -266,7 +279,9 @@ noteRoutes.get("/", requireSession, async (c) => {
   const kind = c.req.query("kind");
   const q = c.req.query("q")?.trim();
 
-  const conditions = [eq(schema.notes.familyId, familyId)];
+  const conditions = [
+    noteVisibilityWhere(familyId, userId, membership.role)!,
+  ];
   if (trashed) {
     conditions.push(isNotNull(schema.notes.deletedAt));
   } else {
@@ -284,9 +299,11 @@ noteRoutes.get("/", requireSession, async (c) => {
   }
 
   if (q) {
-    // Escape LIKE metacharacters so user input is literal.
-    const escaped = q.replace(/([\\%_])/g, "\\$1");
-    const pattern = `%${escaped}%`;
+    // SQLite LIKE has no default ESCAPE char — neutralize user wildcards
+    // (same approach as documents search).
+    const sanitized = q.replace(/[%_]/g, " ").trim();
+    if (!sanitized) return c.json({ notes: [] });
+    const pattern = `%${sanitized}%`;
     conditions.push(
       or(
         like(schema.notes.title, pattern),
@@ -305,11 +322,7 @@ noteRoutes.get("/", requireSession, async (c) => {
       desc(sql`"notes".rowid`),
     );
 
-  const notes = rows
-    .filter((n) => !isNoteHiddenFrom(n, userId, membership.role))
-    .map(serializeNote);
-
-  return c.json({ notes });
+  return c.json({ notes: rows.map(serializeNote) });
 });
 
 // POST /notes

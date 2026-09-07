@@ -123,14 +123,32 @@ function NoteEditor({
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const baselineRef = useRef<Draft>(draftFromNote(note));
+  const draftRef = useRef(draft);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canEditRef = useRef(false);
 
   const isTrashed = Boolean(note.deletedAt);
+  // Edit only when this note belongs to the active family context AND the
+  // caller is the owner or an admin/owner of that same family.
+  const sameFamily = activeFamily?.id === note.familyId;
   const canEdit =
-    Boolean(user && !isTrashed) &&
+    Boolean(user && sameFamily && !isTrashed) &&
     (note.ownerUserId === user!.id ||
       activeFamily?.role === "owner" ||
       activeFamily?.role === "admin");
+  const canManageTrash =
+    Boolean(user && sameFamily && isTrashed) &&
+    (note.ownerUserId === user!.id ||
+      activeFamily?.role === "owner" ||
+      activeFamily?.role === "admin");
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -167,32 +185,57 @@ function NoteEditor({
     },
   });
 
-  // Debounced autosave when draft diverges from the last saved baseline.
+  function buildPatchBody(d: Draft): Record<string, unknown> {
+    return {
+      title: d.title,
+      body: d.body,
+      kind: d.kind,
+      visibility: d.visibility,
+      pinned: d.pinned,
+      notebookId: d.notebookId,
+      noteDate: d.noteDate.trim() ? d.noteDate.trim() : null,
+    };
+  }
+
+  // Debounced autosave while editing.
   useEffect(() => {
     if (isTrashed || !canEdit) return;
-    if (draftsEqual(draft, baselineRef.current)) return;
+    if (draftsEqual(draft, baselineRef.current)) {
+      setSaveState((s) => (s === "saving" ? "idle" : s));
+      return;
+    }
 
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveState("saving");
-    const body: Record<string, unknown> = {
-      title: draft.title,
-      body: draft.body,
-      kind: draft.kind,
-      visibility: draft.visibility,
-      pinned: draft.pinned,
-      notebookId: draft.notebookId,
-      noteDate: draft.noteDate.trim() ? draft.noteDate.trim() : null,
-    };
+    const body = buildPatchBody(draft);
     saveTimer.current = setTimeout(() => {
       patch.mutate(body);
     }, 600);
 
     return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
     };
-    // patch.mutate is stable enough for debounce; including `patch` retriggers saves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional debounce
   }, [draft, isTrashed, canEdit]);
+
+  // Flush dirty edits only on unmount (navigate away), not on every keystroke.
+  useEffect(() => {
+    const noteId = note.id;
+    return () => {
+      if (!canEditRef.current) return;
+      const latest = draftRef.current;
+      if (draftsEqual(latest, baselineRef.current)) return;
+      void api<{ note: Note }>(`/notes/${noteId}`, {
+        method: "PATCH",
+        body: JSON.stringify(buildPatchBody(latest)),
+      }).catch(() => {
+        /* best-effort; next open shows last saved */
+      });
+    };
+  }, [note.id]);
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -228,7 +271,7 @@ function NoteEditor({
                 <Pin className="size-5" />
               </button>
             )}
-            {isTrashed ? (
+            {isTrashed && canManageTrash ? (
               <button
                 type="button"
                 className="lq lq-flat lq-press flex size-10 items-center justify-center rounded-full text-fg-muted"
@@ -239,7 +282,7 @@ function NoteEditor({
                 <RotateCcw className="size-5" />
               </button>
             ) : null}
-            {canEdit || isTrashed ? (
+            {canEdit || canManageTrash ? (
               <button
                 type="button"
                 className="lq lq-flat lq-press flex size-10 items-center justify-center rounded-full text-danger"
@@ -266,7 +309,7 @@ function NoteEditor({
         }
       />
       <Page>
-        {isTrashed && (
+        {isTrashed && canManageTrash && (
           <div className="lq lq-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
             This note is in Recently Deleted. Restore it, or delete it forever.
             <div className="mt-3 flex gap-2">
@@ -294,6 +337,12 @@ function NoteEditor({
                 Delete forever
               </Button>
             </div>
+          </div>
+        )}
+
+        {isTrashed && !canManageTrash && (
+          <div className="lq lq-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
+            This note is in Recently Deleted.
           </div>
         )}
 
