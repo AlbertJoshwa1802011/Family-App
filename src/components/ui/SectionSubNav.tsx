@@ -28,6 +28,11 @@ function itemIsActive(
  * iOS-style liquid-glass pill sub-nav. Matches the floating bottom tab bar:
  * frosted capsule, morphing active bubble, 44px+ targets.
  *
+ * Tabs are equal-width across the full track so the sliding bubble lines up on
+ * phones. (A prior content-sized row layout made labels different widths, so the
+ * percentage-based bubble drifted off the active tab — especially Money's five
+ * labels.)
+ *
  * Pass `accentColor` (e.g. Money green) to tint the sliding bubble the same way
  * AppShell tints the primary tab.
  */
@@ -48,13 +53,12 @@ export function SectionSubNav({
         (item.end ? search === "" || search === "?" : true),
   );
 
+  const count = Math.max(items.length, 1);
+
   return (
-    <nav
-      aria-label={ariaLabel}
-      className="-mx-4 mb-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
+    <nav aria-label={ariaLabel} className="-mx-4 mb-2 px-4">
       <div
-        className="liquid-pill-track relative mx-auto flex min-w-max overflow-hidden rounded-full"
+        className="liquid-pill-track relative mx-auto w-full overflow-hidden rounded-full"
         style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (
@@ -67,8 +71,8 @@ export function SectionSubNav({
               "motion-reduce:transition-none",
             )}
             style={{
-              left: `calc(${activeIndex} * (100% / ${items.length}) + 4px)`,
-              width: `calc(100% / ${items.length} - 8px)`,
+              left: `calc(${activeIndex} * (100% / ${count}) + 4px)`,
+              width: `calc(100% / ${count} - 8px)`,
               ...(accentColor
                 ? {
                     background: `linear-gradient(180deg, ${accentColor}55, ${accentColor}28)`,
@@ -78,16 +82,19 @@ export function SectionSubNav({
             }}
           />
         )}
-        <ul className="relative z-10 flex min-w-max">
+        <ul
+          className="relative z-10 grid w-full"
+          style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+        >
           {items.map((item) => (
-            <li key={item.to + item.label} className="flex-1">
+            <li key={item.to + item.label} className="min-w-0">
               <NavLink
                 to={item.to}
                 end={item.end}
                 className={({ isActive: navActive }) => {
                   const selected = itemIsActive(item, pathname, search, navActive);
                   return cn(
-                    "block min-h-11 whitespace-nowrap rounded-full px-4 py-2.5 text-center text-xs font-medium transition-colors",
+                    "block min-h-11 truncate rounded-full px-1.5 py-2.5 text-center text-[11px] font-medium transition-colors sm:px-3 sm:text-xs",
                     selected
                       ? accentColor
                         ? "font-semibold"
