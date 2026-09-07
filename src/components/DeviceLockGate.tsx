@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Fingerprint, Lock, ShieldCheck } from "lucide-react";
 import { Outlet } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
+import { cn } from "../lib/cn";
+import { inputCls } from "../lib/fieldCls";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Page } from "./ui/Page";
@@ -261,7 +263,7 @@ export function DeviceLockGate({
       <Page className="space-y-4" aria-label={`${section} lock`}>
         <Card className="space-y-4 p-5">
           <div className="flex items-center gap-3">
-            <span className="flex size-12 items-center justify-center rounded-2xl bg-vault-500/15 text-vault-300">
+            <span className="liquid-bubble liquid-raised flex size-12 items-center justify-center rounded-2xl text-vault-300 [--lq-bg:#14b8a626]">
               <Lock className="size-6" />
             </span>
             <div>
@@ -299,7 +301,7 @@ export function DeviceLockGate({
               maxLength={6}
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-center text-lg tracking-[0.4em] text-fg"
+              className={cn(inputCls, "text-center text-lg tracking-[0.4em]")}
             />
             <Button
               fullWidth
@@ -313,7 +315,7 @@ export function DeviceLockGate({
           </div>
 
           {status?.pin && (
-            <div className="space-y-2 border-t border-line pt-3">
+            <div className="space-y-2 border-t border-white/10 pt-3">
               <button
                 type="button"
                 className="text-xs font-medium text-vault-300"
@@ -332,7 +334,7 @@ export function DeviceLockGate({
                     value={resetCode}
                     onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     placeholder="Email code"
-                    className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-center text-sm tracking-[0.3em] text-fg"
+                    className={cn(inputCls, "text-center text-sm tracking-[0.3em]")}
                   />
                   <input
                     inputMode="numeric"
@@ -340,7 +342,7 @@ export function DeviceLockGate({
                     value={resetPin}
                     onChange={(e) => setResetPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     placeholder="New 6-digit PIN"
-                    className="w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-center text-sm tracking-[0.3em] text-fg"
+                    className={cn(inputCls, "text-center text-sm tracking-[0.3em]")}
                   />
                   <Button fullWidth loading={busy} onClick={() => void onConfirmReset()}>
                     Set new PIN

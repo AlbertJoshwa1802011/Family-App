@@ -40,6 +40,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useVault } from "../context/VaultContext";
 import { cn } from "../lib/cn";
+import { inputCls } from "../lib/fieldCls";
 import {
   SectionSubNav,
 } from "../components/ui/SectionSubNav";
@@ -177,13 +178,13 @@ function PassphraseInput({
         placeholder={placeholder ?? "Enter your vault passphrase"}
         autoFocus={autoFocus}
         autoComplete="current-password"
-        className="w-full rounded-xl bg-ink-950 px-3.5 py-3 pr-10 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+        className={cn(inputCls, "pr-11")}
       />
       <button
         type="button"
         onClick={() => setShow((s) => !s)}
         aria-label={show ? "Hide passphrase" : "Show passphrase"}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg-muted"
+        className="absolute right-3 top-1/2 z-1 -translate-y-1/2 text-fg-subtle hover:text-fg-muted"
       >
         {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
       </button>
@@ -224,7 +225,7 @@ function VaultSetupWizard({ familyId }: { familyId: string }) {
   if (step === "intro") {
     return (
       <div className="flex flex-col items-center py-12 text-center gap-6">
-        <div className="flex size-20 items-center justify-center rounded-3xl bg-vault-500/15">
+        <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
           <Shield className="size-10 text-vault-400" />
         </div>
         <div className="space-y-2 max-w-sm">
@@ -341,7 +342,7 @@ function VaultUnlockForm({ familyId }: { familyId: string }) {
 
   return (
     <div className="flex flex-col items-center py-12 gap-6">
-      <div className="flex size-20 items-center justify-center rounded-3xl bg-vault-500/15">
+      <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
         <Lock className="size-10 text-vault-400" />
       </div>
       <div className="text-center max-w-xs">
@@ -370,7 +371,7 @@ function VaultUnlockForm({ familyId }: { familyId: string }) {
 function VaultNoAccess() {
   return (
     <div className="flex flex-col items-center py-12 text-center gap-6">
-      <div className="flex size-20 items-center justify-center rounded-3xl bg-warning/15">
+      <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#f59e0b26]">
         <Lock className="size-10 text-warning" />
       </div>
       <div className="space-y-2 max-w-sm">
@@ -445,7 +446,7 @@ function UnlockedVault({
   return (
     <div className="space-y-5">
       {/* Status bar */}
-      <div className="flex items-center gap-2 rounded-2xl border border-vault-500/25 bg-vault-500/8 px-4 py-2.5">
+      <div className="liquid-bubble flex items-center gap-2 rounded-2xl px-4 py-2.5 [--lq-bg:#14b8a61a]">
         <ShieldCheck className="size-4 shrink-0 text-vault-400" />
         <span className="flex-1 text-sm font-medium text-vault-300">
           Vault unlocked — {items.length} credential{items.length !== 1 ? "s" : ""}
@@ -460,14 +461,14 @@ function UnlockedVault({
 
       {/* Search bar */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+        <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle" />
         <input
           ref={searchInputRef}
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by type…"
-          className="w-full rounded-xl bg-surface border border-line pl-9 pr-4 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+          className={cn(inputCls, "py-2.5 pl-9 pr-4")}
         />
       </div>
 
