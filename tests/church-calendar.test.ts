@@ -61,8 +61,8 @@ describe("/api/church", () => {
             success: true,
             funds: [
               {
-                slug: "tech-fund",
-                name: "Tech fund",
+                slug: "christmas-fund",
+                name: "Christmas Fund",
                 totalCollected: 1000,
                 spentOnProducts: 250,
                 availableBalance: 750,
@@ -97,7 +97,7 @@ describe("/api/church", () => {
       funds: { slug: string }[];
     };
     expect(body.configured).toBe(true);
-    expect(body.funds[0]?.slug).toBe("tech-fund");
+    expect(body.funds[0]?.slug).toBe("christmas-fund");
   });
 
   it("GET /snapshot maps upstream 401 to church_auth_failed", async () => {
@@ -130,8 +130,8 @@ describe("/api/church", () => {
             success: true,
             funds: [
               {
-                slug: "tech-fund",
-                name: "Tech fund",
+                slug: "christmas-fund",
+                name: "Christmas Fund",
                 totalCollected: 1000,
                 spentOnProducts: 250,
                 availableBalance: 750,
@@ -151,7 +151,7 @@ describe("/api/church", () => {
                 name: "Mic",
                 amount: 250,
                 date: "2026-08-01",
-                fund: "tech-fund",
+                fund: "christmas-fund",
                 status: "Active",
               },
             ],
@@ -181,7 +181,7 @@ describe("/api/church", () => {
       funds: { slug: string; availableBalance: number }[];
       purchases: { name: string }[];
     };
-    expect(body.funds[0].slug).toBe("tech-fund");
+    expect(body.funds[0].slug).toBe("christmas-fund");
     expect(body.funds[0].availableBalance).toBe(750);
     expect(body.purchases[0].name).toBe("Mic");
   });
@@ -193,8 +193,8 @@ describe("/api/church", () => {
           success: true,
           funds: [
             {
-              slug: "tech-fund",
-              name: "Tech fund",
+              slug: "christmas-fund",
+              name: "Christmas Fund",
               totalCollected: 1000,
               spentOnProducts: 250,
               availableBalance: 750,
@@ -215,7 +215,7 @@ describe("/api/church", () => {
 
     const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-08",
       dueMinor: 75_000,
       paidMinor: 75_000,
@@ -245,8 +245,8 @@ describe("/api/church", () => {
           success: true,
           funds: [
             {
-              slug: "tech-fund",
-              name: "Tech fund",
+              slug: "christmas-fund",
+              name: "Christmas Fund",
               totalCollected: 5320,
               spentOnProducts: 0,
               availableBalance: 5320,
@@ -267,7 +267,7 @@ describe("/api/church", () => {
 
     const partial = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-09",
       dueMinor: 532_000,
       paidMinor: 300_000,
@@ -296,7 +296,7 @@ describe("/api/church", () => {
 
     const payoff = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-10",
       dueMinor: 232_000,
       paidMinor: 232_000,
@@ -329,8 +329,8 @@ describe("/api/church", () => {
           success: true,
           funds: [
             {
-              slug: "tech-fund",
-              name: "Tech fund",
+              slug: "christmas-fund",
+              name: "Christmas Fund",
               totalCollected: 1000,
               spentOnProducts: 0,
               availableBalance: 1000,
@@ -347,7 +347,7 @@ describe("/api/church", () => {
     const alice = seedActor(sqlite, family.id, "owner");
     const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-08",
       dueMinor: 100_000,
       paidMinor: 150_000,
@@ -372,7 +372,7 @@ describe("/api/church", () => {
     const alice = seedActor(sqlite, family.id, "owner");
     const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "August",
       dueMinor: 75_000,
       paidMinor: 75_000,

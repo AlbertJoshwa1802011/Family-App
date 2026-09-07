@@ -33,6 +33,34 @@ export interface ChurchFund {
   status: string;
 }
 
+/**
+ * Tech Fund (`tech-contributions`) and Contribution Fund are platform
+ * super-admin only — ordinary family members must not see balances, purchases,
+ * or settlements for them. Christmas and other public pots stay family-visible.
+ *
+ * Match by known slugs plus slug/name keywords so renamed variants stay gated.
+ */
+const SUPER_ADMIN_ONLY_FUND_SLUGS = new Set([
+  "tech-contributions",
+  "tech-fund",
+  "contribution-fund",
+  "contributions",
+  "contribution",
+]);
+
+export function isSuperAdminOnlyChurchFund(fund: {
+  slug: string;
+  name?: string | null;
+}): boolean {
+  const slug = fund.slug.trim().toLowerCase();
+  if (!slug) return false;
+  if (SUPER_ADMIN_ONLY_FUND_SLUGS.has(slug)) return true;
+  if (slug.includes("tech") || slug.includes("contribution")) return true;
+  const name = (fund.name ?? "").trim().toLowerCase();
+  if (!name) return false;
+  return /\btech\b/.test(name) || /\bcontribution/.test(name);
+}
+
 export interface ChurchPurchase {
   id: string;
   name: string;

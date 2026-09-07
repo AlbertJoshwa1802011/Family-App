@@ -76,7 +76,7 @@ function parseRupees(raw: string): number | null {
 }
 
 export function Funds() {
-  const { activeFamilyId } = useAuth();
+  const { activeFamilyId, user } = useAuth();
   const qc = useQueryClient();
   const [view, setView] = useState<"church" | "hand">("church");
   const [today] = useState(() => new Date().toISOString().slice(0, 7));
@@ -196,6 +196,12 @@ export function Funds() {
             site. Settlements here track what you actually transferred — you can
             pay part of the amount due and carry the rest to next month.
           </p>
+          {user?.isPlatformAdmin && (
+            <p className="mt-2 text-xs text-fg-subtle">
+              Tech Fund and Contribution Fund are visible only to you as super
+              admin.
+            </p>
+          )}
         </Card>
 
         {snapQ.isLoading ? (
