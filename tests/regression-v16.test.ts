@@ -552,6 +552,8 @@ describe("Church snapshot + settle", () => {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "2026-08",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
     });
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toBe("church_not_configured");
@@ -567,6 +569,8 @@ describe("Church snapshot + settle", () => {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "2026-08",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
     });
     expect(res.status).toBe(404);
   });
@@ -593,6 +597,8 @@ describe("Church snapshot + settle", () => {
       familyId: famA.id,
       fundSlug: "tech-fund",
       periodKey: "2026-08",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
     });
     expect(settle.status).toBe(404);
   });
@@ -631,6 +637,8 @@ describe("Church snapshot + settle", () => {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "2026-09",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
     });
     expect(settle.status).toBe(201);
 

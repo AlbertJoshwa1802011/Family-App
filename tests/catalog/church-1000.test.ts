@@ -45,6 +45,8 @@ describe("catalog: church ≥1000", () => {
           familyId: s.familyId,
           fundSlug: "building",
           periodKey: c.periodKey,
+          dueMinor: 100_00,
+          paidMinor: 100_00,
         },
       });
       expect(res.status).toBe(400);
@@ -62,6 +64,8 @@ describe("catalog: church ≥1000", () => {
           familyId: s.familyId,
           fundSlug: "building",
           periodKey: c.periodKey,
+          dueMinor: 100_00,
+          paidMinor: 100_00,
         },
       });
       expect(res.status).toBe(503);

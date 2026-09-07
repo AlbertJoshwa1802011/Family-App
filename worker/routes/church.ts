@@ -2,12 +2,13 @@
  * Church fund snapshot + settlements.
  *
  * Live collected / spent numbers come from the contributions Pages app.
- * This Worker only stores monthly settlement records the family adds here.
+ * This Worker stores settlement payments the family records here, including
+ * partial payments with carry-forward (due − paid).
  */
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -31,6 +32,18 @@ function zv<T extends z.ZodType>(s: T) {
       );
     }
   });
+}
+
+/** Sum of unpaid carry (remainingMinor > 0) per fund slug. */
+function outstandingByFund(
+  settlements: { fundSlug: string; remainingMinor: number }[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const s of settlements) {
+    if (s.remainingMinor <= 0) continue;
+    map.set(s.fundSlug, (map.get(s.fundSlug) ?? 0) + s.remainingMinor);
+  }
+  return map;
 }
 
 churchRoutes.get("/snapshot", requireSession, async (c) => {
@@ -75,21 +88,44 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
     .where(eq(schema.churchSettlements.familyId, familyId))
     .orderBy(desc(schema.churchSettlements.settledAt));
 
+  const outstanding = outstandingByFund(settlements);
+  const funds = fundsRes.funds.map((f) => {
+    const outstandingMinor = outstanding.get(f.slug) ?? 0;
+    const availableMinor = rupeesToMinor(f.availableBalance);
+    // Prefer unpaid carry when present; otherwise suggest live available.
+    const suggestedDueMinor =
+      outstandingMinor > 0 ? outstandingMinor : availableMinor;
+    return {
+      ...f,
+      outstandingMinor,
+      suggestedDueMinor,
+    };
+  });
+
   return c.json({
     configured: true,
     currency: fundsRes.currency,
-    funds: fundsRes.funds,
+    funds,
     purchases,
     settlements,
   });
 });
 
-const settleSchema = z.object({
+const settleFieldsSchema = z.object({
   familyId: z.string().min(1),
   fundSlug: z.string().min(1).max(80),
   periodKey: z.string().regex(/^\d{4}-\d{2}$/, "Must be yyyy-mm"),
+  /** Total due for this payment in minor units (paise). */
+  dueMinor: z.number().int().positive().max(1_000_000_000_000),
+  /** Amount paid now in minor units. Must be ≤ dueMinor. */
+  paidMinor: z.number().int().positive().max(1_000_000_000_000),
   note: z.string().max(2000).optional().nullable(),
 });
+
+const settleSchema = settleFieldsSchema.refine(
+  (d) => d.paidMinor <= d.dueMinor,
+  { message: "paidMinor must be ≤ dueMinor", path: ["paidMinor"] },
+);
 
 churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
   const userId = c.get("userId")!;
@@ -110,26 +146,26 @@ churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
   if (!fund) return c.json({ error: "not_found" }, 404);
 
   const db = getDb(c.env);
-  const existing = await db
-    .select({ id: schema.churchSettlements.id })
-    .from(schema.churchSettlements)
+  const collectedMinor = rupeesToMinor(fund.totalCollected);
+  const spentMinor = rupeesToMinor(fund.spentOnProducts);
+  const dueMinor = data.dueMinor;
+  const paidMinor = data.paidMinor;
+  const remainingMinor = dueMinor - paidMinor;
+  const id = crypto.randomUUID();
+  const settledAt = Math.floor(Date.now() / 1000);
+
+  // Roll prior carry into this payment: only the newest row keeps an open
+  // remaining balance so "still to settle" does not double-count history.
+  await db
+    .update(schema.churchSettlements)
+    .set({ remainingMinor: 0 })
     .where(
       and(
         eq(schema.churchSettlements.familyId, data.familyId),
         eq(schema.churchSettlements.fundSlug, data.fundSlug),
-        eq(schema.churchSettlements.periodKey, data.periodKey),
+        gt(schema.churchSettlements.remainingMinor, 0),
       ),
-    )
-    .get();
-  if (existing) {
-    return c.json({ error: "already_settled", periodKey: data.periodKey }, 409);
-  }
-
-  const collectedMinor = rupeesToMinor(fund.totalCollected);
-  const spentMinor = rupeesToMinor(fund.spentOnProducts);
-  const remainingMinor = rupeesToMinor(fund.availableBalance);
-  const id = crypto.randomUUID();
-  const settledAt = Math.floor(Date.now() / 1000);
+    );
 
   await db.insert(schema.churchSettlements).values({
     id,
@@ -138,6 +174,8 @@ churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
     periodKey: data.periodKey,
     collectedMinor,
     spentMinor,
+    dueMinor,
+    paidMinor,
     remainingMinor,
     settledAt,
     settledByUserId: userId,
@@ -150,7 +188,13 @@ churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
     action: "church.settled",
     targetType: "church_settlement",
     targetId: id,
-    meta: { fundSlug: data.fundSlug, periodKey: data.periodKey },
+    meta: {
+      fundSlug: data.fundSlug,
+      periodKey: data.periodKey,
+      dueMinor,
+      paidMinor,
+      remainingMinor,
+    },
   });
 
   const settlement = await db
