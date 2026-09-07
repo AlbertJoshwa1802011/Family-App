@@ -258,8 +258,9 @@ function EventFormFields({
       <Page className="space-y-4">
         <Card className="space-y-2 p-4">
           <p className="text-sm text-fg-muted">
-            Saving writes this event to <span className="font-medium text-fg">Google Calendar instantly</span>{" "}
-            (Calendar API). Connect Calendar once if you have not already.
+            Saving stores the event in Family Vault. It appears on your phone when{" "}
+            <span className="font-medium text-fg">Google Calendar is connected</span>
+            {" "}— or use Add to Google / Apple on the next screen.
           </p>
           <a
             href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(isEdit && id ? `/calendar/events/${id}/edit` : "/calendar/events/new")}`}

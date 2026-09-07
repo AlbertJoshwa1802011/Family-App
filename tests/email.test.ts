@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canSendEmail,
+  classifyResendError,
   isEmailConfigured,
   reminderEmailHtml,
   sendEmail,
@@ -144,6 +145,39 @@ describe("sendEmailResult", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.via).toBe("none");
+    expect(result.error).toBe("resend_rejected");
+  });
+
+  it("surfaces Resend testing-mode recipient restriction", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          statusCode: 403,
+          name: "validation_error",
+          message:
+            "You can only send testing emails to your own email address (owner@example.com).",
+        }),
+        { status: 403 },
+      ),
+    );
+    const result = await sendEmailResult(makeEnv({ RESEND_API_KEY: "re_test" }), {
+      to: "other@example.com",
+      subject: "Hi",
+      html: "<p>x</p>",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("resend_testing_recipients");
+  });
+});
+
+describe("classifyResendError", () => {
+  it("detects testing-mode recipient limits", () => {
+    expect(
+      classifyResendError(
+        403,
+        "You can only send testing emails to your own email address (a@b.com). To send emails to other recipients, please verify a domain.",
+      ),
+    ).toBe("resend_testing_recipients");
   });
 });
 

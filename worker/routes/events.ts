@@ -11,6 +11,7 @@ import { notifyEventChange } from "../lib/eventNotify";
 import {
   calendarStatusMessage,
   deleteGoogleCalendarEvent,
+  googleCalendarTemplateUrl,
   upsertGoogleCalendarEvent,
   type CalendarSyncResult,
 } from "../lib/googleCalendar";
@@ -219,6 +220,11 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     message: calendarStatusMessage("failed"),
   };
   if (event) {
+    calendar = {
+      ...calendar,
+      googleTemplateUrl: googleCalendarTemplateUrl(event),
+      icsUrl: `/api/calendar/events/${event.id}/ics`,
+    };
     try {
       calendar = await syncCalendar(c.env, db, userId, event);
     } catch (err) {
@@ -347,6 +353,11 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     message: calendarStatusMessage("failed"),
   };
   if (updatedEvent) {
+    calendar = {
+      ...calendar,
+      googleTemplateUrl: googleCalendarTemplateUrl(updatedEvent),
+      icsUrl: `/api/calendar/events/${updatedEvent.id}/ics`,
+    };
     try {
       calendar = await syncCalendar(c.env, db, userId, updatedEvent);
     } catch (err) {

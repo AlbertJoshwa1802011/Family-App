@@ -12,11 +12,17 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { buildCalendar, type IcsAllDayItem, type IcsEvent } from "../lib/ics";
 import { generateRandom } from "../lib/crypto";
+import { toWebcalUrl } from "../lib/googleCalendar";
 
 export const calendarRoutes = new Hono<HonoEnv>();
 
 const FEED_KV_PREFIX = "calfeed:";
 const FEED_USER_PREFIX = "calfeed_user:";
+
+function feedUrls(appUrl: string, token: string) {
+  const url = `${appUrl}/api/calendar/feed/${token}.ics`;
+  return { url, webcalUrl: toWebcalUrl(url) };
+}
 
 calendarRoutes.post("/feed-token", requireSession, async (c) => {
   const userId = c.get("userId")!;
@@ -28,15 +34,15 @@ calendarRoutes.post("/feed-token", requireSession, async (c) => {
   await c.env.KV.put(`${FEED_USER_PREFIX}${userId}`, token);
 
   const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json({ url: `${appUrl}/api/calendar/feed/${token}.ics` });
+  return c.json(feedUrls(appUrl, token));
 });
 
 calendarRoutes.get("/feed-token", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const token = await c.env.KV.get(`${FEED_USER_PREFIX}${userId}`);
-  if (!token) return c.json({ url: null });
+  if (!token) return c.json({ url: null, webcalUrl: null });
   const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json({ url: `${appUrl}/api/calendar/feed/${token}.ics` });
+  return c.json(feedUrls(appUrl, token));
 });
 
 calendarRoutes.get("/feed/:file", async (c) => {

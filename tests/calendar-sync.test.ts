@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildCalendar, icsEscape } from "../worker/lib/ics";
-import { toGcalBody, calendarStatusMessage } from "../worker/lib/googleCalendar";
+import {
+  toGcalBody,
+  calendarStatusMessage,
+  googleCalendarTemplateUrl,
+  toWebcalUrl,
+} from "../worker/lib/googleCalendar";
 import { classifyGoogleApiError } from "../worker/lib/google";
 
 describe("icsEscape", () => {
@@ -111,5 +116,34 @@ describe("calendarStatusMessage", () => {
 
   it("points needs_reconnect at Connect Google Calendar", () => {
     expect(calendarStatusMessage("needs_reconnect")).toMatch(/Connect Google Calendar/i);
+  });
+
+  it("points failed sync at Add to Google / Apple fallbacks", () => {
+    expect(calendarStatusMessage("failed")).toMatch(/Add to Google Calendar|Apple/i);
+  });
+});
+
+describe("googleCalendarTemplateUrl", () => {
+  it("builds a Google TEMPLATE deep link for timed events", () => {
+    const url = googleCalendarTemplateUrl({
+      title: "Dinner",
+      description: "Bring cake",
+      location: "Home",
+      startAt: 1_800_000_000,
+      endAt: 1_800_003_600,
+      allDay: false,
+    });
+    expect(url).toContain("calendar.google.com/calendar/render");
+    expect(url).toContain("action=TEMPLATE");
+    expect(url).toContain("text=Dinner");
+    expect(url).toContain("dates=");
+  });
+});
+
+describe("toWebcalUrl", () => {
+  it("rewrites https feed URLs for Apple Calendar", () => {
+    expect(toWebcalUrl("https://fam.example/api/calendar/feed/abc.ics")).toBe(
+      "webcal://fam.example/api/calendar/feed/abc.ics",
+    );
   });
 });

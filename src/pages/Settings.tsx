@@ -192,13 +192,25 @@ function ReminderPrefsCard() {
       }
       if (msg === "gmail_api_disabled") {
         setTestMsg(
-          "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key.",
+          "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or verify a Resend domain.",
+        );
+        return;
+      }
+      if (msg.includes("Resend is in testing mode") || msg === "resend_testing_recipients") {
+        setTestMsg(
+          "Resend can only email the account owner until a domain is verified. Reconnect Admin → Storage with Gmail send so every family member receives mail.",
+        );
+        return;
+      }
+      if (msg === "gmail_auth_failed") {
+        setTestMsg(
+          "Gmail rejected the send. Reconnect Admin → Storage (include gmail.send), or Connect Gmail above.",
         );
         return;
       }
       if (msg === "email_send_failed" || msg.startsWith("resend_")) {
         setTestMsg(
-          "Could not send. Reconnect Admin → Storage for Gmail send, or check EMAIL_FROM on a verified Resend domain.",
+          "Could not send. Reconnect Admin → Storage for Gmail send (reaches all members), or verify a Resend domain.",
         );
         return;
       }
@@ -308,32 +320,48 @@ function ReminderPrefsCard() {
 
 function CalendarFeedCard() {
   const [url, setUrl] = useState<string | null>(null);
+  const [webcalUrl, setWebcalUrl] = useState<string | null>(null);
   const mint = useMutation({
-    mutationFn: () => api<{ url: string }>("/calendar/feed-token", { method: "POST" }),
-    onSuccess: (res) => setUrl(res.url),
+    mutationFn: () =>
+      api<{ url: string; webcalUrl: string }>("/calendar/feed-token", { method: "POST" }),
+    onSuccess: (res) => {
+      setUrl(res.url);
+      setWebcalUrl(res.webcalUrl);
+    },
   });
   const existing = useQuery({
     queryKey: ["calendar", "feed-token"],
-    queryFn: () => api<{ url: string | null }>("/calendar/feed-token"),
+    queryFn: () =>
+      api<{ url: string | null; webcalUrl: string | null }>("/calendar/feed-token"),
   });
   const shown = url ?? existing.data?.url ?? null;
+  const appleUrl = webcalUrl ?? existing.data?.webcalUrl ?? null;
 
   return (
     <section className="space-y-2">
       <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-        Google Calendar
+        Calendar subscribe (Apple & backup)
       </h3>
       <Card className="space-y-3 p-4">
         <p className="text-sm text-fg-muted">
-          Events write to your Google Calendar on save (instant). Use
-          Connections → Google Calendar above if Sync says permission is
-          missing. The ICS feed below is only a backup — Google may take hours
-          to refresh a feed.
+          Instant Google Calendar needs Connections → Google Calendar above.
+          For Apple Calendar, create a feed and open the webcal link — or open
+          any event and tap Add to Apple Calendar.
         </p>
         {shown && (
-          <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
-            {shown}
-          </p>
+          <div className="space-y-2">
+            <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
+              {shown}
+            </p>
+            {appleUrl && (
+              <a
+                href={appleUrl}
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"
+              >
+                Subscribe in Apple Calendar
+              </a>
+            )}
+          </div>
         )}
         <Button
           variant="secondary"
