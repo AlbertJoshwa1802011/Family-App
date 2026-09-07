@@ -212,6 +212,48 @@ describe("money destinations API", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("validation_error");
   });
+
+  it("unarchive clashes with an active same-name destination", async () => {
+    const first = await (
+      await req("POST", "/api/money/destinations", owner.cookie, {
+        familyId,
+        name: "Mom",
+      })
+    ).json() as { destination: { id: string } };
+
+    await req("POST", "/api/money/movements", owner.cookie, {
+      familyId,
+      type: "received",
+      amount: 10,
+    });
+    await req("POST", "/api/money/movements", owner.cookie, {
+      familyId,
+      type: "settled",
+      amount: 5,
+      destinationId: first.destination.id,
+    });
+    // Archive used destination, then recreate the same name.
+    await req(
+      "DELETE",
+      `/api/money/destinations/${first.destination.id}`,
+      owner.cookie,
+    );
+    await req("POST", "/api/money/destinations", owner.cookie, {
+      familyId,
+      name: "Mom",
+    });
+
+    const clash = await req(
+      "PATCH",
+      `/api/money/destinations/${first.destination.id}`,
+      owner.cookie,
+      { archived: false },
+    );
+    expect(clash.status).toBe(409);
+    expect(((await clash.json()) as { error: string }).error).toBe(
+      "destination_exists",
+    );
+  });
 });
 
 describe("money movements + summary API", () => {

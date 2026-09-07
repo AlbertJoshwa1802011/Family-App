@@ -387,7 +387,13 @@ moneyRoutes.patch(
       return c.json({ error: "forbidden" }, 403);
     }
 
-    if (updates.name !== undefined) {
+    const willBeActive =
+      updates.archived === false ||
+      (updates.archived === undefined && dest.archivedAt === null);
+    const nextName =
+      updates.name !== undefined ? updates.name.trim() : dest.name;
+
+    if (willBeActive) {
       const siblings = await db
         .select()
         .from(schema.settlementDestinations)
@@ -400,7 +406,7 @@ moneyRoutes.patch(
       const clash = siblings.find(
         (d) =>
           d.id !== id &&
-          d.name.toLowerCase() === updates.name!.toLowerCase(),
+          d.name.toLowerCase() === nextName.toLowerCase(),
       );
       if (clash) {
         return c.json({ error: "destination_exists", id: clash.id }, 409);
@@ -411,7 +417,7 @@ moneyRoutes.patch(
     const set: Partial<typeof schema.settlementDestinations.$inferInsert> = {
       updatedAt: now,
     };
-    if (updates.name !== undefined) set.name = updates.name.trim();
+    if (updates.name !== undefined) set.name = nextName;
     if (updates.kind !== undefined) set.kind = updates.kind;
     if (updates.sortOrder !== undefined) set.sortOrder = updates.sortOrder;
     if (updates.archived !== undefined) {

@@ -291,7 +291,7 @@ function SettlementsPanel({ familyId }: { familyId: string | undefined }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
-                  Available
+                  Received
                 </div>
                 <div className="mt-0.5 text-base font-semibold tabular-nums text-fg">
                   {formatMoney(data?.available ?? 0, currency)}
@@ -307,7 +307,7 @@ function SettlementsPanel({ familyId }: { familyId: string | undefined }) {
               </div>
             </div>
             <p className="text-xs text-fg-muted">
-              Available mirrors the full fund. Settlements reduce what you still hold.
+              Received is the full fund logged here. Settlements reduce what you still hold in hand.
             </p>
           </Card>
 
