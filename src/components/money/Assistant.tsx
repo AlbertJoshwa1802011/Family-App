@@ -42,7 +42,9 @@ export function Assistant() {
       return true;
     }
   });
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const statusQ = useQuery({
     queryKey: ["assistant", "status"],
@@ -71,6 +73,34 @@ export function Assistant() {
     window.addEventListener("family-vault:open-assistant", onOpen);
     return () => window.removeEventListener("family-vault:open-assistant", onOpen);
   }, []);
+
+  // Lock background scroll while the sheet is open (iOS Safari otherwise scrolls the app).
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // Lift the sheet above the software keyboard on mobile browsers.
+  useEffect(() => {
+    if (!open || typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const sync = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKeyboardInset(inset > 40 ? inset : 0);
+    };
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+      setKeyboardInset(0);
+    };
+  }, [open]);
 
   function openAssistant() {
     setOpen(true);
@@ -110,11 +140,13 @@ export function Assistant() {
         await qc.invalidateQueries({ queryKey: ["wishlist"] });
       }
     } catch (e) {
-      setError(
-        e instanceof ApiError && e.status === 501
-          ? "The assistant isn't set up yet."
-          : "The assistant couldn't answer. Try again.",
-      );
+      if (e instanceof ApiError && e.status === 501) {
+        setError("The assistant isn't set up yet.");
+      } else if (e instanceof ApiError && e.message && e.message !== e.code) {
+        setError(e.message);
+      } else {
+        setError("The assistant couldn't answer. Try again.");
+      }
     } finally {
       setBusy(false);
     }
@@ -127,10 +159,13 @@ export function Assistant() {
         onClick={openAssistant}
         aria-label="Ask the money assistant"
         className={cn(
-          "pb-safe fixed right-4 bottom-20 z-30 flex items-center justify-center gap-2",
+          // Sit above the liquid bottom tabs (z-30) without covering the sheet (z-50).
+          "fixed right-4 z-40 flex items-center justify-center gap-2",
           "rounded-full border border-white/20 bg-vault-600 text-white",
           "shadow-[0_8px_28px_-8px_rgba(13,148,136,0.65)] backdrop-blur-md",
-          "transition-transform active:scale-95 md:bottom-6",
+          "transition-transform active:scale-95",
+          // Clear the floating tab bar + home indicator on phones; sit lower on desktop.
+          "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-6",
           showAiLabel ? "h-14 min-w-14 px-4" : "size-14",
         )}
       >
@@ -151,26 +186,32 @@ export function Assistant() {
               role="dialog"
               aria-modal="true"
               aria-label="Money assistant"
+              style={keyboardInset ? { bottom: keyboardInset } : undefined}
               className={cn(
-                "pb-safe liquid-bubble fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-3xl shadow-pop",
+                // Edge-to-edge bottom sheet — do NOT use .liquid-bubble here: that
+                // recipe forces 28px radius on all corners and leaves a gap above
+                // the home indicator on phones.
+                "fixed inset-x-0 bottom-0 z-50 flex max-h-[min(85vh,100dvh)] flex-col",
+                "rounded-t-3xl border border-b-0 border-line bg-ink-950/95 shadow-pop",
+                "backdrop-blur-2xl",
                 "animate-[slideUp_220ms_cubic-bezier(0.22,1,0.36,1)]",
-                "md:inset-x-auto md:right-4 md:bottom-4 md:w-96 md:rounded-3xl",
+                "md:inset-x-auto md:right-4 md:bottom-4 md:w-96 md:max-h-[85vh] md:rounded-3xl md:border",
               )}
             >
-              <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+              <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
                 <Sparkles className="size-4 text-m3-purple" aria-hidden="true" />
                 <h2 className="flex-1 text-sm font-semibold text-fg">Money assistant</h2>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
                   aria-label="Close"
-                  className="flex size-9 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5"
+                  className="flex size-11 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5"
                 >
                   <X className="size-5" />
                 </button>
               </div>
 
-              <div ref={scrollRef} className="min-h-40 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              <div ref={scrollRef} className="min-h-40 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
                 {turns.length === 0 && (
                   <div className="space-y-3">
                     <p className="text-sm text-fg-muted">
@@ -182,7 +223,7 @@ export function Assistant() {
                           key={s}
                           type="button"
                           onClick={() => send(s)}
-                          className="rounded-full border border-line px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-white/5"
+                          className="rounded-full border border-line px-3 py-2 text-xs text-fg-muted transition-colors hover:bg-white/5"
                         >
                           {s}
                         </button>
@@ -198,7 +239,7 @@ export function Assistant() {
                       "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm",
                       t.role === "user"
                         ? "ml-auto bg-vault-600/25 text-fg"
-                        : "bg-ink-950/60 text-fg-muted",
+                        : "bg-ink-900/80 text-fg-muted",
                     )}
                   >
                     {t.text}
@@ -206,7 +247,7 @@ export function Assistant() {
                 ))}
 
                 {busy && (
-                  <div className="max-w-[85%] rounded-2xl bg-ink-950/60 px-3.5 py-2.5">
+                  <div className="max-w-[85%] rounded-2xl bg-ink-900/80 px-3.5 py-2.5">
                     <span className="flex gap-1" aria-label="Thinking">
                       {[0, 1, 2].map((i) => (
                         <span
@@ -231,16 +272,24 @@ export function Assistant() {
                   e.preventDefault();
                   send(input);
                 }}
-                className="flex items-center gap-2 border-t border-line px-4 py-3"
+                className={cn(
+                  "flex shrink-0 items-center gap-2 border-t border-line px-4 pt-3",
+                  // Keep the composer clear of the home indicator when the keyboard is closed.
+                  keyboardInset > 0
+                    ? "pb-3"
+                    : "pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+                )}
               >
                 <input
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="I spent 70 on noodles…"
                   aria-label="Message the assistant"
-                  className="liquid-field flex-1 rounded-2xl px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+                  // text-base (≥16px) avoids iOS focus-zoom; liquid-field keeps the glass look.
+                  className="liquid-field min-h-11 flex-1 rounded-2xl px-3.5 py-2.5 text-base text-fg placeholder:text-fg-subtle focus:outline-none"
                 />
-                <Button type="submit" loading={busy} aria-label="Send">
+                <Button type="submit" loading={busy} aria-label="Send" className="size-11 shrink-0">
                   <CornerDownLeft className="size-4" />
                 </Button>
               </form>
