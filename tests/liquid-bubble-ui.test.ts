@@ -91,10 +91,22 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     expect(src).toContain("Money views");
   });
 
-  it("SectionSubNav and LiquidPillTabs use liquid-pill-track", () => {
-    expect(read("src/components/ui/SectionSubNav.tsx")).toContain("liquid-pill-track");
+  it("SectionSubNav uses equal-width grid so the bubble stays aligned on phones", () => {
+    const src = read("src/components/ui/SectionSubNav.tsx");
+    expect(src).toContain("liquid-pill-track");
+    expect(src).toContain("gridTemplateColumns");
+    expect(src).not.toMatch(/className="[^"]*min-w-max/);
     expect(read("src/components/ui/LiquidPillTabs.tsx")).toContain("liquid-pill-track");
     expect(read("src/components/ui/LiquidPillTabs.tsx")).toContain("MONEY_ACCENT");
+  });
+
+  it("assistant sheet is an edge-to-edge phone sheet, not a fully-rounded liquid bubble", () => {
+    const src = read("src/components/money/Assistant.tsx");
+    expect(src).toContain("rounded-t-3xl");
+    expect(src).toContain("visualViewport");
+    expect(src).toContain("bottom-[calc(5.5rem+env(safe-area-inset-bottom))]");
+    // Using .liquid-bubble on the sheet forced 28px radius on the bottom edge.
+    expect(src).not.toMatch(/liquid-bubble fixed inset-x-0 bottom-0/);
   });
 });
 

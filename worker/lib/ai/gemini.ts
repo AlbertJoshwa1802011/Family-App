@@ -11,7 +11,8 @@
  */
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-2.0-flash";
+/** Current Flash id — override with env GEMINI_MODEL if Google retires it. */
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 export interface FunctionDeclaration {
   name: string;
@@ -24,13 +25,15 @@ export interface FunctionDeclaration {
 }
 
 export interface GeminiContent {
-  role: "user" | "model" | "function";
+  /** Gemini only accepts user | model. Function replies go as user + functionResponse. */
+  role: "user" | "model";
   parts: unknown[];
 }
 
 interface GeminiCandidatePart {
   text?: string;
-  functionCall?: { name: string; args: Record<string, unknown> };
+  thought?: boolean;
+  functionCall?: { name: string; args?: Record<string, unknown>; id?: string };
 }
 
 interface GeminiResponse {
@@ -111,7 +114,7 @@ export async function runAssistant(args: {
       tools: [{ functionDeclarations: args.tools }],
     });
 
-    const parts = json.candidates?.[0]?.content?.parts ?? [];
+    const parts = (json.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought);
     const calls = parts.filter((p) => p.functionCall).map((p) => p.functionCall!);
 
     if (calls.length === 0) {
@@ -123,7 +126,16 @@ export async function runAssistant(args: {
     }
 
     // Echo the model's call back into the transcript, then answer it.
-    contents.push({ role: "model", parts: calls.map((c) => ({ functionCall: c })) });
+    contents.push({
+      role: "model",
+      parts: calls.map((c) => ({
+        functionCall: {
+          name: c.name,
+          args: c.args ?? {},
+          ...(c.id ? { id: c.id } : {}),
+        },
+      })),
+    });
 
     const responseParts: unknown[] = [];
     for (const call of calls) {
@@ -137,10 +149,17 @@ export async function runAssistant(args: {
       }
       toolCalls.push({ name: call.name, args: call.args ?? {}, result });
       responseParts.push({
-        functionResponse: { name: call.name, response: { result } },
+        functionResponse: {
+          name: call.name,
+          // Newer Gemini models require the functionCall id echoed back.
+          ...(call.id ? { id: call.id } : {}),
+          response: result && typeof result === "object" ? result : { result },
+        },
       });
     }
-    contents.push({ role: "function", parts: responseParts });
+    // IMPORTANT: functionResponse parts must use role "user", not "function".
+    // "function" is rejected by current Gemini models and surfaces as 502 in the UI.
+    contents.push({ role: "user", parts: responseParts });
   }
 
   return {
