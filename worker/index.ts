@@ -23,6 +23,7 @@ import { wishlistRoutes } from "./routes/wishlist";
 import { assistantRoutes } from "./routes/assistant";
 import { calendarRoutes } from "./routes/calendar";
 import { churchRoutes } from "./routes/church";
+import { settlementRoutes } from "./routes/settlements";
 import { deviceLockRoutes } from "./routes/deviceLock";
 import { chatRoutes } from "./routes/chat";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
@@ -95,6 +96,7 @@ api.route("/wishlist", wishlistRoutes);
 api.route("/assistant", assistantRoutes);
 api.route("/calendar", calendarRoutes);
 api.route("/church", churchRoutes);
+api.route("/settlements", settlementRoutes);
 api.route("/device-lock", deviceLockRoutes);
 api.route("/chat", chatRoutes);
 

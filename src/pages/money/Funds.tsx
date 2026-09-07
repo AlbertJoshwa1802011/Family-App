@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HandCoins } from "lucide-react";
+import { Church, HandCoins } from "lucide-react";
 import { AppBar } from "../../components/ui/AppBar";
 import { Page } from "../../components/ui/Page";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { LiquidPillTabs } from "../../components/ui/LiquidPillTabs";
 import { MoneySubNav } from "../../components/money/MoneySubNav";
 import { useAuth } from "../../context/AuthContext";
 import { api, ApiError } from "../../lib/api";
 import { formatMoney } from "../../lib/money";
 import { inputCls as inputClass } from "../../lib/fieldCls";
+import { HandSettlementsPanel } from "./HandSettlements";
 
 interface ChurchFund {
   slug: string;
@@ -76,6 +78,7 @@ function parseRupees(raw: string): number | null {
 export function Funds() {
   const { activeFamilyId } = useAuth();
   const qc = useQueryClient();
+  const [view, setView] = useState<"church" | "hand">("church");
   const [today] = useState(() => new Date().toISOString().slice(0, 7));
   const [fundSlug, setFundSlug] = useState("");
   const [periodKey, setPeriodKey] = useState(today);
@@ -173,6 +176,20 @@ export function Funds() {
       <Page width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
 
+        <LiquidPillTabs
+          ariaLabel="Fund settlement views"
+          value={view}
+          onChange={setView}
+          items={[
+            { id: "church", label: "Church", icon: Church },
+            { id: "hand", label: "In hand", icon: HandCoins },
+          ]}
+        />
+
+        {view === "hand" ? (
+          <HandSettlementsPanel familyId={activeFamilyId} />
+        ) : (
+          <>
         <Card className="p-4">
           <p className="text-sm text-fg-muted">
             Live collection and purchase totals come from the church contributions
@@ -415,6 +432,8 @@ export function Funds() {
               ))}
             </Card>
           </section>
+        )}
+          </>
         )}
       </Page>
     </>

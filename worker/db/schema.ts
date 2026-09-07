@@ -1436,6 +1436,69 @@ export const churchSettlements = sqliteTable(
   ],
 );
 
+// ── Hand settlements (Mom / Church / any destination) ────────────────────────
+// Generic ledger for "fund in hand → settled to a destination". Destinations
+// are family-scoped tracks on the Funds page — not separate pages.
+// Balances: available = Σ received, settled = Σ settled, inHand = available − settled.
+
+export const SETTLEMENT_DESTINATION_KINDS = [
+  "person",
+  "organization",
+  "other",
+] as const;
+
+export const MONEY_MOVEMENT_TYPES = ["received", "settled"] as const;
+
+export const settlementDestinations = sqliteTable(
+  "settlement_destinations",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: SETTLEMENT_DESTINATION_KINDS })
+      .notNull()
+      .default("other"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: integer("archived_at"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_settlement_dest_family").on(t.familyId, t.sortOrder)],
+);
+
+export const moneyMovements = sqliteTable(
+  "money_movements",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    type: text("type", { enum: MONEY_MOVEMENT_TYPES }).notNull(),
+    destinationId: text("destination_id").references(
+      () => settlementDestinations.id,
+      { onDelete: "restrict" },
+    ),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    note: text("note"),
+    movedOn: text("moved_on").notNull(), // ISO yyyy-mm-dd
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_money_movements_family_moved").on(t.familyId, t.movedOn),
+    index("idx_money_movements_dest").on(t.destinationId, t.movedOn),
+  ],
+);
+
 // ── Family chat ──────────────────────────────────────────────────────────────
 // Soft-deleted messages keep their slot (deleted_at set) but never leak body.
 
