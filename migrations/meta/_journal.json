@@ -71,6 +71,13 @@
       "when": 1788794917630,
       "tag": "0009_thankful_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788806799856,
+      "tag": "0010_mighty_shriek",
+      "breakpoints": true
     }
   ]
 }

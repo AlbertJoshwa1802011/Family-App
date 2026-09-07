@@ -541,6 +541,72 @@ export const expenses = sqliteTable(
   (t) => [index("idx_expense_family_spent").on(t.familyId, t.spentOn)],
 );
 
+// ── Money settlements ────────────────────────────────────────────────────────
+// Generic ledger for "fund in hand → settled to a destination".
+// Destinations are family-scoped tracks (Mom, Church, landlord, …) — not
+// separate pages. Balances are computed:
+//   available = sum(received), settled = sum(settled), inHand = available − settled.
+
+export const SETTLEMENT_DESTINATION_KINDS = [
+  "person",
+  "organization",
+  "other",
+] as const;
+
+export const MONEY_MOVEMENT_TYPES = ["received", "settled"] as const;
+
+export const settlementDestinations = sqliteTable(
+  "settlement_destinations",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: SETTLEMENT_DESTINATION_KINDS })
+      .notNull()
+      .default("other"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Soft-archive keeps historical settlements readable under the old name.
+    archivedAt: integer("archived_at"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_settlement_dest_family").on(t.familyId, t.sortOrder)],
+);
+
+export const moneyMovements = sqliteTable(
+  "money_movements",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // received → into the pot; settled → out to a destination.
+    type: text("type", { enum: MONEY_MOVEMENT_TYPES }).notNull(),
+    destinationId: text("destination_id").references(
+      () => settlementDestinations.id,
+      { onDelete: "restrict" },
+    ),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    note: text("note"),
+    movedOn: text("moved_on").notNull(), // ISO yyyy-mm-dd
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_money_movements_family_moved").on(t.familyId, t.movedOn),
+    index("idx_money_movements_dest").on(t.destinationId, t.movedOn),
+  ],
+);
+
 // ── Task reminder dedupe ─────────────────────────────────────────────────────
 // Parallel to reminders_log / event_reminders_log. Daily cron fires at the
 // tightest of [7, 2, 1] days before a task's due date (plus overdue).

@@ -17,6 +17,7 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
 | Premium batch | ✅ Complete | Family chat + @mentions, tag-to-remind, dependents + member profiles, search + AI categories, ICS calendar feed, HTML email reports + weekly digest, Instagram-style nav |
 | Assistant + expenses | ✅ Complete | In-app Gemini assistant (Claude fallback; D1 context + tools), family expenses, task due-date emails at 7/2/1 days |
+| Money settlements | ✅ Complete | Fund ledger (received → in hand → settled to destinations like Mom/Church) on the Money page |
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
@@ -32,7 +33,7 @@ Schema source of truth: `worker/db/schema.ts`.
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
-`0006` (expenses + assistant_messages + task_reminders_log).
+`0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -63,6 +64,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `digest_log` | Dedupe for Monday weekly digest | 0004 |
 | `chat_messages` | Family chat (soft-delete) | 0004 |
 | `expenses` | Family spending log (integer cents) | 0006 |
+| `settlement_destinations` | Named settlement tracks (Mom, Church, …) | 0010 |
+| `money_movements` | Fund ledger: received into pot / settled to a destination | 0010 |
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
 
@@ -127,6 +130,9 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
+| GET | `/money/summary?familyId` | settlement balances (available / settled / inHand) + destinations + movements |
+| GET/POST | `/money/destinations` · PATCH/DELETE `/money/destinations/:id` | named settlement tracks; DELETE archives if used |
+| GET/POST | `/money/movements` · GET/PATCH/DELETE `/money/movements/:id` | received / settled ledger entries |
 | GET/POST | `/assistant?familyId` | private Gemini assistant (Claude fallback); D1 snapshot + tools · RL 20/10min · needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
 | GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
@@ -140,6 +146,10 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
 **POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
+
+**POST /money/destinations:** `name` 1–80 chars; `kind` enum `person|organization|other` (default other). Duplicate active names in the same family → `409 destination_exists`.
+
+**POST /money/movements:** `type` `received|settled`; `amount` positive major units; `movedOn` yyyy-mm-dd; `destinationId` **required** when settled, **forbidden** when received. Cross-family destination → `400 invalid_destination_id`. Balances: `available = Σ received`, `settled = Σ settled`, `inHand = available − settled`.
 
 **POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`. Gemini is preferred when both are set. GET includes `provider: "gemini" | "anthropic" | null`.
 
@@ -164,7 +174,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/contacts` | `Contacts` | Yes |
 | `/chat` | `Chat` | Yes |
 | `/assistant` | `Assistant` | Yes |
-| `/expenses` | `Expenses` | Yes |
+| `/expenses` | `Expenses` (Money: Settlements + Expenses) | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
@@ -173,7 +183,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
 unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
-the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Expenses and the Assistant are in
+the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Money and the Assistant are in
 the Dashboard "Quick access" grid. A **sparkles icon in the AppBar** on every
 family screen opens the assistant as a sheet (stay on the current page). Active state: `text-vault-300` +
 `strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
