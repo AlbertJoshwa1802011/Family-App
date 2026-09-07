@@ -45,11 +45,21 @@ const LOGIN_ERRORS: Record<string, string> = {
 
 type Mode = "request" | "signin";
 
+/** Same-origin relative path only — mirrors worker/lib/publicUrl.safeAppPath. */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return "/";
+  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\")) {
+    return raw;
+  }
+  return "/";
+}
+
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get("error");
+  const nextPath = safeNextPath(params.get("next"));
 
   const initialMode: Mode =
     oauthError === "access_denied" || oauthError === "access_revoked"
@@ -72,15 +82,20 @@ export function Login() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (isAuthenticated) navigate("/", { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (isAuthenticated) navigate(nextPath, { replace: true });
+  }, [isAuthenticated, navigate, nextPath]);
 
   async function startGoogle() {
     setStarting(true);
     setError("");
     setSuccess("");
     // Full-page GET so phones never sit on a JSON 404. The Worker 302s to Google.
-    window.location.assign("/api/auth/google/start");
+    // Carry `next` so invite email links land back on /invite/:token after OAuth.
+    const qs =
+      nextPath !== "/"
+        ? `?next=${encodeURIComponent(nextPath)}`
+        : "";
+    window.location.assign(`/api/auth/google/start${qs}`);
   }
 
   async function submitDemo(e: FormEvent) {

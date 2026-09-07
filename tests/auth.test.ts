@@ -82,6 +82,38 @@ describe("GET /api/auth/google/start (phone full-page navigation)", () => {
       ),
     );
   });
+
+  it("stores a safe next path in OAuth state for invite return", async () => {
+    const t = createTestEnv({ GOOGLE_CLIENT_ID: "test-client-id" });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start?next=/invite/abc-token",
+      { method: "GET" },
+      t.env,
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const location = res.headers.get("location") ?? "";
+    const state = new URL(location).searchParams.get("state");
+    expect(state).toBeTruthy();
+    const stored = (await t.env.KV.get(`oauth:state:${state}`, "json")) as {
+      next?: string;
+    } | null;
+    expect(stored?.next).toBe("/invite/abc-token");
+  });
+
+  it("rejects protocol-relative next paths in OAuth state", async () => {
+    const t = createTestEnv({ GOOGLE_CLIENT_ID: "test-client-id" });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start?next=//evil.example",
+      { method: "GET" },
+      t.env,
+    );
+    const location = res.headers.get("location") ?? "";
+    const state = new URL(location).searchParams.get("state");
+    const stored = (await t.env.KV.get(`oauth:state:${state}`, "json")) as {
+      next?: string;
+    } | null;
+    expect(stored?.next).toBe("/");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -138,6 +170,7 @@ describe("4. Protected family routes return 401 without session", () => {
     { method: "GET",   path: "/api/families/fam-1/members" },
     { method: "PATCH", path: "/api/families/fam-1/members/mem-1" },
     { method: "POST",  path: "/api/families/fam-1/invites" },
+    { method: "GET",   path: "/api/families/fam-1/invites" },
     { method: "POST",  path: "/api/families/invites/some-token/accept" },
     { method: "GET",   path: "/api/families/fam-1/activity" },
   ];
@@ -289,5 +322,11 @@ describe("publicUrl helpers", () => {
     expect(html).toContain('http-equiv="refresh"');
     expect(html).toContain("url=/");
     expect(html).not.toMatch(/<script/i);
+  });
+
+  it("login bounce preserves invite next path", () => {
+    const html = loginBounceHtml("/invite/tok-123");
+    expect(html).toContain("url=/invite/tok-123");
+    expect(html).toContain('href="/invite/tok-123"');
   });
 });

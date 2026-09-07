@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  Mail,
   Settings,
   UserPlus,
   Users,
@@ -35,6 +36,17 @@ interface FamilyMember {
   status: "active" | "invited" | "removed";
 }
 
+interface FamilyInvite {
+  id: string;
+  email: string;
+  role: "admin" | "member";
+  status: "pending" | "accepted" | "expired";
+  expiresAt: number;
+  acceptedAt: number | null;
+  createdAt: number;
+  invitedBy: string;
+}
+
 interface ActivityItem {
   id: string;
   actorName: string | null;
@@ -48,6 +60,21 @@ const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
   admin: "Admin",
   member: "Member",
+};
+
+const INVITE_STATUS_TONE: Record<
+  FamilyInvite["status"],
+  "warning" | "success" | "danger" | undefined
+> = {
+  pending: "warning",
+  accepted: "success",
+  expired: "danger",
+};
+
+const INVITE_STATUS_LABEL: Record<FamilyInvite["status"], string> = {
+  pending: "Pending",
+  accepted: "Joined",
+  expired: "Expired",
 };
 
 // Keys mirror worker audit actions (worker/lib/audit callers).
@@ -86,6 +113,14 @@ function formatRelativeTime(unixSec: number, nowSec: number): string {
   return `${Math.floor(diffSec / 86400)}d ago`;
 }
 
+function formatInviteExpiry(expiresAt: number, nowSec: number): string {
+  const diffSec = expiresAt - nowSec;
+  if (diffSec <= 0) return `expired ${formatRelativeTime(expiresAt, nowSec)}`;
+  if (diffSec < 3600) return `expires in ${Math.max(1, Math.floor(diffSec / 60))}m`;
+  if (diffSec < 86400) return `expires in ${Math.floor(diffSec / 3600)}h`;
+  return `expires in ${Math.floor(diffSec / 86400)}d`;
+}
+
 export function FamilyPage() {
   const { activeFamily, families, setActiveFamilyId, user } = useAuth();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -111,9 +146,18 @@ export function FamilyPage() {
     enabled: Boolean(familyId),
   });
 
+  const { data: invitesData, isLoading: invitesLoading } = useQuery({
+    queryKey: ["family-invites", familyId],
+    queryFn: () =>
+      api<{ invites: FamilyInvite[] }>(`/families/${familyId}/invites`),
+    enabled: Boolean(familyId) && canInvite,
+  });
+
   const members = membersData?.members ?? [];
   const activities = activityData?.activities ?? [];
+  const invites = invitesData?.invites ?? [];
   const activeMembers = members.filter((m) => m.status === "active");
+  const openInvites = invites.filter((i) => i.status !== "accepted");
 
   return (
     <>
@@ -166,7 +210,10 @@ export function FamilyPage() {
         )}
 
         {inviteOpen && familyId && (
-          <InviteCard familyId={familyId} onClose={() => setInviteOpen(false)} />
+          <InviteCard
+            familyId={familyId}
+            onClose={() => setInviteOpen(false)}
+          />
         )}
 
         {dependentOpen && familyId && (
@@ -183,6 +230,46 @@ export function FamilyPage() {
             isSelf={manageMember.userId === user?.id}
             onClose={() => setManageMember(null)}
           />
+        )}
+
+        {/* Pending / expired invites */}
+        {canInvite && (invitesLoading || openInvites.length > 0) && (
+          <section className="space-y-2">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              Invites
+            </h3>
+            {invitesLoading ? (
+              <Card className="divide-y divide-white/8">
+                <MemberSkeleton />
+              </Card>
+            ) : (
+              <Card className="divide-y divide-white/8 overflow-hidden">
+                {openInvites.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex min-h-14 items-center gap-3 px-4 py-3"
+                  >
+                    <span className="lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full [--lq-tint:var(--color-vault-400)]">
+                      <Mail className="size-4 text-vault-300" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-fg">
+                        {inv.email}
+                      </span>
+                      <span className="block truncate text-xs text-fg-muted">
+                        {ROLE_LABELS[inv.role] ?? inv.role}
+                        {" · "}
+                        {formatInviteExpiry(inv.expiresAt, now)}
+                      </span>
+                    </span>
+                    <Badge tone={INVITE_STATUS_TONE[inv.status]}>
+                      {INVITE_STATUS_LABEL[inv.status]}
+                    </Badge>
+                  </div>
+                ))}
+              </Card>
+            )}
+          </section>
         )}
 
         {/* Members section */}
@@ -316,22 +403,34 @@ function InviteCard({
   familyId: string;
   onClose: () => void;
 }) {
+  const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
   const [error, setError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ invite: { token: string } }>(`/families/${familyId}/invites`, {
+      api<{
+        invite: {
+          token: string;
+          inviteUrl?: string;
+          emailSent: boolean;
+        };
+      }>(`/families/${familyId}/invites`, {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), role }),
       }),
     onSuccess: (res) => {
-      // Invite links are accepted in-app: the invitee signs in with the
-      // invited email, then the app POSTs the token.
-      setInviteLink(`${window.location.origin}/invite/${res.invite.token}`);
+      // Prefer the server-built URL (APP_URL) so email and copy-link match.
+      setInviteLink(
+        res.invite.inviteUrl ??
+          `${window.location.origin}/invite/${res.invite.token}`,
+      );
+      setEmailSent(Boolean(res.invite.emailSent));
+      void qc.invalidateQueries({ queryKey: ["family-invites", familyId] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -350,11 +449,14 @@ function InviteCard({
     return (
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium text-fg">
-          Invite created for {email}
+          {emailSent
+            ? `Invite email sent to ${email}`
+            : `Invite created for ${email}`}
         </p>
         <p className="text-xs text-fg-muted">
-          Share this link with them. It only works for the Google account with
-          that email, and expires in 7 days.
+          {emailSent
+            ? "They can join by clicking the link in their email. Sign in with that Google account — the invite only works for this address and expires in 7 days."
+            : "Email delivery isn't configured on this server, so share this link manually. It only works for the Google account with that email, and expires in 7 days."}
         </p>
         <div className="flex items-center gap-2">
           <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
@@ -423,7 +525,7 @@ function InviteCard({
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
-            Create invite
+            Send invite
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

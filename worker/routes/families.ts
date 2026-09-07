@@ -11,6 +11,7 @@ import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
 import { inviteEmail } from "../lib/emailTemplates";
+import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -21,10 +22,18 @@ const createFamilySchema = z.object({
 });
 
 const inviteSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   role: z.enum(["admin", "member"]).optional().default("member"),
 });
 
+function inviteStatus(
+  row: { acceptedAt: number | null; expiresAt: number },
+  now: number,
+): "pending" | "accepted" | "expired" {
+  if (row.acceptedAt !== null) return "accepted";
+  if (row.expiresAt < now) return "expired";
+  return "pending";
+}
 const updateMemberSchema = z
   .object({
     role: z.enum(["admin", "member"]).optional(),
@@ -196,7 +205,7 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
 
   if (
     !acceptingUser ||
-    acceptingUser.email.toLowerCase() !== invite.email.toLowerCase()
+    normalizeEmail(acceptingUser.email) !== normalizeEmail(invite.email)
   ) {
     return c.json({ error: "invite_email_mismatch" }, 403);
   }
@@ -404,15 +413,52 @@ familyRoutes.patch(
   },
 );
 
-// POST /families/:id/invites — create an invite (admin+ only).
-// Email delivery is deferred to Phase 3 (Resend integration).
+// GET /families/:id/invites — list invites with derived status (admin+).
+familyRoutes.get("/:id/invites", requireSession, async (c) => {
+  const { id: familyId } = c.req.param();
+
+  const callerOrError = await requireFamilyMember(c, familyId, "admin");
+  if (callerOrError instanceof Response) return callerOrError;
+
+  const db = getDb(c.env);
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await db
+    .select({
+      id: schema.invites.id,
+      email: schema.invites.email,
+      role: schema.invites.role,
+      expiresAt: schema.invites.expiresAt,
+      acceptedAt: schema.invites.acceptedAt,
+      createdAt: schema.invites.createdAt,
+      invitedBy: schema.invites.invitedBy,
+    })
+    .from(schema.invites)
+    .where(eq(schema.invites.familyId, familyId))
+    .orderBy(desc(schema.invites.createdAt));
+
+  return c.json({
+    invites: rows.map((r) => ({
+      id: r.id,
+      email: r.email,
+      role: r.role,
+      status: inviteStatus(r, now),
+      expiresAt: r.expiresAt,
+      acceptedAt: r.acceptedAt,
+      createdAt: r.createdAt,
+      invitedBy: r.invitedBy,
+    })),
+  });
+});
+
+// POST /families/:id/invites — create an invite (admin+ only) and email the link.
 familyRoutes.post(
   "/:id/invites",
   requireSession,
   zv(inviteSchema),
   async (c) => {
     const { id: familyId } = c.req.param();
-    const { email, role } = c.req.valid("json");
+    const { email: rawEmail, role } = c.req.valid("json");
+    const email = normalizeEmail(rawEmail);
     const userId = c.get("userId")!;
 
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
@@ -427,19 +473,29 @@ familyRoutes.post(
 
     const db = getDb(c.env);
     const now = Math.floor(Date.now() / 1000);
+    const expiresAt = now + 7 * 24 * 3600; // 7 days
 
     // Generate invite token and hash it for storage
     const token = crypto.randomUUID();
     const tokenHash = await sha256Hex(token);
+    const inviteId = crypto.randomUUID();
 
     await db.insert(schema.invites).values({
-      id: crypto.randomUUID(),
+      id: inviteId,
       familyId,
       email,
       tokenHash,
       role,
       invitedBy: userId,
-      expiresAt: now + 7 * 24 * 3600, // 7 days
+      expiresAt,
+    });
+
+    // Closed signup: a family invite is enough to let them sign in and accept.
+    // Without this grant, clicking the email link hits access_denied at OAuth.
+    await upsertAccessGrant(db, {
+      email,
+      grantedByUserId: userId,
+      note: `Family invite to ${familyId}`,
     });
 
     await insertAuditEvent(db, {
@@ -447,6 +503,7 @@ familyRoutes.post(
       actorUserId: userId,
       action: "invite_created",
       targetType: "invite",
+      targetId: inviteId,
       meta: { email, role },
     });
 
@@ -456,25 +513,29 @@ familyRoutes.post(
       db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
       db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
     ]);
-    const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-    await sendEmail(c.env, {
+    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+    const inviteUrl = `${appUrl}/invite/${token}`;
+    const emailSent = await sendEmail(c.env, {
       to: email,
       subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
       html: inviteEmail({
         inviterName: inviter?.name ?? null,
         familyName: family?.name ?? "your family",
-        inviteUrl: `${appUrl}/invite/${token}`,
+        inviteUrl,
       }),
     });
 
-    // Return the plain token so the caller can include it in an email link.
     return c.json(
       {
         invite: {
+          id: inviteId,
           email,
           role,
-          expiresAt: now + 7 * 24 * 3600,
-          token, // include in invite link: /invites/<token>/accept
+          status: "pending" as const,
+          expiresAt,
+          token, // include in invite link: /invite/<token>
+          inviteUrl,
+          emailSent,
         },
       },
       201,

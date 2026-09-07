@@ -106,7 +106,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET | `/families/:id` · `/families/:id/members` · `/families/me/members` | details / member lists |
 | POST | `/families/:id/members` | add **dependent** (admin+) |
 | PATCH | `/families/:id/members/:mid` | role change / remove (admin+; owner protected) |
-| POST | `/families/:id/invites` | email-bound single-use token + HTML invite email · admin+ · RL 20/h |
+| GET | `/families/:id/invites` | list invites with pending/accepted/expired status · admin+ |
+| POST | `/families/:id/invites` | email-bound single-use token + HTML invite email + app access grant · admin+ · RL 20/h |
 | POST | `/families/invites/:token/accept` | accepting account's email must match |
 | GET | `/families/:id/activity` | audit feed w/ actor names |
 | GET | `/documents?familyId&q&member` | visibility-filtered list + search + per-member filter |

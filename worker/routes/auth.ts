@@ -19,7 +19,7 @@ import {
   ensureBootstrapSuperAdmin,
   listAppRoles,
 } from "../lib/appAccess";
-import { loginBounceHtml, requestOrigin } from "../lib/publicUrl";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -54,10 +54,12 @@ async function beginGoogleOAuth(
   const codeChallenge = await sha256Base64url(codeVerifier);
   const state = generateRandom(16);
   const redirectUri = oauthRedirectUri(origin);
+  // Preserve post-login destination (e.g. /invite/:token from email links).
+  const next = safeAppPath(c.req.query("next") ?? "/");
 
   await c.env.KV.put(
     `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier, redirectUri }),
+    JSON.stringify({ codeVerifier, redirectUri, next }),
     { expirationTtl: PKCE_TTL_SECS },
   );
 
@@ -198,6 +200,7 @@ authRoutes.get("/google/callback", async (c) => {
   const stored = await c.env.KV.get(kvKey, "json") as {
     codeVerifier: string;
     redirectUri?: string;
+    next?: string;
   } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
@@ -299,7 +302,8 @@ authRoutes.get("/google/callback", async (c) => {
 
   // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
   // follows Google's cross-site redirect, which looks like a failed phone login.
-  return c.html(loginBounceHtml("/"), 200);
+  // Honor `next` from OAuth start so invite email links survive sign-in.
+  return c.html(loginBounceHtml(safeAppPath(stored.next ?? "/")), 200);
 });
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.

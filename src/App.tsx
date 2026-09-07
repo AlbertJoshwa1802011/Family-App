@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
@@ -62,6 +62,7 @@ function SuperAdminOnly({ children }: { children: ReactNode }) {
 /** Auth required but NO family gate — invitees usually have no family yet. */
 function AuthOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-slate-400">
@@ -69,7 +70,15 @@ function AuthOnly({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    const next = `${location.pathname}${location.search}`;
+    return (
+      <Navigate
+        to={`/login?next=${encodeURIComponent(next)}`}
+        replace
+      />
+    );
+  }
   return <>{children}</>;
 }
 

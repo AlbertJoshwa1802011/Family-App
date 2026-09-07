@@ -16,7 +16,7 @@
  *     exists → dedupe on second run → mark read
  *  9. Reminder prefs: PUT persists and normalizes windows
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { app } from "../worker/index";
 import { runExpiryReminders } from "../worker/cron";
 import {
@@ -314,8 +314,13 @@ describe("6. invite flow (email-bound)", () => {
       role: "member",
     });
     expect(invite.status).toBe(201);
-    const { invite: inv } = (await invite.json()) as { invite: { token: string } };
+    const { invite: inv } = (await invite.json()) as {
+      invite: { token: string; emailSent: boolean; inviteUrl: string };
+    };
     expect(inv.token).toBeTruthy();
+    expect(inv.inviteUrl).toContain(`/invite/${inv.token}`);
+    // No RESEND_API_KEY in default test env → email skipped but invite still created.
+    expect(inv.emailSent).toBe(false);
 
     // Right email → accepted
     const cousin = seedUser(t.sqlite, { email: "cousin@example.com" });
@@ -341,6 +346,86 @@ describe("6. invite flow (email-bound)", () => {
     expect(again.status).toBe(409);
   });
 
+  it("sends the invite email via Resend and lists pending status", async () => {
+    const fetches: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        fetches.push({ url, body });
+        return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
+      }),
+    );
+
+    const env = createTestEnv({
+      RESEND_API_KEY: "re_test",
+      APP_URL: "https://vault.example",
+    });
+    const ownerUser = seedUser(env.sqlite, { email: "owner@example.com", name: "Owner" });
+    const fam = seedFamily(env.sqlite, ownerUser.id);
+    const { seedSession, seedMember } = await import("./helpers/testEnv");
+    seedMember(env.sqlite, fam.id, ownerUser.id, "owner");
+    const cookie = seedSession(env.sqlite, ownerUser.id);
+
+    const create = await app.request(
+      `/api/families/${fam.id}/invites`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: "  New.Member@Example.COM ", role: "admin" }),
+      },
+      env.env,
+    );
+    expect(create.status).toBe(201);
+    const { invite } = (await create.json()) as {
+      invite: {
+        email: string;
+        emailSent: boolean;
+        inviteUrl: string;
+        token: string;
+        status: string;
+      };
+    };
+    expect(invite.email).toBe("new.member@example.com");
+    expect(invite.emailSent).toBe(true);
+    expect(invite.status).toBe("pending");
+    expect(invite.inviteUrl).toBe(`https://vault.example/invite/${invite.token}`);
+
+    expect(fetches).toHaveLength(1);
+    expect(fetches[0].url).toBe("https://api.resend.com/emails");
+    expect(fetches[0].body.to).toBe("new.member@example.com");
+    expect(String(fetches[0].body.html)).toContain(invite.inviteUrl);
+    expect(String(fetches[0].body.subject)).toContain("Test Family");
+
+    // Closed signup: invite also grants app access so they can sign in.
+    const grant = env.sqlite
+      .prepare("SELECT status FROM access_grants WHERE email = ?")
+      .get("new.member@example.com") as { status: string } | undefined;
+    expect(grant?.status).toBe("approved");
+
+    const listed = await app.request(
+      `/api/families/${fam.id}/invites`,
+      { method: "GET", headers: { Cookie: cookie } },
+      env.env,
+    );
+    expect(listed.status).toBe(200);
+    const { invites } = (await listed.json()) as {
+      invites: Array<{ email: string; status: string; role: string }>;
+    };
+    expect(invites).toHaveLength(1);
+    expect(invites[0]).toMatchObject({
+      email: "new.member@example.com",
+      status: "pending",
+      role: "admin",
+    });
+
+    vi.unstubAllGlobals();
+  });
+
   it("a different account cannot use someone else's invite token", async () => {
     const invite = await req("POST", `/api/families/${familyId}/invites`, owner.cookie, {
       email: "intended@example.com",
@@ -362,6 +447,11 @@ describe("6. invite flow (email-bound)", () => {
     const res = await req("POST", `/api/families/${familyId}/invites`, member.cookie, {
       email: "nope@example.com",
     });
+    expect(res.status).toBe(403);
+  });
+
+  it("member role cannot list invites (403)", async () => {
+    const res = await req("GET", `/api/families/${familyId}/invites`, member.cookie);
     expect(res.status).toBe(403);
   });
 });
