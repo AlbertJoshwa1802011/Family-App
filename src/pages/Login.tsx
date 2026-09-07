@@ -79,16 +79,8 @@ export function Login() {
     setStarting(true);
     setError("");
     setSuccess("");
-    try {
-      const { url } = await api<{ url: string }>("/auth/google/start", {
-        method: "POST",
-        body: "{}",
-      });
-      window.location.assign(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start sign-in.");
-      setStarting(false);
-    }
+    // Full-page GET so phones never sit on a JSON 404. The Worker 302s to Google.
+    window.location.assign("/api/auth/google/start");
   }
 
   async function submitDemo(e: FormEvent) {

@@ -91,7 +91,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 |---|---|---|
 | GET | `/health` | liveness |
 | GET | `/auth/me` | user (+ `appRoles`) + families (null when signed out) |
-| POST | `/auth/google/start` | PKCE + state in KV · RL 10/min/IP |
+| GET/POST | `/auth/google/start` | PKCE + state in KV · GET 302s to Google (phones) · POST `{ url }` · RL 10/min/IP |
 | GET | `/auth/google/callback` | token exchange, jose ID-token verify, **closed-signup gate**, session cookie · RL 10/min/IP |
 | POST | `/auth/logout` | revokes session server-side |
 | POST | `/access/demo-requests` | public demo request → email admin + requester · RL 5/h/IP |

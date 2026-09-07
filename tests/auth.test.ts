@@ -57,6 +57,33 @@ describe("2. POST /api/auth/google/start", () => {
   });
 });
 
+describe("GET /api/auth/google/start (phone full-page navigation)", () => {
+  it("redirects to login when OAuth is not configured (not a JSON 404)", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    expect(res.headers.get("location")).toContain("/login?error=oauth_not_configured");
+  });
+
+  it("302s to Google when configured", async () => {
+    const t = createTestEnv({ GOOGLE_CLIENT_ID: "test-client-id" });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "GET" },
+      t.env,
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const location = res.headers.get("location") ?? "";
+    expect(location.startsWith("https://accounts.google.com/")).toBe(true);
+    expect(location).toContain(
+      encodeURIComponent(
+        "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+      ),
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 3. /auth/logout — always succeeds (clears cookie best-effort)
 // ---------------------------------------------------------------------------
