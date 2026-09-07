@@ -58,7 +58,14 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
     queryFn: () => api<{ currency: string }>(`/finance/settings?familyId=${activeFamilyId}`),
     enabled: Boolean(activeFamilyId),
   });
-  const currency = existing?.currency ?? settingsQ.data?.currency ?? "USD";
+  // On edit, save under the family default so a past USD mislabel can become INR.
+  const currency = isEdit
+    ? (settingsQ.data?.currency ?? existing?.currency ?? "USD")
+    : (existing?.currency ?? settingsQ.data?.currency ?? "USD");
+  const currencyMismatch =
+    Boolean(existing?.currency) &&
+    Boolean(settingsQ.data?.currency) &&
+    existing!.currency !== settingsQ.data!.currency;
 
   const [kind, setKind] = useState<CommitmentKind>(() => existing?.kind ?? "emi");
   const [name, setName] = useState(
@@ -148,6 +155,13 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
           }}
           className="space-y-4"
         >
+          {currencyMismatch && (
+            <p role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-fg">
+              This commitment was labeled {existing!.currency}. Saving will update it to{" "}
+              {currency} (amounts stay the same — no conversion).
+            </p>
+          )}
+
           {/* Kind */}
           <Card className="p-4">
             <p className="text-xs font-medium text-fg-subtle">What kind of commitment?</p>

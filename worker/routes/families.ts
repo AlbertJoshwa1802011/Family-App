@@ -8,6 +8,10 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, ACTIONS } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
+import {
+  relabelFamilyCurrency,
+  totalRelabeled,
+} from "../lib/finance/relabelCurrency";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -46,11 +50,20 @@ const FAMILY_CURRENCIES = [
   "HKD",
 ] as const;
 
-const updateFamilySchema = z.object({
-  defaultCurrency: z.enum(FAMILY_CURRENCIES).optional(),
-  name: z.string().min(1).max(200).optional(),
-}).refine((d) => d.defaultCurrency !== undefined || d.name !== undefined, {
-  message: "At least one of defaultCurrency or name must be provided",
+const updateFamilySchema = z
+  .object({
+    defaultCurrency: z.enum(FAMILY_CURRENCIES).optional(),
+    name: z.string().min(1).max(200).optional(),
+    /** When changing defaultCurrency, also relabel existing money rows (no conversion). */
+    relabelExisting: z.boolean().optional(),
+  })
+  .refine((d) => d.defaultCurrency !== undefined || d.name !== undefined, {
+    message: "At least one of defaultCurrency or name must be provided",
+  });
+
+const relabelCurrencySchema = z.object({
+  from: z.enum(FAMILY_CURRENCIES),
+  to: z.enum(FAMILY_CURRENCIES),
 });
 
 function zv<T extends z.ZodType>(schema: T) {
@@ -368,21 +381,60 @@ familyRoutes.get("/:id", requireSession, async (c) => {
 });
 
 // PATCH /families/:id — update family-level settings (currency, name).
-// Any active member may change currency; existing incomes/expenses keep their
-// stored currency — only the default for new entries changes.
+// Any active member may change currency. By default existing rows keep their
+// stored currency; pass relabelExisting:true to rewrite labels (no conversion).
 familyRoutes.patch("/:id", requireSession, zv(updateFamilySchema), async (c) => {
   const { id: familyId } = c.req.param();
   const updates = c.req.valid("json");
+  const userId = c.get("userId")!;
 
   const memberOrError = await requireFamilyMember(c, familyId);
   if (memberOrError instanceof Response) return memberOrError;
 
   const db = getDb(c.env);
+  const before = await db
+    .select({ defaultCurrency: schema.families.defaultCurrency })
+    .from(schema.families)
+    .where(eq(schema.families.id, familyId))
+    .get();
+  if (!before) return c.json({ error: "not_found" }, 404);
+
   const set: Partial<typeof schema.families.$inferInsert> = {};
   if (updates.defaultCurrency !== undefined) set.defaultCurrency = updates.defaultCurrency;
   if (updates.name !== undefined) set.name = updates.name;
 
-  await db.update(schema.families).set(set).where(eq(schema.families.id, familyId));
+  if (Object.keys(set).length > 0) {
+    await db.update(schema.families).set(set).where(eq(schema.families.id, familyId));
+  }
+
+  let relabeled: Awaited<ReturnType<typeof relabelFamilyCurrency>> | undefined;
+  if (
+    updates.relabelExisting &&
+    updates.defaultCurrency &&
+    updates.defaultCurrency !== before.defaultCurrency
+  ) {
+    relabeled = await relabelFamilyCurrency(
+      db,
+      familyId,
+      before.defaultCurrency,
+      updates.defaultCurrency,
+    );
+    await insertAuditEvent(db, {
+      familyId,
+      actorUserId: userId,
+      action: ACTIONS.FAMILY_UPDATED,
+      targetType: "family",
+      targetId: familyId,
+      meta: {
+        currencyRelabel: {
+          from: before.defaultCurrency,
+          to: updates.defaultCurrency,
+          counts: relabeled,
+          total: totalRelabeled(relabeled),
+        },
+      },
+    });
+  }
 
   const family = await db
     .select()
@@ -390,8 +442,88 @@ familyRoutes.patch("/:id", requireSession, zv(updateFamilySchema), async (c) => 
     .where(eq(schema.families.id, familyId))
     .get();
 
-  return c.json({ family });
+  return c.json({ family, ...(relabeled ? { relabeled } : {}) });
 });
+
+// POST /families/:id/relabel-currency — fix mislabeled money rows in place.
+// Amounts are NOT converted. `to` must equal the family's current default
+// (change the default first via PATCH if needed). Use when commitments /
+// expenses were saved as USD while the family now uses INR.
+familyRoutes.post(
+  "/:id/relabel-currency",
+  requireSession,
+  zv(relabelCurrencySchema),
+  async (c) => {
+    const { id: familyId } = c.req.param();
+    const { from, to } = c.req.valid("json");
+    const userId = c.get("userId")!;
+
+    const memberOrError = await requireFamilyMember(c, familyId);
+    if (memberOrError instanceof Response) return memberOrError;
+
+    if (from === to) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["from"],
+              message: "from and to must differ",
+            },
+          ],
+        },
+        400,
+      );
+    }
+
+    const db = getDb(c.env);
+    const family = await db
+      .select({
+        id: schema.families.id,
+        defaultCurrency: schema.families.defaultCurrency,
+      })
+      .from(schema.families)
+      .where(eq(schema.families.id, familyId))
+      .get();
+    if (!family) return c.json({ error: "not_found" }, 404);
+
+    if (to !== family.defaultCurrency) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [
+            {
+              code: "custom",
+              path: ["to"],
+              message: `to must match family default (${family.defaultCurrency})`,
+            },
+          ],
+        },
+        400,
+      );
+    }
+
+    const relabeled = await relabelFamilyCurrency(db, familyId, from, to);
+    await insertAuditEvent(db, {
+      familyId,
+      actorUserId: userId,
+      action: ACTIONS.FAMILY_UPDATED,
+      targetType: "family",
+      targetId: familyId,
+      meta: {
+        currencyRelabel: {
+          from,
+          to,
+          counts: relabeled,
+          total: totalRelabeled(relabeled),
+        },
+      },
+    });
+
+    return c.json({ ok: true, from, to, relabeled, total: totalRelabeled(relabeled) });
+  },
+);
 
 // GET /families/:id/members — list all active members with user profile info.
 familyRoutes.get("/:id/members", requireSession, async (c) => {

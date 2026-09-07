@@ -158,6 +158,48 @@ describe("finance: commitments", () => {
     expect(res.status).toBe(400);
   });
 
+  it("lets the owner edit a USD commitment after the family switched to INR", async () => {
+    const { env, sqlite, familyId, alice } = setup();
+    const created = (await (
+      await req(env, "POST", "/api/finance/commitments", alice.cookie, emi(familyId))
+    ).json()) as { commitment: { id: string; currency: string } };
+    expect(created.commitment.currency).toBe("USD");
+
+    sqlite
+      .prepare("UPDATE families SET default_currency = ? WHERE id = ?")
+      .run("INR", familyId);
+
+    // Re-sending the historical USD label must not 400 — that was the bind.
+    const keep = await req(env, "PATCH", `/api/finance/commitments/${created.commitment.id}`, alice.cookie, {
+      name: "Car loan (updated)",
+      currency: "USD",
+      amountMinor: 1300_00,
+    });
+    expect(keep.status).toBe(200);
+
+    // Relabel to the family default is also allowed.
+    const relabel = await req(
+      env,
+      "PATCH",
+      `/api/finance/commitments/${created.commitment.id}`,
+      alice.cookie,
+      { currency: "INR" },
+    );
+    expect(relabel.status).toBe(200);
+    const body = (await relabel.json()) as { commitment: { currency: string } };
+    expect(body.commitment.currency).toBe("INR");
+
+    // Inventing a third currency is still rejected.
+    const bad = await req(
+      env,
+      "PATCH",
+      `/api/finance/commitments/${created.commitment.id}`,
+      alice.cookie,
+      { currency: "EUR" },
+    );
+    expect(bad.status).toBe(400);
+  });
+
   it("rejects a percent commitment with no percentage", async () => {
     const { env, familyId, alice } = setup();
     const res = await req(env, "POST", "/api/finance/commitments", alice.cookie, {

@@ -20,6 +20,7 @@ import { insertAuditEvent } from "../lib/audit";
 import { MAX_AMOUNT_MINOR } from "../lib/money";
 import { buildPlan, type CommitmentInput, type IncomeInput } from "../lib/finance/plan";
 import { cycleFor, recentCycles, toUtc } from "../lib/finance/periods";
+import { listMismatchedCurrencies } from "../lib/finance/relabelCurrency";
 
 export const financeRoutes = new Hono<HonoEnv>();
 
@@ -104,7 +105,9 @@ financeRoutes.get("/settings", requireSession, async (c) => {
 
   const db = getDb(c.env);
   const settings = await loadSettings(db, userId, familyId);
-  return c.json({ settings, currency: await familyCurrency(db, familyId) });
+  const currency = await familyCurrency(db, familyId);
+  const otherCurrenciesInUse = await listMismatchedCurrencies(db, familyId, currency);
+  return c.json({ settings, currency, otherCurrenciesInUse });
 });
 
 financeRoutes.put("/settings", requireSession, zv(settingsSchema), async (c) => {
@@ -434,6 +437,19 @@ financeRoutes.patch("/commitments/:id", requireSession, zv(updateCommitmentSchem
   }
   if (row.ownerUserId !== userId) return c.json({ error: "forbidden" }, 403);
 
+  // Currency on PATCH: keep the existing label, or move to the family default
+  // (relabel). Reject inventing a third currency — that caused the USD/INR bind.
+  if (data.currency !== undefined) {
+    const expected = await familyCurrency(db, row.familyId);
+    if (data.currency !== row.currency && data.currency !== expected) {
+      return invalid(
+        c,
+        ["currency"],
+        `currency must match family default (${expected})`,
+      );
+    }
+  }
+
   await db
     .update(schema.commitments)
     .set({
@@ -443,6 +459,7 @@ financeRoutes.patch("/commitments/:id", requireSession, zv(updateCommitmentSchem
       ...(data.amountMinor !== undefined ? { amountMinor: data.amountMinor } : {}),
       ...(data.percentBp !== undefined ? { percentBp: data.percentBp } : {}),
       ...(data.amountKind !== undefined ? { amountKind: data.amountKind } : {}),
+      ...(data.currency !== undefined ? { currency: data.currency } : {}),
       ...(data.cadence !== undefined ? { cadence: data.cadence } : {}),
       ...(data.dayOfMonth !== undefined ? { dayOfMonth: data.dayOfMonth } : {}),
       ...(data.dayOfWeek !== undefined ? { dayOfWeek: data.dayOfWeek } : {}),
