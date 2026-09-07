@@ -178,9 +178,24 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     const src = read("src/components/money/Assistant.tsx");
     expect(src).toContain("rounded-t-3xl");
     expect(src).toContain("visualViewport");
-    expect(src).toContain("bottom-[calc(5.5rem+env(safe-area-inset-bottom))]");
     // Using .liquid-bubble on the sheet forced 28px radius on the bottom edge.
     expect(src).not.toMatch(/liquid-bubble fixed inset-x-0 bottom-0/);
+  });
+
+  it("assistant trigger lives in the AppBar, not a floating FAB over Add event", () => {
+    const sheet = read("src/components/money/Assistant.tsx");
+    const button = read("src/components/money/AssistantButton.tsx");
+    const appBar = read("src/components/ui/AppBar.tsx");
+    const fab = read("src/components/ui/Fab.tsx");
+
+    // No fixed thumb-zone bubble that steals hits from Calendar / Tasks FABs.
+    expect(sheet).not.toMatch(/fixed right-4/);
+    expect(sheet).not.toMatch(/bottom-\[calc\(5\.5rem/);
+    expect(button).not.toMatch(/\bfixed\b/);
+
+    expect(appBar).toContain("AssistantButton");
+    expect(button).toContain("family-vault:open-assistant");
+    expect(fab).toMatch(/z-40/);
   });
 });
 

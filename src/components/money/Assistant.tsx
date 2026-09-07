@@ -19,13 +19,16 @@ const SUGGESTIONS = [
 ];
 
 /**
- * Floating assistant.
+ * Money assistant sheet (no floating trigger).
  *
- * Hidden entirely unless the server reports a Gemini key is configured, so the
- * UI never advertises something that will fail.
+ * The sparkles control lives in the AppBar (`AssistantButton`) so it never
+ * covers primary FABs (Add event / Add task / Add expense) or form CTAs.
+ * Overview "Ask AI" and the header button open this sheet via
+ * `family-vault:open-assistant`.
  *
- * Portalled to <body> for the same reason the account menu is: the AppBar's
- * backdrop-filter would otherwise become the containing block for the panel.
+ * Hidden entirely unless the server reports a Gemini key is configured.
+ * Portalled to <body> so the AppBar's backdrop-filter is not the containing
+ * block for the panel.
  */
 export function Assistant() {
   const { activeFamilyId } = useAuth();
@@ -35,13 +38,6 @@ export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAiLabel, setShowAiLabel] = useState(() => {
-    try {
-      return localStorage.getItem("fv:assistant-label-seen") !== "1";
-    } catch {
-      return true;
-    }
-  });
   const [keyboardInset, setKeyboardInset] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -116,19 +112,8 @@ export function Assistant() {
     };
   }, [open]);
 
-  function openAssistant() {
-    setOpen(true);
-    if (showAiLabel) {
-      setShowAiLabel(false);
-      try {
-        localStorage.setItem("fv:assistant-label-seen", "1");
-      } catch {
-        /* ignore quota / private mode */
-      }
-    }
-  }
-
   if (!statusQ.data?.configured || !activeFamilyId) return null;
+  if (!open) return null;
 
   const keyWarning =
     probeQ.data?.configured && probeQ.data.keyOk === false
@@ -172,29 +157,7 @@ export function Assistant() {
     }
   }
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={openAssistant}
-        aria-label="Ask the money assistant"
-        className={cn(
-          // Sit above the liquid bottom tabs (z-30) without covering the sheet (z-50).
-          "fixed right-4 z-40 flex items-center justify-center gap-2",
-          "rounded-full border border-white/20 bg-vault-600 text-white",
-          "shadow-[0_8px_28px_-8px_rgba(13,148,136,0.65)] backdrop-blur-md",
-          "transition-transform active:scale-95",
-          // Clear the floating tab bar + home indicator on phones; sit lower on desktop.
-          "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-6",
-          showAiLabel ? "h-14 min-w-14 px-4" : "size-14",
-        )}
-      >
-        <Sparkles className="size-6" aria-hidden="true" />
-        {showAiLabel && <span className="text-sm font-semibold tracking-wide">AI</span>}
-      </button>
-
-      {open &&
-        createPortal(
+  return createPortal(
           <>
             <button
               type="button"
@@ -322,7 +285,5 @@ export function Assistant() {
             </div>
           </>,
           document.body,
-        )}
-    </>
   );
 }

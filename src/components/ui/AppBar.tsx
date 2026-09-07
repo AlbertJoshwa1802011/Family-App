@@ -2,6 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { AccountMenu } from "../AccountMenu";
+import { AssistantButton } from "../money/AssistantButton";
 import { VaultMark } from "../brand/VaultMark";
 import { cn } from "../../lib/cn";
 
@@ -53,6 +54,7 @@ export function AppBar({
           </h1>
 
           {trailing}
+          <AssistantButton />
           {!hideAccount && <AccountMenu />}
         </div>
       </div>
