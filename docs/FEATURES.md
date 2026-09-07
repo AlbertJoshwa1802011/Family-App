@@ -75,7 +75,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 - **Events `type` vs `status`**: `type` = what kind (`gathering|appointment|milestone|other`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
-- **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a task sets `completed_at` and hides it from the To-do view; leftover open subtasks are promoted to roots. `priority` is `low|medium|high` (default medium).
+- **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
 
 ---
@@ -193,6 +193,11 @@ family screen opens the assistant as a sheet (stay on the current page). Active 
 - **`src/lib/eventTime.ts`**: `formatEventDate`, `formatEventTime`, `formatMonthYear`, `eventMonthKey`, `eventTypeColor`
 - **`src/lib/expiry.ts`**: `expiryStatus` — UTC-based, tone thresholds: ≤0d danger, ≤7d danger, ≤30d warning, >30d success
 - **`src/lib/api.ts`**: Same-origin fetch wrapper; throws `ApiError`; 204 → `undefined`
+- **`src/lib/taskTree.ts`**: nested-task forest, views (`todo` `due` `recent` `mine` `completed`), client sorts (`due` `added_desc` `added_asc` `priority`), and `withDoneChildrenUnderOpenParents` so completed subtasks stay visible under an open parent. List vs Board is UI-only; API `view=priority` is unchanged.
+
+### Tasks UI
+
+`/tasks` is a nested checklist. **To do** (default) shows only in-progress work; completed roots live under the **Completed** filter. Layout segmented control: **List** (tree rails + first-level expanded) and **Board** (High / Medium / Low columns, subtasks nested inside each card; tap the flag to cycle priority). Sort chips apply to both layouts. Search expands matching branches.
 
 ### Date.now() in Render Rule
 

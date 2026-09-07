@@ -24,6 +24,15 @@ export const TASK_VIEWS = [
 
 export type TaskView = (typeof TASK_VIEWS)[number];
 
+/** Client-side sorts. Independent of the filter/view. */
+export const TASK_SORTS = ["due", "added_desc", "added_asc", "priority"] as const;
+export type TaskSort = (typeof TASK_SORTS)[number];
+
+export const TASK_LAYOUTS = ["list", "board"] as const;
+export type TaskLayout = (typeof TASK_LAYOUTS)[number];
+
+export const PRIORITY_COLUMNS: TaskPriority[] = ["high", "medium", "low"];
+
 export interface TaskRecord {
   id: string;
   title: string;
@@ -54,6 +63,12 @@ export interface TaskViewOptions {
   nowSecs: number;
   /** UTC yyyy-mm-dd of "today". Pass a snapshot so render stays pure. */
   todayIso: string;
+  /**
+   * Keep completed subtasks nested under an open parent so the checklist stays
+   * readable. Done *roots* are still dropped. Default false so API `view=todo`
+   * counts stay open-work-only (Dashboard badge).
+   */
+  includeDoneChildren?: boolean;
 }
 
 const PRIORITY_RANK: Record<TaskPriority, number> = {
@@ -181,6 +196,80 @@ function stampDepth(node: TaskNode, depth: number) {
   for (const child of node.children) stampDepth(child, depth + 1);
 }
 
+function compareTasks(a: TaskRecord, b: TaskRecord, sort: TaskSort): number {
+  switch (sort) {
+    case "added_desc":
+      return b.createdAt - a.createdAt || a.id.localeCompare(b.id);
+    case "added_asc":
+      return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+    case "priority": {
+      const pr = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+      if (pr !== 0) return pr;
+      return sortByDueThenCreated(a, b);
+    }
+    case "due":
+    default:
+      return sortByDueThenCreated(a, b);
+  }
+}
+
+export function sortTasks<T extends TaskRecord>(tasks: T[], sort: TaskSort): T[] {
+  return [...tasks].sort((a, b) => compareTasks(a, b, sort));
+}
+
+/** Sort a forest and every nested children array with the same comparator. */
+export function sortForest(forest: TaskNode[], sort: TaskSort): TaskNode[] {
+  return [...forest]
+    .sort((a, b) => compareTasks(a, b, sort))
+    .map((n) => ({ ...n, children: sortForest(n.children, sort) }));
+}
+
+export function groupForestByPriority(
+  forest: TaskNode[],
+): Record<TaskPriority, TaskNode[]> {
+  return {
+    high: forest.filter((n) => n.priority === "high"),
+    medium: forest.filter((n) => n.priority === "medium"),
+    low: forest.filter((n) => n.priority === "low"),
+  };
+}
+
+export function nextPriority(p: TaskPriority): TaskPriority {
+  if (p === "high") return "medium";
+  if (p === "medium") return "low";
+  return "high";
+}
+
+/**
+ * Re-attach completed descendants whose nearest in-view ancestor is still
+ * open. Done roots stay out. Used so a parent's checklist doesn't go blank
+ * the moment a subtask is ticked.
+ */
+export function withDoneChildrenUnderOpenParents<T extends TaskRecord>(
+  family: T[],
+  viewed: T[],
+): T[] {
+  const viewedIds = new Set(viewed.map((t) => t.id));
+  const byId = new Map(family.map((t) => [t.id, t]));
+  const extra: T[] = [];
+  for (const t of family) {
+    if (t.status !== "done") continue;
+    if (viewedIds.has(t.id)) continue;
+    const seen = new Set<string>();
+    let current = t.parentTaskId ? byId.get(t.parentTaskId) : undefined;
+    while (current) {
+      if (seen.has(current.id)) break;
+      seen.add(current.id);
+      if (current.status === "open" && viewedIds.has(current.id)) {
+        extra.push(t);
+        break;
+      }
+      current = current.parentTaskId ? byId.get(current.parentTaskId) : undefined;
+    }
+  }
+  return extra.length === 0 ? viewed : [...viewed, ...extra];
+}
+
 /**
  * Build a forest from a (possibly filtered) flat list.
  *
@@ -246,7 +335,7 @@ export function applyTaskView<T extends TaskRecord>(
   tasks: T[],
   opts: TaskViewOptions,
 ): T[] {
-  const { view, myMemberId, nowSecs, todayIso } = opts;
+  const { view, myMemberId, nowSecs, todayIso, includeDoneChildren } = opts;
   const dueLimit = utcDayOffset(todayIso, DUE_SOON_DAYS);
 
   let filtered: T[];
@@ -293,6 +382,9 @@ export function applyTaskView<T extends TaskRecord>(
     default:
       filtered = tasks.filter((t) => t.status !== "archived");
       filtered.sort(sortByDueThenCreated);
+  }
+  if (includeDoneChildren && view !== "completed") {
+    filtered = withDoneChildrenUnderOpenParents(tasks, filtered);
   }
   return filtered;
 }
@@ -348,9 +440,9 @@ export function dueStatus(date?: string | null, todayIso?: string): DueStatus | 
   return { tone: "neutral", label: `Due ${date}`, overdue: false };
 }
 
-/** Views that render as a nested tree vs a flat work-queue with a path. */
+/** List layout nests every filter; `priority` remains a flat API sort. */
 export function isTreeView(view: TaskView): boolean {
-  return view === "todo" || view === "mine";
+  return view !== "priority";
 }
 
 export function priorityLabel(p: TaskPriority): string {

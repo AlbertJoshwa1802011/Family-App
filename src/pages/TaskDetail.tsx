@@ -25,19 +25,14 @@ import {
   buildForest,
   descendantIds,
   dueStatus,
-  flattenForest,
   priorityLabel,
   type TaskPriority,
   type TaskRecord,
 } from "../lib/taskTree";
-import { TaskComposer } from "./Tasks";
-
-interface FamilyMember {
-  id: string;
-  userId: string | null;
-  displayName: string | null;
-  name: string | null;
-}
+import { TaskComposer } from "../components/tasks/TaskComposer";
+import { TaskProgress } from "../components/tasks/TaskRow";
+import { TaskTree } from "../components/tasks/TaskTree";
+import type { FamilyMember } from "../components/tasks/types";
 
 interface TaskDetailResponse {
   task: TaskRecord;
@@ -52,6 +47,9 @@ export function TaskDetailPage() {
   const qc = useQueryClient();
   const { activeFamily } = useAuth();
   const [adding, setAdding] = useState(false);
+  const [composerParent, setComposerParent] = useState<TaskRecord | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [forcedOpen, setForcedOpen] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ["tasks", id],
@@ -89,6 +87,15 @@ export function TaskDetailPage() {
     },
   });
 
+  const toggleChild = useMutation({
+    mutationFn: (t: TaskRecord) =>
+      api(`/tasks/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: t.status === "done" ? "open" : "done" }),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+
   const all = useMemo(
     () => attachChildCounts(listData?.tasks ?? []),
     [listData?.tasks],
@@ -116,16 +123,37 @@ export function TaskDetailPage() {
   const subtree = all.filter((t) => subtreeIds.has(t.id));
   const forest = buildForest(subtree);
   const rootNode = forest.find((n) => n.id === task.id);
-  const nested = rootNode
-    ? flattenForest(rootNode.children)
-    : (data.children ?? []).map((c) => ({ ...c, children: [], depth: 1 }));
+  const childForest = rootNode?.children ?? [];
   const due = dueStatus(task.dueDate);
   const done = task.status === "done";
   const archived = task.status === "archived";
   const descendantCount = descendantIds(all, task.id).length;
   const canNest = (data.depth ?? 0) < MAX_TASK_DEPTH && !done && !archived;
-  const progress =
-    task.childCount > 0 ? `${task.doneChildCount} of ${task.childCount} subtasks done` : null;
+
+  function isExpanded(nodeId: string, depth: number, hasChildren: boolean) {
+    if (!hasChildren) return false;
+    if (collapsed.has(nodeId)) return false;
+    if (forcedOpen.has(nodeId)) return true;
+    return depth === 0;
+  }
+
+  function toggleExpand(nodeId: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+        setForcedOpen((open) => new Set(open).add(nodeId));
+        return next;
+      }
+      next.add(nodeId);
+      setForcedOpen((open) => {
+        const o = new Set(open);
+        o.delete(nodeId);
+        return o;
+      });
+      return next;
+    });
+  }
 
   return (
     <>
@@ -170,8 +198,11 @@ export function TaskDetailPage() {
               >
                 {task.title}
               </h2>
-              {progress && (
-                <p className="mt-1 text-xs font-medium text-vault-300">{progress}</p>
+              {task.childCount > 0 && (
+                <TaskProgress
+                  done={task.doneChildCount}
+                  total={task.childCount}
+                />
               )}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Badge tone={task.priority === "high" ? "danger" : "neutral"}>
@@ -212,55 +243,53 @@ export function TaskDetailPage() {
               Subtasks ({task.childCount})
             </h3>
           </div>
-          {nested.length === 0 && !adding ? (
+          {childForest.length === 0 && !adding ? (
             <p className="lq rounded-bubble px-4 py-3 text-sm text-fg-subtle">
               No subtasks yet. Break this into smaller steps so it stays clear even
               when the family list gets long.
             </p>
-          ) : (
-            <Card className="divide-y divide-white/8 overflow-hidden">
-              {nested.map((n) => (
-                <Link
-                  key={n.id}
-                  to={`/tasks/${n.id}`}
-                  className="flex min-h-12 items-center gap-2 py-2 pr-3 hover:bg-white/5"
-                  style={{ paddingLeft: 12 + Math.min(Math.max(n.depth - 1, 0), 6) * 14 }}
-                >
-                  {n.status === "done" ? (
-                    <CheckCircle2 className="size-5 shrink-0 text-success" />
-                  ) : (
-                    <Circle className="size-5 shrink-0 text-fg-subtle" />
-                  )}
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-sm",
-                      n.status === "done" ? "text-fg-subtle line-through" : "text-fg",
-                    )}
-                  >
-                    {n.title}
-                  </span>
-                  {n.childCount > 0 && (
-                    <span className="text-xs text-vault-300">
-                      {n.doneChildCount}/{n.childCount}
-                    </span>
-                  )}
-                </Link>
-              ))}
-            </Card>
-          )}
+          ) : childForest.length > 0 ? (
+            <TaskTree
+              forest={childForest}
+              isExpanded={isExpanded}
+              onToggleExpand={toggleExpand}
+              onToggleDone={(t) => toggleChild.mutate(t)}
+              onAddSubtask={
+                !done && !archived
+                  ? (parent) => {
+                      setComposerParent(parent);
+                      setAdding(true);
+                      setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        next.delete(parent.id);
+                        return next;
+                      });
+                      setForcedOpen((prev) => new Set(prev).add(parent.id));
+                    }
+                  : undefined
+              }
+              pending={toggleChild.isPending}
+            />
+          ) : null}
           {canNest && activeFamily && (
             adding ? (
               <TaskComposer
                 familyId={activeFamily.id}
-                parent={task}
+                parent={composerParent ?? task}
                 members={membersData?.members ?? []}
-                onClose={() => setAdding(false)}
+                onClose={() => {
+                  setAdding(false);
+                  setComposerParent(null);
+                }}
               />
             ) : (
               <Button
                 variant="secondary"
                 fullWidth
-                onClick={() => setAdding(true)}
+                onClick={() => {
+                  setComposerParent(task);
+                  setAdding(true);
+                }}
               >
                 Add subtask
               </Button>
