@@ -12,6 +12,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { app } from "../worker/index";
+import { createTestEnv } from "./helpers/testEnv";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../worker/lib/publicUrl";
 
 // ---------------------------------------------------------------------------
 // 1. /auth/me — unauthenticated path (no D1 needed since no cookie)
@@ -208,5 +210,57 @@ describe("9. GET /api/auth/google/callback error handling", () => {
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("missing_params");
+  });
+
+  it("callback error redirect stays on the host the phone actually opened", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback?error=access_denied",
+    );
+    const location = res.headers.get("location") ?? "";
+    expect(location).toBe(
+      "https://fam.connect-cloud.workers.dev/login?error=access_denied",
+    );
+  });
+});
+
+describe("OAuth start uses the request origin (not a stale APP_URL)", () => {
+  it("puts the incoming host in Google redirect_uri", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "test-client-id",
+      APP_URL: "http://localhost:5173",
+    });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "POST" },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    const google = new URL(body.url);
+    expect(google.searchParams.get("redirect_uri")).toBe(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+    );
+  });
+});
+
+describe("publicUrl helpers", () => {
+  it("requestOrigin reads the Worker host", () => {
+    expect(
+      requestOrigin("https://fam.connect-cloud.workers.dev/api/auth/google/start"),
+    ).toBe("https://fam.connect-cloud.workers.dev");
+  });
+
+  it("safeAppPath rejects protocol-relative and empty junk", () => {
+    expect(safeAppPath("/")).toBe("/");
+    expect(safeAppPath("/tasks")).toBe("/tasks");
+    expect(safeAppPath("//evil.example")).toBe("/");
+    expect(safeAppPath("https://evil.example")).toBe("/");
+  });
+
+  it("login bounce is first-party HTML with no inline script", () => {
+    const html = loginBounceHtml("/");
+    expect(html).toContain('http-equiv="refresh"');
+    expect(html).toContain("url=/");
+    expect(html).not.toMatch(/<script/i);
   });
 });
