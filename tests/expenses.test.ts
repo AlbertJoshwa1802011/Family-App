@@ -648,12 +648,17 @@ describe("expenses: categories", () => {
     const res = await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      categories: { id: string; name: string; color: string | null }[];
-      tree: { id: string; children: unknown[] }[];
+      categories: { id: string; name: string; color: string | null; emoji?: string }[];
+      tree: { id: string; children: unknown[]; emoji?: string }[];
     };
     expect(body.categories.length).toBeGreaterThan(5);
     expect(body.categories.some((c) => c.id.startsWith("builtin_"))).toBe(true);
     expect(body.categories.some((c) => c.color && c.color.startsWith("#"))).toBe(true);
+    expect(body.categories.every((c) => typeof c.emoji === "string" && c.emoji.length > 0)).toBe(
+      true,
+    );
+    const dining = body.categories.find((c) => c.id === "builtin_dining");
+    expect(dining?.emoji).toBe("🍔");
     const groceries = body.tree.find((t) => t.id === "builtin_groceries");
     expect(groceries?.children.length).toBeGreaterThan(0);
   });
@@ -663,10 +668,119 @@ describe("expenses: categories", () => {
     const res = await post(env, "/api/expenses/categories", alice.cookie, {
       familyId,
       name: "School lunch",
+      emoji: "🥗",
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { category: { name: string; builtin: boolean } };
+    const body = (await res.json()) as {
+      category: { name: string; builtin: boolean; emoji: string; icon: string | null };
+    };
     expect(body.category.name).toBe("School lunch");
     expect(body.category.builtin).toBe(false);
+    expect(body.category.emoji).toBe("🥗");
+    expect(body.category.icon).toBe("🥗");
+  });
+});
+
+describe("expenses: merchant lookup autocomplete", () => {
+  it("ranks prefix + frequency and fills category emoji", async () => {
+    const { env, familyId, alice } = setup();
+    // Seed builtins before referencing category ids.
+    await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          merchant: "outside snacks",
+          amountMinor: 100_00 + i,
+          categoryId: "builtin_dining",
+          expenseDate: `2026-09-0${i + 1}`,
+        }),
+      );
+      expect(res.status).toBe(201);
+    }
+    expect(
+      (
+        await post(
+          env,
+          "/api/expenses",
+          alice.cookie,
+          expensePayload(familyId, alice.memberId, {
+            merchant: "office coffee",
+            amountMinor: 40_00,
+            categoryId: "builtin_dining_coffee",
+          }),
+        )
+      ).status,
+    ).toBe(201);
+
+    const empty = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}`,
+      alice.cookie,
+    );
+    expect(empty.status).toBe(200);
+    const emptyBody = (await empty.json()) as {
+      suggestions: { label: string; count: number; categoryEmoji: string }[];
+    };
+    expect(emptyBody.suggestions[0]?.label).toBe("outside snacks");
+    expect(emptyBody.suggestions[0]?.count).toBe(3);
+    expect(emptyBody.suggestions[0]?.categoryEmoji).toBe("🍔");
+
+    const q = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=out`,
+      alice.cookie,
+    );
+    const { suggestions } = (await q.json()) as {
+      suggestions: { label: string }[];
+    };
+    expect(suggestions[0]?.label).toBe("outside snacks");
+  });
+
+  it("isolates families and strips LIKE wildcards", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "secret snacks" }),
+    );
+
+    const strangerEnv = createTestEnv();
+    const strangerOwner = seedUser(strangerEnv.sqlite);
+    const strangerFamily = seedFamily(strangerEnv.sqlite, strangerOwner.id);
+    const stranger = seedActor(strangerEnv.sqlite, strangerFamily.id, "owner");
+
+    expect(
+      (
+        await get(
+          strangerEnv.env,
+          `/api/expenses/lookup?familyId=${familyId}&q=snack`,
+          stranger.cookie,
+        )
+      ).status,
+    ).toBe(404);
+
+    // Private expense: bob (same family) should not see alice's private merchant.
+    const bobView = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=snack`,
+      bob.cookie,
+    );
+    expect(bobView.status).toBe(200);
+    const bobBody = (await bobView.json()) as { suggestions: { label: string }[] };
+    expect(bobBody.suggestions.every((s) => s.label !== "secret snacks")).toBe(true);
+
+    const meta = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=${encodeURIComponent("%_snack")}`,
+      alice.cookie,
+    );
+    expect(meta.status).toBe(200);
+    const { suggestions } = (await meta.json()) as { suggestions: { label: string }[] };
+    expect(suggestions.some((s) => s.label.includes("snack"))).toBe(true);
   });
 });
