@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   Bell,
   Calendar,
@@ -20,7 +19,6 @@ import type { LucideIcon } from "lucide-react";
 import { Avatar } from "./ui/Avatar";
 import { Badge } from "./ui/Badge";
 import { useAuth } from "../context/AuthContext";
-import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 
 interface MenuLink {
@@ -49,10 +47,8 @@ const LINKS: MenuLink[] = [
  * and Modal so the profile surface feels like the rest of the glass UI.
  */
 export function AccountMenu() {
-  const { user, families, activeFamily, setActiveFamilyId } = useAuth();
+  const { user, families, activeFamily, setActiveFamilyId, signOut } = useAuth();
   const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-  const qc = useQueryClient();
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -78,16 +74,6 @@ export function AccountMenu() {
       document.removeEventListener("pointerdown", onPointer);
     };
   }, [open]);
-
-  async function signOut() {
-    try {
-      await api("/auth/logout", { method: "POST" });
-    } catch {
-      // Even if revocation fails we still clear local state and leave.
-    }
-    qc.clear();
-    navigate("/login", { replace: true });
-  }
 
   const visibleLinks = LINKS.filter((l) => !l.adminOnly || user?.isPlatformAdmin);
 

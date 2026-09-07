@@ -160,6 +160,20 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     expect(menu).not.toMatch(/border border-line bg-surface shadow-pop/);
   });
 
+  it("Sign out uses AuthContext.signOut (hard redirect), not a client navigate", () => {
+    const menu = read("src/components/AccountMenu.tsx");
+    const settings = read("src/pages/Settings.tsx");
+    expect(menu).toMatch(/signOut/);
+    expect(menu).not.toMatch(/navigate\("\/login"/);
+    expect(settings).toMatch(/void signOut\(\)/);
+    expect(settings).not.toMatch(/window\.confirm/);
+    const profile = settings.indexOf("Not signed in");
+    const signOut = settings.indexOf("Sign out");
+    const reminders = settings.indexOf("Reminders");
+    expect(signOut).toBeGreaterThan(profile);
+    expect(reminders).toBeGreaterThan(signOut);
+  });
+
   it("assistant sheet is an edge-to-edge phone sheet, not a fully-rounded liquid bubble", () => {
     const src = read("src/components/money/Assistant.tsx");
     expect(src).toContain("rounded-t-3xl");

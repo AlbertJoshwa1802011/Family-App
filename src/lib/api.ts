@@ -15,12 +15,12 @@ export async function api<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const res = await fetch(`/api${path}`, {
+    ...options,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   if (!res.ok) {
