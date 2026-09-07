@@ -138,7 +138,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
   return (
     <>
       <AppBar title={isEdit ? "Edit commitment" : "New commitment"} back />
-      <Page className="pb-24">
+      <Page className="pb-24 md:pb-10">
         <form
           onSubmit={(e) => {
             e.preventDefault();

@@ -249,7 +249,7 @@ export function FundDetail() {
   return (
     <>
       <AppBar title={fund.name} back />
-      <Page className="space-y-4 pb-24">
+      <Page className="space-y-4 pb-24 md:pb-10">
         <Card className="p-5">
           <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
             Remaining

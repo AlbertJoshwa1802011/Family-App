@@ -140,7 +140,7 @@ export function ExpenseDetail() {
   return (
     <>
       <AppBar title="Expense" back />
-      <Page className="space-y-4 pb-24">
+      <Page className="space-y-4 pb-24 md:pb-10">
         <Card className="p-5">
           <p className="text-3xl font-bold tabular-nums text-fg">
             {displayAmount(e)}

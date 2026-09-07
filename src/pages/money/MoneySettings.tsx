@@ -77,7 +77,7 @@ export function MoneySettings() {
   return (
     <>
       <AppBar title="Money settings" back />
-      <Page className="space-y-4 pb-24">
+      <Page className="space-y-4 pb-24 md:pb-10">
         <CurrencySection
           currency={currency}
           familyId={activeFamilyId!}

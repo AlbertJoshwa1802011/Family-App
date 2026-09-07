@@ -4,18 +4,24 @@ import { cn } from "../../lib/cn";
 /**
  * Width presets for the Page container.
  *
- * - prose: max-w-xl  — default; comfortable reading width, suits forms & detail pages
- * - list:  max-w-2xl — wider; suits item lists where more horizontal space helps
- * - wide:  max-w-5xl — full-ish; suits dashboards and data-heavy layouts
- * - full:  no max-w  — edge-to-edge with only horizontal padding
+ * Mobile stays compact (phone column). From `md` upward we intentionally
+ * widen so laptop/desktop no longer look like a stretched phone mockup.
+ *
+ * - prose: forms & detail pages
+ * - list:  item lists / Money tabs
+ * - wide:  dashboards and data-heavy layouts
+ * - full:  edge-to-edge with horizontal padding only
  */
 export type PageWidth = "prose" | "list" | "wide" | "full";
 
 const WIDTH_CLASSES: Record<PageWidth, string> = {
-  prose: "max-w-xl mx-auto px-4",
-  list: "max-w-2xl mx-auto px-4",
-  wide: "max-w-5xl mx-auto px-4",
-  full: "px-4",
+  prose:
+    "mx-auto w-full max-w-xl px-4 md:max-w-2xl md:px-6 lg:max-w-3xl",
+  list:
+    "mx-auto w-full max-w-2xl px-4 md:max-w-3xl md:px-6 lg:max-w-5xl xl:max-w-6xl",
+  wide:
+    "mx-auto w-full max-w-5xl px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl",
+  full: "w-full px-4 md:px-6 lg:px-8",
 };
 
 /** Standard content container. Clears the bottom nav on mobile; no extra offset on tablet/desktop. */
@@ -30,7 +36,7 @@ export function Page({
   width?: PageWidth;
 }) {
   return (
-    <div className={cn(WIDTH_CLASSES[width], "pt-4 pb-8", className)}>
+    <div className={cn(WIDTH_CLASSES[width], "pt-4 pb-8 md:pt-6 md:pb-10", className)}>
       {children}
     </div>
   );

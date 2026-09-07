@@ -26,6 +26,10 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+/** Shared chrome for tablet rail + desktop sidebar — liquid, not flat ink. */
+const SIDE_NAV_CHROME =
+  "border-r border-white/10 bg-ink-950/55 backdrop-blur-2xl backdrop-saturate-150";
+
 // ---------------------------------------------------------------------------
 // Mobile liquid-glass bottom tab bar (pinned like WhatsApp / iOS)
 // Long-press then drag moves the active pill *inside* the bar only.
@@ -182,7 +186,7 @@ function MobileBottomTabs() {
 }
 
 // ---------------------------------------------------------------------------
-// Tablet nav rail (icon-only, 64 px wide)
+// Tablet nav rail (icon-only, 72 px wide) — liquid glass
 // ---------------------------------------------------------------------------
 
 function NavRail() {
@@ -192,30 +196,36 @@ function NavRail() {
   return (
     <nav
       aria-label="Primary navigation"
-      className="pt-safe fixed inset-y-0 left-0 z-30 hidden w-16 flex-col border-r border-white/10 bg-ink-950/70 backdrop-blur-xl md:flex lg:hidden"
+      className={cn(
+        "pt-safe fixed inset-y-0 left-0 z-30 hidden w-[4.5rem] flex-col md:flex lg:hidden",
+        SIDE_NAV_CHROME,
+      )}
     >
-      <div className="flex h-16 items-center justify-center border-b border-line">
+      <div className="flex h-16 items-center justify-center border-b border-white/10">
         <BrandLockup size="md" markOnly />
       </div>
 
-      <ul className="flex flex-1 flex-col items-center gap-1 py-3">
+      <ul className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3">
         {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (
-            <li key={path}>
+            <li key={path} className="w-full">
               <NavLink
                 to={path}
                 end={path === "/"}
                 title={label}
                 aria-label={label}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "no-select flex items-center justify-center rounded-xl transition-colors",
+                  "no-select relative flex w-full flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-2 transition-colors",
                   active ? "bg-white/10" : "hover:bg-white/5",
                 )}
                 style={{
-                  minWidth: "var(--tap-min)",
                   minHeight: "var(--tap-min)",
                   color: active ? color : `${color}99`,
+                  boxShadow: active
+                    ? `0 0 18px ${color}33, inset 0 1px 0 rgba(255,255,255,0.2)`
+                    : undefined,
                 }}
               >
                 <Icon
@@ -223,20 +233,23 @@ function NavRail() {
                   strokeWidth={active ? 2.4 : 1.8}
                   aria-hidden="true"
                 />
+                <span className="max-w-full truncate text-[9px] font-semibold leading-none">
+                  {label}
+                </span>
               </NavLink>
             </li>
           );
         })}
       </ul>
 
-      <div className="flex flex-col items-center pb-6 gap-2">
+      <div className="flex flex-col items-center gap-2 px-2 pb-6">
         {user?.isPlatformAdmin && (
           <Link
             to="/admin/storage"
             title="Storage Admin"
             aria-label="Storage Admin"
             className={cn(
-              "no-select flex items-center justify-center rounded-xl transition-colors",
+              "no-select flex items-center justify-center rounded-2xl transition-colors",
               pathname === "/admin/storage"
                 ? "bg-vault-500/15 text-vault-400"
                 : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
@@ -251,7 +264,7 @@ function NavRail() {
           title="Settings"
           aria-label="Settings"
           className={cn(
-            "no-select flex items-center justify-center rounded-xl transition-colors",
+            "no-select flex items-center justify-center rounded-2xl transition-colors",
             pathname === "/settings"
               ? "bg-vault-500/15 text-vault-400"
               : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
@@ -266,7 +279,7 @@ function NavRail() {
 }
 
 // ---------------------------------------------------------------------------
-// Desktop nav sidebar (icons + labels, 200 px wide)
+// Desktop / laptop nav sidebar (icons + labels, 220 px) — liquid glass
 // ---------------------------------------------------------------------------
 
 function NavSidebar() {
@@ -276,13 +289,16 @@ function NavSidebar() {
   return (
     <nav
       aria-label="Primary navigation"
-      className="pt-safe fixed inset-y-0 left-0 z-30 hidden w-[200px] flex-col border-r border-white/10 bg-ink-950/70 backdrop-blur-xl lg:flex"
+      className={cn(
+        "pt-safe fixed inset-y-0 left-0 z-30 hidden w-[13.75rem] flex-col lg:flex",
+        SIDE_NAV_CHROME,
+      )}
     >
-      <div className="flex h-16 items-center border-b border-line px-4">
+      <div className="flex h-16 items-center border-b border-white/10 px-4">
         <BrandLockup size="md" />
       </div>
 
-      <ul className="flex flex-1 flex-col gap-1 px-2 py-3">
+      <ul className="flex flex-1 flex-col gap-1 px-2.5 py-3">
         {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (
@@ -290,13 +306,17 @@ function NavSidebar() {
               <NavLink
                 to={path}
                 end={path === "/"}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "no-select flex w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
-                  active ? "bg-white/10" : "hover:bg-white/5 text-fg-subtle",
+                  "no-select flex w-full items-center gap-3 rounded-2xl px-3 text-sm font-medium transition-colors",
+                  active ? "bg-white/10" : "text-fg-subtle hover:bg-white/5",
                 )}
                 style={{
                   minHeight: "var(--tap-min)",
                   color: active ? color : undefined,
+                  boxShadow: active
+                    ? `0 0 20px ${color}28, inset 0 1px 0 rgba(255,255,255,0.18)`
+                    : undefined,
                 }}
               >
                 <Icon
@@ -311,12 +331,12 @@ function NavSidebar() {
         })}
       </ul>
 
-      <div className="px-2 pb-6 flex flex-col gap-1">
+      <div className="flex flex-col gap-1 px-2.5 pb-6">
         {user?.isPlatformAdmin && (
           <Link
             to="/admin/storage"
             className={cn(
-              "no-select flex w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
+              "no-select flex w-full items-center gap-3 rounded-2xl px-3 text-sm font-medium transition-colors",
               pathname === "/admin/storage"
                 ? "bg-vault-500/15 text-vault-400"
                 : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
@@ -330,7 +350,7 @@ function NavSidebar() {
         <Link
           to="/settings"
           className={cn(
-            "no-select flex w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
+            "no-select flex w-full items-center gap-3 rounded-2xl px-3 text-sm font-medium transition-colors",
             pathname === "/settings"
               ? "bg-vault-500/15 text-vault-400"
               : "text-fg-subtle hover:bg-white/5 hover:text-fg-muted",
@@ -356,9 +376,11 @@ export interface AppShellProps {
 /**
  * Responsive application shell.
  *
- * - Mobile  (<768 px): pinned liquid-glass bottom tabs + content
- * - Tablet  (768-1023 px): icon-only nav rail (64 px) + content shifted right
- * - Desktop (>=1024 px): icon+label sidebar (200 px) + content shifted right
+ * - Mobile  (<768 px): pinned liquid-glass bottom tabs + phone content width
+ * - Tablet  (768-1023 px): liquid icon rail (72 px) + wider content
+ * - Laptop/Desktop (>=1024 px): liquid sidebar (220 px) + wide multi-column content
+ *
+ * Mobile bottom tabs stay `md:hidden` — never shown on laptop.
  */
 export function AppShell({ children }: AppShellProps) {
   return (
@@ -369,10 +391,10 @@ export function AppShell({ children }: AppShellProps) {
 
       <main
         className={cn(
-          // Extra bottom padding so content clears the pinned tab bar
+          // Extra bottom padding so content clears the pinned tab bar on phones only
           "min-h-full pb-20 [padding-bottom:calc(5rem+env(safe-area-inset-bottom))]",
-          "md:ml-16 md:pb-0 md:[padding-bottom:0]",
-          "lg:ml-[200px]",
+          "md:ml-[4.5rem] md:pb-0 md:[padding-bottom:0]",
+          "lg:ml-[13.75rem]",
         )}
       >
         {children}
