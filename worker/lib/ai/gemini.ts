@@ -17,12 +17,12 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
  * through when Google returns 404 NOT_FOUND for a retired model id.
  * Override the first pick with env GEMINI_MODEL.
  */
-export const DEFAULT_MODEL = "gemini-2.5-flash";
+export const DEFAULT_MODEL = "gemini-3.6-flash";
 export const FALLBACK_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
   "gemini-flash-latest",
-  "gemini-2.0-flash-001",
+  "gemini-2.5-flash",
 ] as const;
 
 export interface FunctionDeclaration {
@@ -117,8 +117,8 @@ export function friendlyGeminiMessage(err: GeminiError): string {
   if (err.status === 429) {
     return "Gemini rate-limited us — wait a minute and try again.";
   }
-  if (err.status === 404 || msg.includes("not found")) {
-    return "Gemini model not available for this key. Set GEMINI_MODEL to gemini-2.0-flash and redeploy, or create a new AI Studio key.";
+  if (err.status === 404 || msg.includes("not found") || msg.includes("no longer available")) {
+    return "Gemini model not available for this key. Set GEMINI_MODEL to gemini-3.6-flash (npx wrangler secret put GEMINI_MODEL --name fam), or create a new AI Studio key.";
   }
   if (msg.includes("billing") || msg.includes("quota")) {
     return "Gemini quota exceeded for this API key.";
