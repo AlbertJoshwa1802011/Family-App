@@ -51,7 +51,7 @@ The assistant is off unless `GEMINI_API_KEY` is set:
 
 ```bash
 npx wrangler secret put GEMINI_API_KEY
-# optional: GEMINI_MODEL, defaults to gemini-2.5-flash
+# optional: GEMINI_MODEL, defaults to gemini-3.6-flash
 ```
 
 `GET /api/assistant/status` reports whether it is configured, and the UI hides

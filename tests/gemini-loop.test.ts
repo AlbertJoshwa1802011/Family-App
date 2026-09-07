@@ -19,9 +19,10 @@ afterEach(() => {
 });
 
 describe("runAssistant Gemini loop", () => {
-  it("defaults to gemini-2.5-flash with flash fallbacks", () => {
-    expect(DEFAULT_MODEL).toBe("gemini-2.5-flash");
-    expect(FALLBACK_MODELS).toContain("gemini-2.0-flash");
+  it("defaults to gemini-3.6-flash with flash fallbacks", () => {
+    expect(DEFAULT_MODEL).toBe("gemini-3.6-flash");
+    expect(FALLBACK_MODELS).toContain("gemini-3.5-flash");
+    expect(FALLBACK_MODELS).toContain("gemini-flash-latest");
   });
 
   it("sends functionResponse under role user (not function)", async () => {
@@ -121,9 +122,14 @@ describe("runAssistant Gemini loop", () => {
       vi.fn(async (url: string) => {
         const model = decodeURIComponent(String(url).split("/models/")[1]?.split(":")[0] ?? "");
         modelsHit.push(model);
-        if (model === "gemini-2.5-flash") {
+        if (model === "gemini-3.6-flash") {
           return new Response(
-            JSON.stringify({ error: { message: "models/gemini-2.5-flash is not found" } }),
+            JSON.stringify({
+              error: {
+                message:
+                  "This model models/gemini-3.6-flash is no longer available. Please update your code to use models/gemini-3.5-flash",
+              },
+            }),
             { status: 404 },
           );
         }
@@ -144,9 +150,9 @@ describe("runAssistant Gemini loop", () => {
       execute: async () => ({}),
     });
 
-    expect(modelsHit[0]).toBe("gemini-2.5-flash");
-    expect(modelsHit[1]).toBe("gemini-2.0-flash");
-    expect(result.model).toBe("gemini-2.0-flash");
+    expect(modelsHit[0]).toBe("gemini-3.6-flash");
+    expect(modelsHit[1]).toBe("gemini-3.5-flash");
+    expect(result.model).toBe("gemini-3.5-flash");
     expect(result.text).toBe("Hi from fallback.");
   });
 
