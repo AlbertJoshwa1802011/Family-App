@@ -32,7 +32,9 @@ Schema source of truth: `worker/db/schema.ts`.
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
-`0006` (expenses + assistant_messages + task_reminders_log).
+`0006` (expenses + assistant_messages + task_reminders_log),
+`0007`–`0008` (events version / scheduling),
+`0009` (expense_categories tree + expenses.category_id).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -63,6 +65,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `digest_log` | Dedupe for Monday weekly digest | 0004 |
 | `chat_messages` | Family chat (soft-delete) | 0004 |
 | `expenses` | Family spending log (integer cents) | 0006 |
+| `expense_categories` | Family-scoped emoji category tree (parent → child) | 0009 |
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
 
@@ -121,7 +124,9 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
-| GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
+| GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents; `categoryId` leaf + root slug) |
+| GET/POST | `/expenses/categories?familyId` | Money Manager–style emoji category tree; seed on first GET; create parent/child while adding |
+| GET | `/expenses/suggestions?familyId&q=` | note lookup from past expenses (prefix + frequency ranked) |
 | GET/POST | `/assistant?familyId` | private Gemini assistant (Claude fallback); D1 snapshot + tools · RL 20/10min · needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` |
 | POST | `/calendar/feed-token` | mint/rotate capability URL |
 | GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
@@ -134,7 +139,9 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
-**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
+**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `categoryId` preferred (family category id); legacy `category` enum food/groceries/transport/household/medical/education/entertainment/travel/shopping/other; `spentOn` yyyy-mm-dd. Leaf picks store the root parent slug on `category` for filters.
+
+**POST /expenses/categories:** `name` 1–80; `emoji` 1–16 (default 📦); optional `parentId` (must be a top-level category in the same family). Depth capped at 2 → `max_depth`.
 
 **POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`. Gemini is preferred when both are set. GET includes `provider: "gemini" | "anthropic" | null`.
 

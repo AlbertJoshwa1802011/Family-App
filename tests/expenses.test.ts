@@ -184,3 +184,278 @@ describe("expenses API", () => {
     expect(total).toBe(10);
   });
 });
+
+describe("expense categories (Money Manager–style tree)", () => {
+  it("GET /expenses/categories seeds emoji parent→child tree once", async () => {
+    const res = await req(
+      "GET",
+      `/api/expenses/categories?familyId=${familyId}`,
+      member.cookie,
+    );
+    expect(res.status).toBe(200);
+    const { categories } = (await res.json()) as {
+      categories: {
+        slug: string | null;
+        emoji: string;
+        name: string;
+        children: { slug: string | null; emoji: string; name: string }[];
+      }[];
+    };
+    expect(categories.length).toBeGreaterThanOrEqual(9);
+    const food = categories.find((c) => c.slug === "food");
+    expect(food?.emoji).toBe("🍔");
+    expect(food?.name).toBe("Food & Dining");
+    expect(food?.children.some((c) => c.slug === "food-snacks" && c.emoji === "🍿")).toBe(true);
+    expect(categories.every((c) => c.emoji.length > 0)).toBe(true);
+
+    // Idempotent: second call does not duplicate.
+    const again = await (
+      await req("GET", `/api/expenses/categories?familyId=${familyId}`, owner.cookie)
+    ).json() as { categories: unknown[] };
+    expect(again.categories).toHaveLength(categories.length);
+  });
+
+  it("POST creates a subcategory under a parent and selects it on expense", async () => {
+    const tree = await (
+      await req("GET", `/api/expenses/categories?familyId=${familyId}`, member.cookie)
+    ).json() as { categories: { id: string; slug: string | null; children: { id: string }[] }[] };
+    const food = tree.categories.find((c) => c.slug === "food")!;
+
+    const created = await req("POST", "/api/expenses/categories", member.cookie, {
+      familyId,
+      name: "Office lunch",
+      emoji: "🥗",
+      parentId: food.id,
+    });
+    expect(created.status).toBe(201);
+    const { category } = (await created.json()) as {
+      category: { id: string; name: string; emoji: string; parentId: string | null; slug: string | null };
+    };
+    expect(category.name).toBe("Office lunch");
+    expect(category.emoji).toBe("🥗");
+    expect(category.parentId).toBe(food.id);
+    expect(category.slug).toBeNull();
+
+    const exp = await req("POST", "/api/expenses", member.cookie, {
+      familyId,
+      amount: 250,
+      categoryId: category.id,
+      note: "salad bowl",
+    });
+    expect(exp.status).toBe(201);
+    const body = (await exp.json()) as {
+      expense: {
+        category: string;
+        categoryId: string;
+        categoryName: string;
+        categoryEmoji: string;
+        parentCategoryName: string | null;
+      };
+    };
+    expect(body.expense.category).toBe("food"); // root slug for filters
+    expect(body.expense.categoryId).toBe(category.id);
+    expect(body.expense.categoryName).toBe("Office lunch");
+    expect(body.expense.categoryEmoji).toBe("🥗");
+    expect(body.expense.parentCategoryName).toBe("Food & Dining");
+  });
+
+  it("rejects grandchild (max depth 2), cross-family parent, bad emoji length", async () => {
+    const tree = await (
+      await req("GET", `/api/expenses/categories?familyId=${familyId}`, member.cookie)
+    ).json() as { categories: { id: string; slug: string | null; children: { id: string }[] }[] };
+    const food = tree.categories.find((c) => c.slug === "food")!;
+    const snacks = food.children[0]!;
+
+    const deep = await req("POST", "/api/expenses/categories", member.cookie, {
+      familyId,
+      name: "Too deep",
+      parentId: snacks.id,
+    });
+    expect(deep.status).toBe(400);
+    expect(((await deep.json()) as { error: string }).error).toBe("max_depth");
+
+    const strangerUser = seedUser(t.sqlite);
+    const other = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, other.id, "owner");
+    const otherTree = await (
+      await req("GET", `/api/expenses/categories?familyId=${other.id}`, stranger.cookie)
+    ).json() as { categories: { id: string }[] };
+
+    const cross = await req("POST", "/api/expenses/categories", member.cookie, {
+      familyId,
+      name: "Hijack",
+      parentId: otherTree.categories[0]!.id,
+    });
+    expect(cross.status).toBe(400);
+    expect(((await cross.json()) as { error: string }).error).toBe("invalid_parent_id");
+
+    const longEmoji = await req("POST", "/api/expenses/categories", member.cookie, {
+      familyId,
+      name: "Bad",
+      emoji: "x".repeat(20),
+    });
+    expect(longEmoji.status).toBe(400);
+    expect(((await longEmoji.json()) as { error: string }).error).toBe("validation_error");
+  });
+
+  it("outsider cannot list or create categories; missing familyId 400; 401 bare", async () => {
+    const strangerUser = seedUser(t.sqlite);
+    const other = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, other.id, "owner");
+
+    expect(
+      (await req("GET", `/api/expenses/categories?familyId=${familyId}`, stranger.cookie)).status,
+    ).toBe(404);
+    expect(
+      (await req("POST", "/api/expenses/categories", stranger.cookie, {
+        familyId,
+        name: "Nope",
+      })).status,
+    ).toBe(404);
+    expect((await req("GET", "/api/expenses/categories", member.cookie)).status).toBe(400);
+    expect((await app.request("/api/expenses/categories", {}, t.env)).status).toBe(401);
+  });
+
+  it("invalid categoryId on create → 400; leaf pick stores root slug", async () => {
+    const bad = await req("POST", "/api/expenses", member.cookie, {
+      familyId,
+      amount: 5,
+      categoryId: "not-a-real-id",
+    });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe("invalid_category_id");
+
+    const tree = await (
+      await req("GET", `/api/expenses/categories?familyId=${familyId}`, member.cookie)
+    ).json() as {
+      categories: { id: string; slug: string | null; children: { id: string; slug: string | null }[] }[];
+    };
+    const transport = tree.categories.find((c) => c.slug === "transport")!;
+    const fuel = transport.children.find((c) => c.slug === "transport-fuel")!;
+
+    const exp = await (
+      await req("POST", "/api/expenses", member.cookie, {
+        familyId,
+        amount: 80,
+        categoryId: fuel.id,
+        note: "shell petrol",
+      })
+    ).json() as { expense: { category: string; categoryId: string; categoryName: string } };
+    expect(exp.expense.category).toBe("transport");
+    expect(exp.expense.categoryId).toBe(fuel.id);
+    expect(exp.expense.categoryName).toBe("Fuel");
+
+    const filtered = await (
+      await req("GET", `/api/expenses?familyId=${familyId}&category=transport`, member.cookie)
+    ).json() as { expenses: { id: string }[]; total: number };
+    expect(filtered.total).toBe(80);
+  });
+});
+
+describe("expense note suggestions (fast lookup)", () => {
+  async function seedNotes() {
+    const tree = await (
+      await req("GET", `/api/expenses/categories?familyId=${familyId}`, member.cookie)
+    ).json() as {
+      categories: { id: string; slug: string | null; children: { id: string; slug: string | null }[] }[];
+    };
+    const food = tree.categories.find((c) => c.slug === "food")!;
+    const snacks = food.children.find((c) => c.slug === "food-snacks")!;
+    const coffee = food.children.find((c) => c.slug === "food-coffee")!;
+
+    for (let i = 0; i < 3; i++) {
+      await req("POST", "/api/expenses", member.cookie, {
+        familyId,
+        amount: 100 + i,
+        categoryId: snacks.id,
+        note: "outside snacks",
+        spentOn: `2026-09-0${i + 1}`,
+      });
+    }
+    await req("POST", "/api/expenses", member.cookie, {
+      familyId,
+      amount: 40,
+      categoryId: coffee.id,
+      note: "office coffee",
+    });
+    await req("POST", "/api/expenses", member.cookie, {
+      familyId,
+      amount: 15,
+      categoryId: snacks.id,
+      note: "school snacks",
+    });
+  }
+
+  it("ranks prefix matches and frequency; empty q returns recent unique notes", async () => {
+    await seedNotes();
+
+    const empty = await req(
+      "GET",
+      `/api/expenses/suggestions?familyId=${familyId}`,
+      member.cookie,
+    );
+    expect(empty.status).toBe(200);
+    const emptyBody = (await empty.json()) as { suggestions: { note: string; count: number }[] };
+    expect(emptyBody.suggestions.length).toBeGreaterThanOrEqual(2);
+    expect(emptyBody.suggestions[0]!.note).toBe("outside snacks");
+    expect(emptyBody.suggestions[0]!.count).toBe(3);
+
+    const q = await req(
+      "GET",
+      `/api/expenses/suggestions?familyId=${familyId}&q=snack`,
+      member.cookie,
+    );
+    const { suggestions } = (await q.json()) as {
+      suggestions: {
+        note: string;
+        amount: number;
+        categoryEmoji: string;
+        categoryName: string;
+        count: number;
+      }[];
+    };
+    expect(suggestions.map((s) => s.note)).toEqual(
+      expect.arrayContaining(["outside snacks", "school snacks"]),
+    );
+    expect(suggestions.every((s) => s.note.toLowerCase().includes("snack"))).toBe(true);
+    expect(suggestions[0]!.note).toBe("outside snacks");
+    expect(suggestions[0]!.count).toBe(3);
+    expect(suggestions[0]!.categoryEmoji).toBe("🍿");
+    expect(suggestions[0]!.amount).toBeGreaterThan(0);
+
+    // Prefix "out" should prefer "outside snacks" over anything else matching.
+    const prefix = await (
+      await req(
+        "GET",
+        `/api/expenses/suggestions?familyId=${familyId}&q=out`,
+        member.cookie,
+      )
+    ).json() as { suggestions: { note: string }[] };
+    expect(prefix.suggestions[0]!.note).toBe("outside snacks");
+  });
+
+  it("family isolation on suggestions; LIKE metacharacters stripped safely", async () => {
+    await seedNotes();
+    const strangerUser = seedUser(t.sqlite);
+    const other = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, other.id, "owner");
+
+    expect(
+      (await req(
+        "GET",
+        `/api/expenses/suggestions?familyId=${familyId}&q=snack`,
+        stranger.cookie,
+      )).status,
+    ).toBe(404);
+
+    const meta = await req(
+      "GET",
+      `/api/expenses/suggestions?familyId=${familyId}&q=${encodeURIComponent("%_snack")}`,
+      member.cookie,
+    );
+    expect(meta.status).toBe(200);
+    const { suggestions } = (await meta.json()) as { suggestions: { note: string }[] };
+    // Stripped %/_ → still matches "snack"
+    expect(suggestions.some((s) => s.note.includes("snack"))).toBe(true);
+  });
+});

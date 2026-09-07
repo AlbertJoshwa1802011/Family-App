@@ -13,6 +13,7 @@ import {
   EXPENSE_CATEGORIES,
   formatMoney,
   isExpenseCategory,
+  resolveCategoryBySlug,
   toCents,
 } from "./expenses";
 
@@ -230,6 +231,8 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
   const id = crypto.randomUUID();
   const now = Math.floor(ctx.nowMs / 1000);
 
+  const catRow = await resolveCategoryBySlug(ctx.db, ctx.familyId, category);
+
   await ctx.db.insert(schema.expenses).values({
     id,
     familyId: ctx.familyId,
@@ -237,6 +240,7 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     amountCents,
     currency: data.currency,
     category,
+    categoryId: catRow?.id ?? null,
     note: data.note,
     spentOn,
     updatedAt: now,
@@ -247,7 +251,7 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     action: "expense_created",
     targetType: "expense",
     targetId: id,
-    meta: { via: "assistant", amountCents, category },
+    meta: { via: "assistant", amountCents, category, categoryId: catRow?.id ?? null },
   });
 
   const money = formatMoney(amountCents, data.currency);

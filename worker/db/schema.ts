@@ -517,8 +517,42 @@ export const digestLog = sqliteTable(
 );
 
 // ── Expenses ─────────────────────────────────────────────────────────────────
+// Money Manager–style expense categories: family-scoped parent → child tree
+// with emoji icons. Seeded lazily on first open (see ensureFamilyCategories).
+// Custom categories created while adding an expense land here too.
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    parentId: text("parent_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+      { onDelete: "cascade" },
+    ),
+    name: text("name").notNull(),
+    emoji: text("emoji").notNull().default("📦"),
+    // Stable key for seeded defaults (`food`, `food-snacks`). Null for custom.
+    slug: text("slug"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_expense_cat_family_parent").on(t.familyId, t.parentId),
+    uniqueIndex("uq_expense_cat_family_slug").on(t.familyId, t.slug),
+  ],
+);
+
 // Family spending log. Amount is stored in integer cents so we never do
 // floating-point money math. "Add 100 for snacks" → 10000 cents of `currency`.
+// `category` remains the root parent slug for filters/assistant; `categoryId`
+// points at the concrete (often leaf) category row.
 
 export const expenses = sqliteTable(
   "expenses",
@@ -533,12 +567,18 @@ export const expenses = sqliteTable(
     amountCents: integer("amount_cents").notNull(),
     currency: text("currency").notNull().default("INR"),
     category: text("category").notNull().default("other"),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
     note: text("note"),
     spentOn: text("spent_on").notNull(), // ISO yyyy-mm-dd
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
   },
-  (t) => [index("idx_expense_family_spent").on(t.familyId, t.spentOn)],
+  (t) => [
+    index("idx_expense_family_spent").on(t.familyId, t.spentOn),
+    index("idx_expense_family_category").on(t.familyId, t.categoryId),
+  ],
 );
 
 // ── Task reminder dedupe ─────────────────────────────────────────────────────
