@@ -350,8 +350,8 @@ function CalendarFeedCard() {
 }
 
 export function Settings() {
-  const { user } = useAuth();
-  const qc = useQueryClient();
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
 
   return (
     <>
@@ -373,6 +373,23 @@ export function Settings() {
             </div>
           </div>
         </Card>
+
+        {/* Keep Sign out under the profile card — NOT at the page bottom.
+            On a phone the bottom button sits under the nav; taps go Home
+            and never call logout. */}
+        <Button
+          type="button"
+          variant="danger"
+          fullWidth
+          loading={signingOut}
+          leadingIcon={<LogOut className="size-4" />}
+          onClick={() => {
+            setSigningOut(true);
+            void signOut();
+          }}
+        >
+          Sign out
+        </Button>
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
@@ -440,18 +457,6 @@ export function Settings() {
           </Card>
         </section>
 
-        <Button
-          variant="danger"
-          fullWidth
-          leadingIcon={<LogOut className="size-4" />}
-          onClick={async () => {
-            if (!window.confirm("Are you sure you want to sign out?")) return;
-            await api("/auth/logout", { method: "POST" });
-            await qc.invalidateQueries({ queryKey: ["me"] });
-          }}
-        >
-          Sign out
-        </Button>
       </Page>
     </>
   );

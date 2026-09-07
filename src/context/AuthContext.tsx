@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
 export interface User {
@@ -37,6 +37,8 @@ interface AuthValue {
   activeFamily: Family | null;
   activeFamilyId: string | null;
   setActiveFamilyId: (id: string) => void;
+  /** Revoke the server session, drop cached PII, and hard-navigate to login. */
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue | undefined>(undefined);
@@ -53,6 +55,7 @@ function readStoredFamilyId(): string | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["me"],
     queryFn: () => api<MeResponse>("/auth/me"),
@@ -72,6 +75,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const signOut = useCallback(async () => {
+    try {
+      await api("/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Best-effort: a failed revoke must not leave the UI signed in.
+    }
+    try {
+      localStorage.removeItem(ACTIVE_FAMILY_KEY);
+    } catch {
+      // Non-fatal.
+    }
+    setStoredId(null);
+    await qc.cancelQueries();
+    qc.clear();
+    // Hard navigation so Login cannot bounce back to `/` on stale auth state.
+    window.location.replace("/login");
+  }, [qc]);
+
   // Resolve the stored id against the memberships we actually have. A stale id
   // (family left or deleted) must not strand the user on a family they can't
   // read, so fall back to the first membership. The stored value is only a
@@ -88,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     activeFamily,
     activeFamilyId: activeFamily?.id ?? null,
     setActiveFamilyId,
+    signOut,
   };
 
   return <AuthContext value={value}>{children}</AuthContext>;
