@@ -44,6 +44,8 @@ export interface GeminiContent {
 interface GeminiCandidatePart {
   text?: string;
   thought?: boolean;
+  /** Gemini 3+ encrypts reasoning here; must be echoed on tool-call turns. */
+  thoughtSignature?: string;
   functionCall?: { name: string; args?: Record<string, unknown>; id?: string };
 }
 
@@ -122,6 +124,9 @@ export function friendlyGeminiMessage(err: GeminiError): string {
   }
   if (msg.includes("billing") || msg.includes("quota")) {
     return "Gemini quota exceeded for this API key.";
+  }
+  if (msg.includes("thought_signature") || msg.includes("thought signature")) {
+    return "Gemini rejected the tool reply (missing thought signature). Try again in a moment.";
   }
   return "The assistant is unavailable right now. Try again in a moment.";
 }
@@ -243,9 +248,9 @@ export async function runAssistant(args: {
     }
 
     const parts = (json.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought);
-    const calls = parts.filter((p) => p.functionCall).map((p) => p.functionCall!);
+    const callParts = parts.filter((p) => p.functionCall);
 
-    if (calls.length === 0) {
+    if (callParts.length === 0) {
       const text = parts
         .map((p) => p.text ?? "")
         .join("")
@@ -258,19 +263,28 @@ export async function runAssistant(args: {
     }
 
     // Echo the model's call back into the transcript, then answer it.
+    // Gemini 3 requires thoughtSignature on functionCall parts — drop it and
+    // the next generateContent returns 400 (hello works; tool questions fail).
     contents.push({
       role: "model",
-      parts: calls.map((c) => ({
-        functionCall: {
-          name: c.name,
-          args: c.args ?? {},
-          ...(c.id ? { id: c.id } : {}),
-        },
-      })),
+      parts: callParts.map((p) => {
+        const c = p.functionCall!;
+        return {
+          functionCall: {
+            name: c.name,
+            args: c.args ?? {},
+            ...(c.id ? { id: c.id } : {}),
+          },
+          ...(typeof p.thoughtSignature === "string" && p.thoughtSignature
+            ? { thoughtSignature: p.thoughtSignature }
+            : {}),
+        };
+      }),
     });
 
     const responseParts: unknown[] = [];
-    for (const call of calls) {
+    for (const part of callParts) {
+      const call = part.functionCall!;
       let result: unknown;
       try {
         result = await args.execute(call.name, call.args ?? {});
