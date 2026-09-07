@@ -236,3 +236,106 @@ export function inviteEmail(opts: {
     footer: "If you weren't expecting this invitation you can safely ignore this email.",
   });
 }
+
+// ── Demo / access-control emails ──────────────────────────────────────────────
+
+export function demoRequestNotifyEmail(opts: {
+  name: string;
+  email: string;
+  company: string | null;
+  message: string | null;
+  approveUrl: string;
+  rejectUrl: string;
+  adminUrl: string;
+}): string {
+  const companyRow = opts.company
+    ? `<tr><td style="padding:4px 24px;font-size:14px;color:${COLORS.muted}"><strong style="color:${COLORS.ink}">Company:</strong> ${escapeHtml(opts.company)}</td></tr>`
+    : "";
+  const messageRow = opts.message
+    ? `<tr><td style="padding:12px 24px 8px;font-size:14px;line-height:1.6;color:${COLORS.muted}">${escapeHtml(opts.message)}</td></tr>`
+    : "";
+
+  const content = `
+    <tr><td style="height:6px;background:${COLORS.brand};font-size:0">&nbsp;</td></tr>
+    <tr><td style="padding:24px 24px 4px;font-size:20px;font-weight:700;color:${COLORS.ink}">New demo request</td></tr>
+    <tr><td style="padding:8px 24px 12px;font-size:14px;line-height:1.6;color:${COLORS.muted}">
+      Someone asked for access to Family Vault. Approve them to let them sign in with Google,
+      or reject if it isn't a fit.
+    </td></tr>
+    <tr><td style="padding:4px 24px;font-size:14px;color:${COLORS.muted}"><strong style="color:${COLORS.ink}">Name:</strong> ${escapeHtml(opts.name)}</td></tr>
+    <tr><td style="padding:4px 24px;font-size:14px;color:${COLORS.muted}"><strong style="color:${COLORS.ink}">Email:</strong> ${escapeHtml(opts.email)}</td></tr>
+    ${companyRow}
+    ${messageRow}
+    <tr><td style="padding:16px 24px 8px">${button("Approve access", opts.approveUrl)}</td></tr>
+    <tr><td style="padding:0 24px 8px">${button("Reject", opts.rejectUrl)}</td></tr>
+    <tr><td style="padding:8px 24px 28px;font-size:12px;color:${COLORS.subtle}">
+      Or review in the app: <a href="${escapeHtml(opts.adminUrl)}" style="color:${COLORS.brand}">Open admin</a>
+    </td></tr>`;
+
+  return shell({
+    preheader: `Demo request from ${opts.name} (${opts.email})`,
+    content,
+    footer: "You're receiving this because you're listed as a Family Vault access admin.",
+  });
+}
+
+export function demoRequestReceivedEmail(opts: {
+  name: string;
+  appUrl: string;
+}): string {
+  const content = `
+    <tr><td style="height:6px;background:${COLORS.brand};font-size:0">&nbsp;</td></tr>
+    <tr><td style="padding:24px 24px 4px;font-size:20px;font-weight:700;color:${COLORS.ink}">We got your demo request</td></tr>
+    <tr><td style="padding:8px 24px 20px;font-size:14px;line-height:1.6;color:${COLORS.muted}">
+      Thanks${opts.name ? `, ${escapeHtml(opts.name)}` : ""} — a Family Vault admin will review your
+      request shortly. You'll get another email when you're approved to sign in.
+    </td></tr>
+    <tr><td style="padding:0 24px 28px">${button("Visit Family Vault", opts.appUrl)}</td></tr>`;
+
+  return shell({
+    preheader: "Your Family Vault demo request was received",
+    content,
+    footer: "If you didn't request this, you can ignore this email.",
+  });
+}
+
+export function accessApprovedEmail(opts: {
+  name: string | null;
+  loginUrl: string;
+}): string {
+  const greet = opts.name ? `Hi ${escapeHtml(opts.name)},` : "Hi,";
+  const content = `
+    <tr><td style="height:6px;background:${COLORS.brand};font-size:0">&nbsp;</td></tr>
+    <tr><td style="padding:24px 24px 4px;font-size:20px;font-weight:700;color:${COLORS.ink}">You're in — sign in to Family Vault</td></tr>
+    <tr><td style="padding:8px 24px 20px;font-size:14px;line-height:1.6;color:${COLORS.muted}">
+      ${greet} your access was approved. Sign in with the same Google account you used in
+      your request to get started with your team.
+    </td></tr>
+    <tr><td style="padding:0 24px 28px">${button("Sign in with Google", opts.loginUrl)}</td></tr>`;
+
+  return shell({
+    preheader: "Your Family Vault access was approved",
+    content,
+    footer: "If you weren't expecting this, contact the person who invited you.",
+  });
+}
+
+export function accessRejectedEmail(opts: {
+  name: string | null;
+}): string {
+  const greet = opts.name ? `Hi ${escapeHtml(opts.name)},` : "Hi,";
+  const content = `
+    <tr><td style="height:6px;background:${COLORS.brand};font-size:0">&nbsp;</td></tr>
+    <tr><td style="padding:24px 24px 4px;font-size:20px;font-weight:700;color:${COLORS.ink}">Demo request update</td></tr>
+    <tr><td style="padding:8px 24px 28px;font-size:14px;line-height:1.6;color:${COLORS.muted}">
+      ${greet} we aren't able to approve access right now. If you think this is a mistake,
+      reply to the person who manages your team's Family Vault.
+    </td></tr>`;
+
+  return shell({
+    preheader: "Update on your Family Vault demo request",
+    content,
+    footer: "If you weren't expecting this, you can ignore this email.",
+  });
+}
+

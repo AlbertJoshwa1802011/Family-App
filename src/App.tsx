@@ -4,6 +4,8 @@ import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
 import { Login } from "./pages/Login";
+import { AccessReview } from "./pages/AccessReview";
+import { AdminAccess } from "./pages/AdminAccess";
 import { AcceptInvite } from "./pages/AcceptInvite";
 import { CreateFamily } from "./pages/CreateFamily";
 import { Dashboard } from "./pages/Dashboard";
@@ -40,6 +42,23 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Super-admin only — no family gate (ops before onboarding a vault). */
+function SuperAdminOnly({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!user?.appRoles?.includes("super_admin")) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
 /** Auth required but NO family gate — invitees usually have no family yet. */
 function AuthOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -59,12 +78,21 @@ export default function App() {
     <>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/access/review" element={<AccessReview />} />
         <Route
           path="/invite/:token"
           element={
             <AuthOnly>
               <AcceptInvite />
             </AuthOnly>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <SuperAdminOnly>
+              <AdminAccess />
+            </SuperAdminOnly>
           }
         />
         <Route

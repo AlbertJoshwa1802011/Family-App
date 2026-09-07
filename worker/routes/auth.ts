@@ -14,6 +14,11 @@ import {
 } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
+import {
+  canSignIn,
+  ensureBootstrapSuperAdmin,
+  listAppRoles,
+} from "../lib/appAccess";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -44,6 +49,10 @@ authRoutes.get("/me", async (c) => {
     .get();
 
   if (!user) return c.json({ user: null, families: [] });
+
+  // Bootstrap SUPER_ADMIN_EMAILS → durable super_admin assignment (idempotent).
+  await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
+  const appRoles = await listAppRoles(db, user.id);
 
   // Fetch all active family memberships for this user
   const memberships = await db
@@ -77,6 +86,7 @@ authRoutes.get("/me", async (c) => {
       email: user.email,
       name: user.name,
       picture: user.picture,
+      appRoles,
     },
     families,
   });
@@ -204,6 +214,12 @@ authRoutes.get("/google/callback", async (c) => {
 
   const db = getDb(c.env);
 
+  // Closed signup: only approved emails / bootstrap admins / returning users.
+  const access = await canSignIn(db, c.env, { email, googleSub: sub });
+  if (!access.ok) {
+    return redirect(`/login?error=${encodeURIComponent(access.reason)}`);
+  }
+
   // Upsert user: update profile fields on conflict (user might have changed their name/picture)
   await db
     .insert(schema.users)
@@ -227,12 +243,14 @@ authRoutes.get("/google/callback", async (c) => {
 
   // Fetch the real user ID (might differ from the UUID we tried to insert)
   const user = await db
-    .select({ id: schema.users.id })
+    .select({ id: schema.users.id, email: schema.users.email })
     .from(schema.users)
     .where(eq(schema.users.googleSub, sub))
     .get();
 
   if (!user) return redirect("/login?error=user_create_failed");
+
+  await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
   // Cache owner refresh token in KV (Drive upload/download needs it in Phase 2)
   if (tokens.refresh_token) {

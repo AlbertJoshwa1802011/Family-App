@@ -592,3 +592,79 @@ export const assistantMessages = sqliteTable(
     ),
   ],
 );
+
+// ── App-level access control (orthogonal to family_members.role) ─────────────
+// Closed signup: strangers request a demo; a super_admin approves (email link
+// or in-app). Approved emails land in access_grants. App roles (super_admin
+// today; more later) live in app_role_assignments — never overload family roles.
+
+/** Known app-level roles. Extensible: add values here as the team grows. */
+export const APP_ROLES = ["super_admin"] as const;
+export type AppRole = (typeof APP_ROLES)[number];
+
+export const demoRequests = sqliteTable(
+  "demo_requests",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull(), // stored lowercased
+    company: text("company"),
+    message: text("message"),
+    status: text("status", { enum: ["pending", "approved", "rejected"] })
+      .notNull()
+      .default("pending"),
+    // Plain token emailed for approve/reject; only the hash is stored.
+    reviewTokenHash: text("review_token_hash").notNull().unique(),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    reviewedAt: integer("reviewed_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_demo_request_email").on(t.email),
+    index("idx_demo_request_status_created").on(t.status, t.createdAt),
+  ],
+);
+
+export const accessGrants = sqliteTable(
+  "access_grants",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(), // lowercased
+    status: text("status", { enum: ["approved", "revoked"] })
+      .notNull()
+      .default("approved"),
+    grantedByUserId: text("granted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    demoRequestId: text("demo_request_id").references(() => demoRequests.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [index("idx_access_grant_status").on(t.status)],
+);
+
+export const appRoleAssignments = sqliteTable(
+  "app_role_assignments",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Free-form text so new roles can be added without a migration; validate
+    // known roles in app code (see APP_ROLES / requireAppRole).
+    role: text("role").notNull(),
+    grantedByUserId: text("granted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_app_role_user").on(t.userId, t.role),
+    index("idx_app_role_role").on(t.role),
+  ],
+);
