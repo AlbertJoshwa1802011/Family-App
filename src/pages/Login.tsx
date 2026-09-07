@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/Button";
+import { api, ApiError } from "../lib/api";
+import { inputCls } from "../lib/fieldCls";
+import { cn } from "../lib/cn";
 
 function GoogleIcon() {
   return (
@@ -28,7 +31,10 @@ function GoogleIcon() {
 }
 
 const LOGIN_ERRORS: Record<string, string> = {
-  access_denied: "Google sign-in was cancelled — try again.",
+  access_denied:
+    "This app is invite-only. Request access below and we'll email you when you're approved.",
+  access_revoked:
+    "Your access was revoked. Contact your family admin if you think that's a mistake.",
   rate_limited: "Too many sign-in attempts — wait a moment and try again.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   missing_params: "Sign-in didn't finish — please try again.",
@@ -38,21 +44,87 @@ const LOGIN_ERRORS: Record<string, string> = {
   user_create_failed: "We couldn't create your account — please try again.",
 };
 
+type Mode = "request" | "signin";
+
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get("error");
+
+  const initialMode: Mode =
+    oauthError === "access_denied" || oauthError === "access_revoked"
+      ? "request"
+      : "signin";
+
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [starting, setStarting] = useState(false);
-  const [error] = useState(() =>
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(() =>
     oauthError
       ? (LOGIN_ERRORS[oauthError] ?? "Sign-in didn't work — please try again.")
       : "",
   );
+  const [success, setSuccess] = useState("");
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [company, setCompany] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
   }, [isAuthenticated, navigate]);
+
+  async function startGoogle() {
+    setStarting(true);
+    setError("");
+    setSuccess("");
+    window.location.assign("/api/auth/google/start");
+  }
+
+  async function submitRequest(e: FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await api<{ ok: boolean; status: string; deduped?: boolean }>(
+        "/access/demo-requests",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            email,
+            company: company || undefined,
+            message: message || undefined,
+          }),
+        },
+      );
+      if (res.status === "already_approved") {
+        setSuccess("You're already approved — sign in with Google below.");
+        setMode("signin");
+      } else if (res.deduped) {
+        setSuccess(
+          "We already have your request. We'll email you when an admin approves access.",
+        );
+      } else {
+        setSuccess(
+          "Request sent. Check your email for confirmation — we'll notify you when you're approved.",
+        );
+      }
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Could not send your request.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center px-6 py-12 text-center">
@@ -64,34 +136,125 @@ export function Login() {
         Family Vault
       </h1>
       <p className="mt-3 max-w-xs text-sm leading-relaxed text-fg-muted">
-        Keep your family's important documents safe, organized, and never miss
-        an expiry again.
+        Sign in with Google if you already have access. New people request
+        access — an admin gets the email and must approve before you can sign
+        in.
       </p>
 
-      <Button
-        type="button"
-        size="lg"
-        variant="white"
-        fullWidth
-        loading={isLoading || starting}
-        leadingIcon={<GoogleIcon />}
-        onClick={() => {
-          setStarting(true);
-          // Full-page GET — Worker 302s to Google (reliable on phones).
-          window.location.assign("/api/auth/google/start");
-        }}
-        className="mt-10 max-w-xs"
-      >
-        Continue with Google
-      </Button>
+      <div className="mt-8 flex w-full max-w-xs gap-2">
+        <button
+          type="button"
+          onClick={() => setMode("signin")}
+          className={cn(
+            "liquid-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium",
+            mode === "signin"
+              ? "liquid-bubble bg-vault-500/30 text-white"
+              : "text-fg-muted",
+          )}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("request")}
+          className={cn(
+            "liquid-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium",
+            mode === "request"
+              ? "liquid-bubble bg-vault-500/30 text-white"
+              : "text-fg-muted",
+          )}
+        >
+          Request access
+        </button>
+      </div>
+
+      {mode === "request" ? (
+        <form
+          onSubmit={submitRequest}
+          className="mt-6 w-full max-w-xs space-y-3 text-left"
+        >
+          <label className="block text-xs font-medium text-fg-muted">
+            Your name
+            <input
+              required
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Alex"
+              className={cn(inputCls, "mt-1")}
+            />
+          </label>
+          <label className="block text-xs font-medium text-fg-muted">
+            Email
+            <input
+              required
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className={cn(inputCls, "mt-1")}
+            />
+          </label>
+          <label className="block text-xs font-medium text-fg-muted">
+            Company / team
+            <input
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              placeholder="Optional"
+              className={cn(inputCls, "mt-1")}
+            />
+          </label>
+          <label className="block text-xs font-medium text-fg-muted">
+            Why do you need access?
+            <textarea
+              rows={3}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Optional note for the admin"
+              className={cn(inputCls, "mt-1 resize-none")}
+            />
+          </label>
+          <Button type="submit" size="lg" fullWidth loading={submitting}>
+            Request access
+          </Button>
+        </form>
+      ) : (
+        <Button
+          type="button"
+          size="lg"
+          variant="white"
+          fullWidth
+          loading={isLoading || starting}
+          leadingIcon={<GoogleIcon />}
+          onClick={() => void startGoogle()}
+          className="mt-6 max-w-xs"
+        >
+          Continue with Google
+        </Button>
+      )}
+
       {error && (
         <p className="mt-3 max-w-xs text-xs text-danger" role="alert">
           {error}
         </p>
       )}
+      {success && (
+        <p className="mt-3 max-w-xs text-xs text-success" role="status">
+          {success}
+        </p>
+      )}
 
       <p className="mt-8 text-xs text-fg-subtle">
-        Sign in with the Google account you use for this family.
+        New here?{" "}
+        <button
+          type="button"
+          className="underline underline-offset-2"
+          onClick={() => setMode("request")}
+        >
+          Request access
+        </button>
+        .
       </p>
     </div>
   );

@@ -57,6 +57,8 @@
   },
   "vars": {
     "APP_URL": "https://fam.connect-cloud.workers.dev",
-    "CONTRIBUTIONS_API_URL": "https://light-of-jesus-ministry-contributions.pages.dev"
+    "CONTRIBUTIONS_API_URL": "https://light-of-jesus-ministry-contributions.pages.dev",
+    // Access-request notifications land here (login "Request access" form).
+    "ACCESS_NOTIFY_EMAIL": "albertjoshrock101@gmail.com"
   }
 }

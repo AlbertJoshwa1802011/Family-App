@@ -6,6 +6,7 @@ import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
 import { VaultProvider } from "./context/VaultContext";
 import { Login } from "./pages/Login";
+import { AccessReview } from "./pages/AccessReview";
 import { Dashboard } from "./pages/Dashboard";
 import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
@@ -21,6 +22,7 @@ import { ContactForm } from "./pages/ContactForm";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { AdminStorage } from "./pages/admin/Storage";
+import { AdminAccess } from "./pages/admin/Access";
 import { Expenses } from "./pages/Expenses";
 import { ExpenseForm } from "./pages/ExpenseForm";
 import { ExpenseDetail } from "./pages/ExpenseDetail";
@@ -56,6 +58,7 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/access/review" element={<AccessReview />} />
         <Route
           element={
             <Protected>
@@ -122,6 +125,7 @@ export default function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
+          <Route path="/admin/access" element={<AdminAccess />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

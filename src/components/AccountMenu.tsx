@@ -12,6 +12,7 @@ import {
   LogOut,
   MessageCircle,
   Settings as SettingsIcon,
+  Shield,
   Users,
   Wallet,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const LINKS: MenuLink[] = [
   { to: "/contacts", label: "Contacts", icon: Contact },
   { to: "/calendar", label: "Calendar", icon: Calendar },
   { to: "/admin/storage", label: "Platform admin", icon: HardDrive, adminOnly: true },
+  { to: "/admin/access", label: "App access", icon: Shield, adminOnly: true },
 ];
 
 /**

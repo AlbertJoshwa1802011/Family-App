@@ -26,6 +26,7 @@ import { churchRoutes } from "./routes/church";
 import { settlementRoutes } from "./routes/settlements";
 import { deviceLockRoutes } from "./routes/deviceLock";
 import { chatRoutes } from "./routes/chat";
+import { accessRoutes } from "./routes/access";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
@@ -99,6 +100,7 @@ api.route("/church", churchRoutes);
 api.route("/settlements", settlementRoutes);
 api.route("/device-lock", deviceLockRoutes);
 api.route("/chat", chatRoutes);
+api.route("/access", accessRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

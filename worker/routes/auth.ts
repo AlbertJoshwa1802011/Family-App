@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/requireSession";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { audit, ACTIONS } from "../lib/audit";
 import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
+import { canSignIn } from "../lib/appAccess";
 import {
   LOGIN_SCOPES,
   extraScopesFromConnect,
@@ -272,6 +273,12 @@ authRoutes.get("/google/callback", async (c) => {
   }
 
   const db = getDb(c.env);
+
+  // Closed signup: only approved emails / bootstrap admins / returning users.
+  const access = await canSignIn(db, c.env, { email, googleSub: sub });
+  if (!access.ok) {
+    return redirect(`/login?error=${encodeURIComponent(access.reason)}`);
+  }
 
   // Upsert user: update profile fields on conflict (user might have changed their name/picture)
   await db
