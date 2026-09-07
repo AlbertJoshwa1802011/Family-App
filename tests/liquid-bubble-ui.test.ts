@@ -35,14 +35,32 @@ describe("liquid bubble design tokens", () => {
   it("ships the three liquid surface recipes inside @layer components", () => {
     // Unlayered glass would beat every Tailwind utility — same footgun as `.lq`.
     const layerIdx = css.indexOf("@layer components");
-    const bubbleIdx = css.indexOf(".liquid-bubble");
-    const pillIdx = css.indexOf(".liquid-pill-track");
-    const fieldIdx = css.indexOf(".liquid-field");
     expect(layerIdx).toBeGreaterThan(-1);
-    expect(bubbleIdx).toBeGreaterThan(layerIdx);
-    expect(pillIdx).toBeGreaterThan(layerIdx);
-    expect(fieldIdx).toBeGreaterThan(layerIdx);
-    expect(css).toMatch(/backdrop-filter:\s*blur\(24px\)/);
+    const layered = css.slice(layerIdx);
+    expect(layered).toMatch(/\.liquid-bubble\s*,/);
+    expect(layered).toMatch(/\.liquid-pill-track\s*\{/);
+    expect(layered).toMatch(/\.liquid-field\s*\{/);
+    // Full recipe: fill + specular rim + inner sheen + ambient orbs
+    expect(layered).toMatch(/backdrop-filter:\s*blur\(var\(--lq-blur\)\)/);
+    expect(layered).toMatch(/\.liquid-bubble::before/);
+    expect(layered).toMatch(/\.liquid-bubble::after/);
+    expect(css).toContain("orb-drift");
+    expect(layered).toContain("liquid-chrome");
+    expect(layered).toContain("liquid-raised");
+  });
+
+  it("AppBar is a floating liquid capsule on phone and laptop", () => {
+    const bar = read("src/components/ui/AppBar.tsx");
+    expect(bar).toContain("liquid-bubble");
+    expect(bar).toContain("liquid-chrome");
+    expect(bar).toContain("rounded-full");
+    expect(bar).not.toMatch(/border-b border-white\/10 bg-ink-950/);
+  });
+
+  it("laptop sidebar uses the same liquid-chrome recipe", () => {
+    const shell = read("src/components/shell/AppShell.tsx");
+    expect(shell).toContain("liquid-bubble liquid-chrome");
+    expect(shell).toContain("NavSidebar");
   });
 });
 

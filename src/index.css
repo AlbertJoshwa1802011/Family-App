@@ -63,6 +63,11 @@
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-liquid: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+
+  /* Bubble radius used by liquid surfaces */
+  --radius-bubble: 28px;
 
   /* Breakpoints — mobile-first. Device intent: sm=big phone, md=tablet portrait,
      lg=tablet landscape / small laptop, xl=laptop, 2xl=big screen. */
@@ -140,20 +145,58 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Subtle premium backdrop glow (themeable) */
+/* Ambient colour orbs — glass needs something colourful to refract.
+   Without this, liquid bubbles look like flat grey panels (especially on laptop). */
 body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  background:
+    radial-gradient(38% 30% at 18% 8%, #14b8a63d, transparent 68%),
+    radial-gradient(34% 28% at 88% 18%, #6366f138, transparent 70%),
+    radial-gradient(42% 32% at 50% 96%, #0f766e33, transparent 72%),
+    radial-gradient(30% 24% at 82% 72%, #db277733, transparent 70%);
+  filter: blur(20px);
+  animation: orb-drift 26s var(--ease-out) infinite alternate;
+  pointer-events: none;
+}
+
+/* Fine grain so large blurred areas don't band */
+body::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(
-      60% 50% at 50% -10%,
-      var(--backdrop-glow-1),
-      transparent 70%
-    ),
-    radial-gradient(40% 30% at 90% 10%, var(--backdrop-glow-2), transparent 70%);
+  opacity: 0.035;
   pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes orb-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-3%, 2%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(2%, -3%, 0) scale(1.03);
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.bubble-in {
+  animation: bubble-in 0.5s var(--ease-spring) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -267,97 +310,234 @@ img {
   touch-action: manipulation;
 }
 
-/* ── Liquid bubble surfaces (Home / Vault / Docs / Money / Family) ────────────
-   One recipe for frosted cards, fields, and pill tracks so Money no longer
-   falls back to flat white/gray `bg-surface` panels. Tokens flip with theme.
+/* ── Liquid bubble surfaces (phone + laptop) ─────────────────────────────────
+   Three stacked ingredients — same recipe as Apple liquid glass:
+     1. tinted low-alpha fill (+ backdrop blur)
+     2. 1px specular rim (::before, masked gradient border)
+     3. inner sheen pooled at the top (::after)
 
-   IMPORTANT: the recipes live in `@layer components` so Tailwind utilities
-   (`bg-*`, `border-dashed`, `hover:bg-*`, …) can still override on the same
-   element. Unlayered glass would silently beat every utility (same footgun
-   as the old `.lq` block). */
+   Public classes: .liquid-bubble · .liquid-pill-track · .liquid-field
+   Modifiers: .liquid-chrome · .liquid-raised · .liquid-flat · .liquid-press
+
+   Live in `@layer components` so Tailwind utilities can still override. */
 :root {
-  --liquid-fill: rgba(255, 255, 255, 0.08);
-  --liquid-fill-strong: rgba(255, 255, 255, 0.12);
-  --liquid-border: rgba(255, 255, 255, 0.15);
-  --liquid-rim: rgba(255, 255, 255, 0.28);
-  --liquid-field: rgba(0, 0, 0, 0.28);
-  --liquid-field-border: rgba(255, 255, 255, 0.12);
-  --liquid-bubble: 0 8px 32px -12px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  --lq-fill: linear-gradient(
+    160deg,
+    #ffffff1c 0%,
+    #ffffff0d 42%,
+    #ffffff05 78%,
+    #ffffff0f 100%
+  );
+  --lq-rim: linear-gradient(
+    140deg,
+    #ffffff66 0%,
+    #ffffff1a 26%,
+    #ffffff00 52%,
+    #ffffff0d 78%,
+    #ffffff3d 100%
+  );
+  --lq-sheen: radial-gradient(
+    130% 80% at 50% -22%,
+    #ffffff26 0%,
+    #ffffff08 42%,
+    transparent 68%
+  );
+  --lq-shadow: 0 10px 34px -14px #000d, 0 2px 8px -4px #0009;
+  --lq-blur: 22px;
+  --lq-bg: #0d1526a6;
+  /* Back-compat aliases used by older tests / light-theme overrides */
+  --liquid-fill: #ffffff14;
+  --liquid-fill-strong: #ffffff1f;
+  --liquid-border: #ffffff26;
+  --liquid-rim: #ffffff47;
+  --liquid-field: #00000047;
+  --liquid-field-border: #ffffff1f;
+  --liquid-bubble: var(--lq-shadow);
 }
 [data-theme="light"] {
+  --lq-fill: linear-gradient(
+    160deg,
+    #ffffffcc 0%,
+    #ffffff99 45%,
+    #f8fafce6 100%
+  );
+  --lq-rim: linear-gradient(
+    140deg,
+    #ffffff 0%,
+    #ffffff99 28%,
+    #94a3b833 55%,
+    #ffffffb3 100%
+  );
+  --lq-sheen: radial-gradient(
+    130% 80% at 50% -22%,
+    #ffffffb3 0%,
+    #ffffff40 42%,
+    transparent 68%
+  );
+  --lq-shadow: 0 10px 28px -14px #0f172a2e, 0 2px 8px -4px #0f172a14;
+  --lq-bg: #fffffff2;
   --liquid-fill: rgba(255, 255, 255, 0.72);
   --liquid-fill-strong: rgba(255, 255, 255, 0.88);
   --liquid-border: rgba(15, 23, 42, 0.08);
   --liquid-rim: rgba(255, 255, 255, 0.9);
   --liquid-field: rgba(15, 23, 42, 0.04);
   --liquid-field-border: rgba(15, 23, 42, 0.1);
-  --liquid-bubble: 0 8px 28px -14px rgba(15, 23, 42, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --liquid-bubble: var(--lq-shadow);
 }
 
 @layer components {
-  .liquid-bubble {
-    background: var(--liquid-fill);
-    border: 1px solid var(--liquid-border);
-    border-radius: 28px;
-    box-shadow: var(--liquid-bubble);
-    backdrop-filter: blur(24px) saturate(1.45);
-    -webkit-backdrop-filter: blur(24px) saturate(1.45);
+  .liquid-bubble,
+  .lq {
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--radius-bubble);
+    background-color: var(--lq-bg);
+    background-image: var(--lq-fill);
+    box-shadow: var(--lq-shadow);
+    -webkit-backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+    backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+  }
+
+  /* Specular rim */
+  .liquid-bubble::before,
+  .lq::before,
+  .liquid-pill-track::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--lq-rim);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* Inner sheen */
+  .liquid-bubble::after,
+  .lq::after,
+  .liquid-pill-track::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--lq-sheen);
+    pointer-events: none;
+    z-index: -1;
   }
 
   .liquid-pill-track {
-    background: var(--liquid-fill-strong);
-    border: 1px solid var(--liquid-border);
-    box-shadow:
-      0 8px 28px -12px rgba(0, 0, 0, 0.35),
-      inset 0 1px 0 var(--liquid-rim);
-    backdrop-filter: blur(24px) saturate(1.5);
-    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    position: relative;
+    isolation: isolate;
+    background-color: color-mix(in oklab, var(--lq-bg) 88%, transparent);
+    background-image: var(--lq-fill);
+    box-shadow: var(--lq-shadow), inset 0 1px 0 #ffffff24;
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+
+  .liquid-chrome {
+    --lq-blur: 34px;
+    --lq-shadow: 0 8px 40px -10px #000f, 0 1px 0 #ffffff14 inset;
+    --lq-bg: #060a14e0;
+    --lq-rim: linear-gradient(
+      140deg,
+      #ffffff59 0%,
+      #ffffff1a 30%,
+      #ffffff0a 58%,
+      #ffffff14 78%,
+      #ffffff40 100%
+    );
+  }
+  :where([data-theme="light"]) .liquid-chrome {
+    --lq-bg: #fffffff5;
+  }
+
+  .liquid-raised {
+    --lq-shadow: 0 14px 40px -12px #000f, 0 4px 12px -6px #000c;
+    --lq-rim: linear-gradient(
+      140deg,
+      #ffffff8c 0%,
+      #ffffff33 24%,
+      #ffffff00 54%,
+      #ffffff1a 80%,
+      #ffffff59 100%
+    );
+  }
+
+  .liquid-flat {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    --lq-bg: #101a2ecc;
   }
 
   .liquid-field {
-    background: var(--liquid-field);
-    border: 1px solid var(--liquid-field-border);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    position: relative;
+    isolation: isolate;
+    border-radius: 1rem;
+    background-color: #060b1699;
+    background-image: linear-gradient(160deg, #00000026 0%, #ffffff08 62%, #ffffff14 100%);
+    box-shadow: inset 0 1px 3px #0009, 0 1px 0 #ffffff0f;
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
     color-scheme: dark;
     transition:
-      border-color 0.15s var(--ease-out),
-      box-shadow 0.15s var(--ease-out);
+      box-shadow 0.15s var(--ease-out),
+      background-color 0.15s var(--ease-out);
   }
   :where([data-theme="light"]) .liquid-field {
     color-scheme: light;
+    background-color: #ffffffd9;
+    background-image: linear-gradient(160deg, #0f172a0a 0%, #ffffffcc 100%);
   }
   .liquid-field:focus,
   .liquid-field:focus-within {
-    border-color: color-mix(in oklab, var(--color-vault-400) 70%, transparent);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.08),
-      0 0 0 3px color-mix(in oklab, var(--color-vault-400) 25%, transparent);
+      inset 0 1px 3px #0009,
+      0 0 0 3px color-mix(in oklab, var(--color-vault-400) 28%, transparent);
   }
 
-  /* Premium Material You Cards (legacy — prefer .liquid-bubble) */
-  .card-premium {
-    background: var(--liquid-fill);
-    border: 1px solid var(--liquid-border);
-    border-radius: 24px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    transition: all 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  .liquid-press {
+    transition:
+      transform 0.42s var(--ease-liquid),
+      box-shadow 0.42s var(--ease-liquid),
+      background-color 0.25s var(--ease-out);
   }
-  .card-premium:hover {
-    transform: translateY(-2px);
-    border-color: var(--color-line-strong);
+  .liquid-press:active {
+    transform: scale(0.965);
   }
 
-  /* Glassmorphic overlays */
+  /* Primary vault-tinted bubble (FAB) */
+  .liquid-primary {
+    --lq-bg: #0d9488e0;
+    --lq-fill: linear-gradient(
+      160deg,
+      #ffffff59 0%,
+      #ffffff1f 40%,
+      #00000014 72%,
+      #ffffff1a 100%
+    );
+    --lq-shadow: 0 12px 32px -12px #14b8a6cc, 0 2px 10px -6px #000c;
+    color: #fff;
+  }
+
+  .card-premium,
   .glass-panel {
-    background: var(--liquid-fill-strong);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--liquid-border);
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--radius-bubble);
+    background-color: var(--lq-bg);
+    background-image: var(--lq-fill);
+    box-shadow: var(--lq-shadow);
+    -webkit-backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+    backdrop-filter: blur(var(--lq-blur)) saturate(170%);
   }
 }
 

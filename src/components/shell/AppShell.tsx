@@ -26,9 +26,9 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Shared chrome for tablet rail + desktop sidebar — liquid, not flat ink. */
+/** Shared chrome for tablet rail + desktop sidebar — full liquid bubble. */
 const SIDE_NAV_CHROME =
-  "border-r border-white/10 bg-ink-950/55 backdrop-blur-2xl backdrop-saturate-150";
+  "liquid-bubble liquid-chrome rounded-none";
 
 // ---------------------------------------------------------------------------
 // Mobile liquid-glass bottom tab bar (pinned like WhatsApp / iOS)
@@ -205,7 +205,7 @@ function NavRail() {
         <BrandLockup size="md" markOnly />
       </div>
 
-      <ul className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3">
+      <ul className="relative z-10 flex flex-1 flex-col items-center gap-1.5 px-2 py-3">
         {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (
@@ -298,7 +298,7 @@ function NavSidebar() {
         <BrandLockup size="md" />
       </div>
 
-      <ul className="flex flex-1 flex-col gap-1 px-2.5 py-3">
+      <ul className="relative z-10 flex flex-1 flex-col gap-1 px-2.5 py-3">
         {NAV_ITEMS.map(({ path, label, icon: Icon, matchPrefix, color }) => {
           const active = isNavActive(path, matchPrefix, pathname);
           return (

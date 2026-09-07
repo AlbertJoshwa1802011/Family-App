@@ -13,9 +13,9 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="liquid-bubble flex flex-col items-center justify-center border-dashed px-6 py-12 text-center">
-      <div className="flex size-14 items-center justify-center rounded-2xl bg-vault-500/15 text-vault-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]">
-        <Icon className="size-7" aria-hidden="true" />
+    <div className="liquid-bubble liquid-raised flex flex-col items-center justify-center border-dashed px-6 py-12 text-center">
+      <div className="liquid-bubble flex size-14 items-center justify-center rounded-2xl text-vault-300 [--lq-bg:#14b8a626]">
+        <Icon className="relative z-10 size-7" aria-hidden="true" />
       </div>
       <h3 className="mt-4 text-base font-semibold text-fg">{title}</h3>
       {description && (
