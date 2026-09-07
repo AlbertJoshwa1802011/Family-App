@@ -113,7 +113,7 @@ function ExpenseFormFields({
     queryKey: ["finance", "settings", activeFamilyId],
     queryFn: () =>
       api<{ currency: string }>(`/finance/settings?familyId=${activeFamilyId}`),
-    enabled: Boolean(activeFamilyId) && !existing,
+    enabled: Boolean(activeFamilyId),
   });
 
   const parentQ = useQuery({
@@ -122,7 +122,14 @@ function ExpenseFormFields({
     enabled: Boolean(parentId),
   });
 
-  const currency = existing?.currency ?? settingsQ.data?.currency ?? "USD";
+  // On edit, save under the family default so a USD mislabel can become INR.
+  const currency = isEdit
+    ? (settingsQ.data?.currency ?? existing?.currency ?? "USD")
+    : (existing?.currency ?? settingsQ.data?.currency ?? "USD");
+  const currencyMismatch =
+    Boolean(existing?.currency) &&
+    Boolean(settingsQ.data?.currency) &&
+    existing!.currency !== settingsQ.data!.currency;
 
   const [amount, setAmount] = useState(() => {
     if (existing) return formatMajorFromMinor(existing.amountMinor, existing.currency);
@@ -325,6 +332,12 @@ function ExpenseFormFields({
       <AppBar title={isEdit ? "Edit expense" : parentId ? "Sub-expense" : "New expense"} back />
       <Page className="pb-24 md:pb-10">
         <form onSubmit={submit} className="space-y-4">
+          {currencyMismatch && (
+            <p role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-fg">
+              This expense was labeled {existing!.currency}. Saving will update it to{" "}
+              {currency} (amounts stay the same — no conversion).
+            </p>
+          )}
           {parentId && (
             <Card className="border-vault-500/30 bg-vault-500/10 p-3">
               <p className="text-xs font-medium text-vault-300">Adding under</p>

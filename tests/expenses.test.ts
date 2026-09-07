@@ -124,6 +124,31 @@ describe("expenses: creation", () => {
     expect(body.error).toBe("validation_error");
   });
 
+  it("allows editing a USD expense after the family switched to INR", async () => {
+    const { env, sqlite, familyId, alice } = setup();
+    const created = (await (
+      await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId))
+    ).json()) as ExpenseBody;
+
+    sqlite
+      .prepare("UPDATE families SET default_currency = ? WHERE id = ?")
+      .run("INR", familyId);
+
+    const keep = await patch(env, `/api/expenses/${created.expense.id}`, alice.cookie, {
+      amountMinor: 15_00,
+      currency: "USD",
+      merchant: "Corner Shop",
+    });
+    expect(keep.status).toBe(200);
+
+    const relabel = await patch(env, `/api/expenses/${created.expense.id}`, alice.cookie, {
+      currency: "INR",
+    });
+    expect(relabel.status).toBe(200);
+    const body = (await relabel.json()) as { expense: { currency: string } };
+    expect(body.expense.currency).toBe("INR");
+  });
+
   it("rejects a negative amount", async () => {
     const { env, familyId, alice } = setup();
     const res = await post(

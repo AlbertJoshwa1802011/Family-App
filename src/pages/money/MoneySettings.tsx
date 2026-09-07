@@ -45,7 +45,9 @@ export function MoneySettings() {
   const settingsQ = useQuery({
     queryKey: ["finance", "settings", activeFamilyId],
     queryFn: () =>
-      api<{ settings: Settings; currency: string }>(`/finance/settings?familyId=${activeFamilyId}`),
+      api<{ settings: Settings; currency: string; otherCurrenciesInUse?: string[] }>(
+        `/finance/settings?familyId=${activeFamilyId}`,
+      ),
     enabled: Boolean(activeFamilyId),
   });
   const incomesQ = useQuery({
@@ -59,6 +61,7 @@ export function MoneySettings() {
   });
 
   const currency = settingsQ.data?.currency ?? "USD";
+  const otherCurrenciesInUse = settingsQ.data?.otherCurrenciesInUse ?? [];
 
   if (settingsQ.isLoading || !settingsQ.data) {
     return (
@@ -80,8 +83,13 @@ export function MoneySettings() {
       <Page className="space-y-4 pb-24 md:pb-10">
         <CurrencySection
           currency={currency}
+          otherCurrenciesInUse={otherCurrenciesInUse}
           familyId={activeFamilyId!}
-          onSaved={() => qc.invalidateQueries({ queryKey: ["finance"] })}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["finance"] });
+            qc.invalidateQueries({ queryKey: ["me"] });
+            qc.invalidateQueries({ queryKey: ["expenses"] });
+          }}
         />
 
         <IncomeSection
@@ -141,29 +149,65 @@ const CURRENCIES = [
 
 function CurrencySection({
   currency,
+  otherCurrenciesInUse,
   familyId,
   onSaved,
 }: {
   currency: string;
+  otherCurrenciesInUse: string[];
   familyId: string;
   onSaved: () => void;
 }) {
   const [value, setValue] = useState(currency);
+  const [relabelExisting, setRelabelExisting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [fixNote, setFixNote] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () =>
-      api(`/families/${familyId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ defaultCurrency: value }),
-      }),
-    onSuccess: () => {
+      api<{ family: { defaultCurrency: string }; relabeled?: Record<string, number> }>(
+        `/families/${familyId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            defaultCurrency: value,
+            ...(value !== currency && relabelExisting ? { relabelExisting: true } : {}),
+          }),
+        },
+      ),
+    onSuccess: (body) => {
       setSaved(true);
+      const total = body.relabeled
+        ? Object.values(body.relabeled).reduce((a, b) => a + b, 0)
+        : 0;
+      setFixNote(
+        total > 0
+          ? `Updated ${total} existing entr${total === 1 ? "y" : "ies"} to ${value} (amounts unchanged).`
+          : null,
+      );
       onSaved();
     },
     onError: (e: unknown) =>
       setError(e instanceof Error ? e.message : "Could not update currency."),
+  });
+
+  const fix = useMutation({
+    mutationFn: (from: string) =>
+      api<{ total: number }>(`/families/${familyId}/relabel-currency`, {
+        method: "POST",
+        body: JSON.stringify({ from, to: currency }),
+      }),
+    onSuccess: (body, from) => {
+      setFixNote(
+        body.total > 0
+          ? `Relabeled ${body.total} ${from} entr${body.total === 1 ? "y" : "ies"} to ${currency} (amounts unchanged).`
+          : `No ${from} entries left to fix.`,
+      );
+      onSaved();
+    },
+    onError: (e: unknown) =>
+      setError(e instanceof Error ? e.message : "Could not fix currency labels."),
   });
 
   return (
@@ -171,8 +215,9 @@ function CurrencySection({
       <div>
         <h2 className="text-sm font-semibold text-fg">Currency</h2>
         <p className="text-xs text-fg-muted">
-          Family default for new incomes and expenses. Existing entries keep their
-          original currency — nothing is auto-converted.
+          Family default for incomes, expenses, and commitments. Changing the
+          default does not convert amounts — use the fix below to correct a wrong
+          label (for example USD saved by mistake when you meant INR).
         </p>
       </div>
 
@@ -184,6 +229,7 @@ function CurrencySection({
             onClick={() => {
               setValue(c);
               setSaved(false);
+              setFixNote(null);
             }}
             aria-pressed={value === c}
             className={cn(
@@ -198,9 +244,54 @@ function CurrencySection({
         ))}
       </div>
 
-      {value !== "USD" && (
-        <p className="text-xs text-fg-muted">
-          Prefer dollars? Tap <span className="font-semibold text-fg">USD</span> above.
+      {value !== currency && (
+        <label className="flex items-start gap-3 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={relabelExisting}
+            onChange={(e) => setRelabelExisting(e.target.checked)}
+            className="mt-1 size-4 rounded border-line"
+          />
+          <span>
+            Also update existing entries still labeled{" "}
+            <span className="font-semibold">{currency}</span> to{" "}
+            <span className="font-semibold">{value}</span> (no conversion — amounts
+            stay the same).
+          </span>
+        </label>
+      )}
+
+      {otherCurrenciesInUse.length > 0 && value === currency && (
+        <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/10 p-3">
+          <p className="text-xs text-fg">
+            Some entries still use a different currency label:{" "}
+            <span className="font-semibold">{otherCurrenciesInUse.join(", ")}</span>.
+            If those amounts were meant to be {currency}, fix the label here —
+            nothing is converted.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {otherCurrenciesInUse.map((from) => (
+              <Button
+                key={from}
+                size="md"
+                variant="secondary"
+                loading={fix.isPending && fix.variables === from}
+                onClick={() => {
+                  setError(null);
+                  setFixNote(null);
+                  fix.mutate(from);
+                }}
+              >
+                Fix {from} → {currency}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {fixNote && (
+        <p role="status" className="text-sm text-success">
+          {fixNote}
         </p>
       )}
 
@@ -213,9 +304,10 @@ function CurrencySection({
       <Button
         fullWidth
         loading={save.isPending}
-        disabled={value === currency && saved}
+        disabled={value === currency}
         onClick={() => {
           setError(null);
+          setFixNote(null);
           save.mutate();
         }}
       >

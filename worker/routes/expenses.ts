@@ -1048,9 +1048,12 @@ expenseRoutes.patch("/:id", requireSession, zv(updateExpenseSchema), async (c) =
     .where(eq(schema.families.id, expense.familyId))
     .get();
 
+  // Allow keeping the row's existing currency (historical label) OR moving it
+  // to the family default (relabel). Reject inventing a different currency.
   if (
     updates.currency !== undefined &&
-    updates.currency !== family?.defaultCurrency
+    updates.currency !== family?.defaultCurrency &&
+    updates.currency !== expense.currency
   ) {
     return c.json(
       {
