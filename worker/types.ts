@@ -38,10 +38,14 @@ export interface Env {
   EMAIL_FROM?: string;
   /**
    * Origin of the Light of Jesus church contributions app
-   * (Cloudflare Pages). Worker fetches /api/funds and /api/purchases.
+   * (Cloudflare Pages). Public GET /api/funds and /api/purchases.
+   * Set in wrangler.jsonc vars — enough to show live totals.
    */
   CONTRIBUTIONS_API_URL?: string;
-  /** Machine token accepted by the contributions app as ADMIN_API_TOKEN. */
+  /**
+   * Optional machine token accepted by the contributions app as
+   * ADMIN_API_TOKEN. Only needed for members-only funds.
+   */
   CONTRIBUTIONS_API_TOKEN?: string;
 }
 

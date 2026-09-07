@@ -1,7 +1,7 @@
 /**
  * Church settlements catalog:
  *  - 500 invalid periodKey values → 400 validation_error
- *  - 504 valid yyyy-mm keys without CONTRIBUTIONS_API_TOKEN → 503 church_not_configured
+ *  - 504 valid yyyy-mm keys without CONTRIBUTIONS_API_URL or token → 503 church_not_configured
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { catalogReq, seedFamilySession, type FamilySession } from "./helpers";
@@ -54,7 +54,7 @@ describe("catalog: church ≥1000", () => {
   );
 
   it.each(VALID_PERIODS)(
-    "POST settle $periodKey without token → 503 church_not_configured",
+    "POST settle $periodKey without URL or token → 503 church_not_configured",
     async (c) => {
       const res = await catalogReq(s.env, "POST", "/api/church/settle", {
         cookie: s.actor.cookie,
@@ -77,7 +77,7 @@ describe("catalog: church ≥1000", () => {
     expect(res.status).toBe(400);
   });
 
-  it("snapshot without token → 503", async () => {
+  it("snapshot without URL or token → 503", async () => {
     const res = await catalogReq(
       s.env,
       "GET",

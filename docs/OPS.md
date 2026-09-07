@@ -70,14 +70,24 @@ npx wrangler secret put EMAIL_FROM
 
 The contributions site
 (https://light-of-jesus-ministry-contributions.pages.dev) already holds live
-totals. This app only **reads** them.
+totals. **GET `/api/funds` and GET `/api/purchases` are public** — this Worker
+only reads them. Production already sets `CONTRIBUTIONS_API_URL` in
+`wrangler.jsonc` vars, so Money → Funds should show Tech Fund / Christmas Fund
+after deploy. No family admin action and no `ADMIN_API_TOKEN` are required for
+those public totals.
+
+`church_not_configured` only happens when **both** `CONTRIBUTIONS_API_URL` and
+`CONTRIBUTIONS_API_TOKEN` are unset (local tests, or a Worker built without
+the wrangler var).
+
+Optional: to include **members-only** funds in the snapshot, set the machine
+token to the same value as that site’s `ADMIN_API_TOKEN`:
 
 ```bash
 npx wrangler secret put CONTRIBUTIONS_API_TOKEN
 ```
 
-Paste the **same** value as that site’s `ADMIN_API_TOKEN`. Then reload Money →
-Funds.
+Then reload Money → Funds.
 
 ## 5. Google Contacts `google_sync_failed` / “unsecured app”
 

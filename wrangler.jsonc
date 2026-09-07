@@ -57,6 +57,7 @@
   },
   "vars": {
     "APP_URL": "https://fam.connect-cloud.workers.dev",
+    // Public church fund/purchase totals. No ADMIN_API_TOKEN required for GET.
     "CONTRIBUTIONS_API_URL": "https://light-of-jesus-ministry-contributions.pages.dev"
   }
 }

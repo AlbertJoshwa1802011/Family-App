@@ -2,8 +2,12 @@
  * Service-to-service client for the Light of Jesus church contributions app.
  *
  * Both apps are Cloudflare-hosted. Worker `fetch()` to the Pages origin is a
- * normal HTTPS call — no CORS, no browser cookies. Auth is the contributions
- * app's ADMIN_API_TOKEN (machine token with wildcard permissions).
+ * normal HTTPS call — no CORS, no browser cookies.
+ *
+ * GET /api/funds and GET /api/purchases are public on that site (active,
+ * visibility=public funds). CONTRIBUTIONS_API_URL (already a wrangler var) is
+ * enough to read live totals. CONTRIBUTIONS_API_TOKEN is optional: send it
+ * when set so members-only funds are included.
  */
 import type { Env } from "../types";
 
@@ -11,7 +15,7 @@ export const DEFAULT_CONTRIBUTIONS_URL =
   "https://light-of-jesus-ministry-contributions.pages.dev";
 
 export function contributionsConfigured(env: Env): boolean {
-  return Boolean(env.CONTRIBUTIONS_API_TOKEN);
+  return Boolean(env.CONTRIBUTIONS_API_URL?.trim() || env.CONTRIBUTIONS_API_TOKEN?.trim());
 }
 
 function origin(env: Env): string {
@@ -43,15 +47,14 @@ async function churchGet(
   env: Env,
   path: string,
 ): Promise<{ ok: true; json: unknown } | { ok: false; status: number; error: string }> {
-  const token = env.CONTRIBUTIONS_API_TOKEN;
-  if (!token) return { ok: false, status: 503, error: "church_not_configured" };
+  if (!contributionsConfigured(env)) {
+    return { ok: false, status: 503, error: "church_not_configured" };
+  }
+  const token = env.CONTRIBUTIONS_API_TOKEN?.trim();
   try {
-    const res = await fetch(`${origin(env)}${path}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${origin(env)}${path}`, { headers });
     const text = await res.text();
     if (!res.ok) {
       return { ok: false, status: res.status, error: "church_upstream_error" };

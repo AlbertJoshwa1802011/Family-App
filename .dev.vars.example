@@ -26,6 +26,11 @@ GEMINI_MODEL=""
 # Secret used to sign sessions and hash invite tokens (use a long random value).
 SESSION_SECRET=""
 
-# CONTRIBUTIONS_API_TOKEN is a Cloudflare Worker secret (same value as the
-# church app's ADMIN_API_TOKEN). Enables live fund + purchase totals.
+# Origin of the church contributions app (Cloudflare Pages).
+# Public GET /api/funds and /api/purchases do not need a token.
+# Production already sets this in wrangler.jsonc vars.
+CONTRIBUTIONS_API_URL="https://light-of-jesus-ministry-contributions.pages.dev"
+
+# Optional machine token (same value as that site's ADMIN_API_TOKEN).
+# Only needed to include members-only funds in the snapshot.
 CONTRIBUTIONS_API_TOKEN=""
