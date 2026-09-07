@@ -320,18 +320,24 @@ function InviteCard({
   const [role, setRole] = useState<"member" | "admin">("member");
   const [error, setError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ invite: { token: string } }>(`/families/${familyId}/invites`, {
+      api<{
+        invite: { token: string; inviteUrl?: string; emailSent?: boolean };
+      }>(`/families/${familyId}/invites`, {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), role }),
       }),
     onSuccess: (res) => {
-      // Invite links are accepted in-app: the invitee signs in with the
-      // invited email, then the app POSTs the token.
-      setInviteLink(`${window.location.origin}/invite/${res.invite.token}`);
+      // Prefer server-built URL (APP_URL) so the mail link matches production.
+      setInviteLink(
+        res.invite.inviteUrl ??
+          `${window.location.origin}/invite/${res.invite.token}`,
+      );
+      setEmailSent(Boolean(res.invite.emailSent));
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -350,11 +356,14 @@ function InviteCard({
     return (
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium text-fg">
-          Invite created for {email}
+          {emailSent
+            ? `Invitation emailed to ${email}`
+            : `Invite created for ${email}`}
         </p>
         <p className="text-xs text-fg-muted">
-          Share this link with them. It only works for the Google account with
-          that email, and expires in 7 days.
+          {emailSent
+            ? "They can join by opening the link in that email (sign in with the same Google account). You can also share the link below."
+            : "Email couldn’t be sent from this server — share this link with them. It only works for the Google account with that email, and expires in 7 days."}
         </p>
         <div className="flex items-center gap-2">
           <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
@@ -423,7 +432,7 @@ function InviteCard({
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
-            Create invite
+            Send invite
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

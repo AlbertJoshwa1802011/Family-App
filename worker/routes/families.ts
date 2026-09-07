@@ -11,6 +11,7 @@ import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
 import { inviteEmail } from "../lib/emailTemplates";
+import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -21,7 +22,7 @@ const createFamilySchema = z.object({
 });
 
 const inviteSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   role: z.enum(["admin", "member"]).optional().default("member"),
 });
 
@@ -405,14 +406,16 @@ familyRoutes.patch(
 );
 
 // POST /families/:id/invites — create an invite (admin+ only).
-// Email delivery is deferred to Phase 3 (Resend integration).
+// Also grants app-level access for the email (closed signup) so the invitee
+// can sign in with Google and accept via the link in the email.
 familyRoutes.post(
   "/:id/invites",
   requireSession,
   zv(inviteSchema),
   async (c) => {
     const { id: familyId } = c.req.param();
-    const { email, role } = c.req.valid("json");
+    const { email: rawEmail, role } = c.req.valid("json");
+    const email = normalizeEmail(rawEmail);
     const userId = c.get("userId")!;
 
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
@@ -442,6 +445,14 @@ familyRoutes.post(
       expiresAt: now + 7 * 24 * 3600, // 7 days
     });
 
+    // Family invite ⇒ app access. Without this, closed signup blocks the
+    // invitee at Google callback before they can open /invite/:token.
+    await upsertAccessGrant(db, {
+      email,
+      grantedByUserId: userId,
+      note: `family invite:${familyId}`,
+    });
+
     await insertAuditEvent(db, {
       familyId,
       actorUserId: userId,
@@ -456,14 +467,15 @@ familyRoutes.post(
       db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
       db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
     ]);
-    const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-    await sendEmail(c.env, {
+    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+    const inviteUrl = `${appUrl}/invite/${token}`;
+    const emailSent = await sendEmail(c.env, {
       to: email,
       subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
       html: inviteEmail({
         inviterName: inviter?.name ?? null,
         familyName: family?.name ?? "your family",
-        inviteUrl: `${appUrl}/invite/${token}`,
+        inviteUrl,
       }),
     });
 
@@ -474,7 +486,9 @@ familyRoutes.post(
           email,
           role,
           expiresAt: now + 7 * 24 * 3600,
-          token, // include in invite link: /invites/<token>/accept
+          token, // include in invite link: /invite/<token>
+          inviteUrl,
+          emailSent,
         },
       },
       201,

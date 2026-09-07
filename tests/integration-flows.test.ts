@@ -16,7 +16,7 @@
  *     exists → dedupe on second run → mark read
  *  9. Reminder prefs: PUT persists and normalizes windows
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { app } from "../worker/index";
 import { runExpiryReminders } from "../worker/cron";
 import {
@@ -314,8 +314,13 @@ describe("6. invite flow (email-bound)", () => {
       role: "member",
     });
     expect(invite.status).toBe(201);
-    const { invite: inv } = (await invite.json()) as { invite: { token: string } };
+    const { invite: inv } = (await invite.json()) as {
+      invite: { token: string; emailSent: boolean; inviteUrl: string };
+    };
     expect(inv.token).toBeTruthy();
+    expect(inv.inviteUrl).toContain(`/invite/${inv.token}`);
+    // No RESEND_API_KEY in the default test env → email is skipped.
+    expect(inv.emailSent).toBe(false);
 
     // Right email → accepted
     const cousin = seedUser(t.sqlite, { email: "cousin@example.com" });
@@ -339,6 +344,89 @@ describe("6. invite flow (email-bound)", () => {
       cousinCookie,
     );
     expect(again.status).toBe(409);
+  });
+
+  it("invite grants app access + sends the join email when Resend is configured", async () => {
+    const { canSignIn } = await import("../worker/lib/appAccess");
+    const { getDb } = await import("../worker/db/client");
+
+    const sent: Array<{ to: string; subject: string; html: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          to: string;
+          subject: string;
+          html: string;
+        };
+        sent.push(body);
+        return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
+      }),
+    );
+
+    const keyed = createTestEnv({
+      RESEND_API_KEY: "re_test",
+      APP_URL: "https://vault.example",
+    });
+    const { seedActor, seedFamily, seedUser } = await import("./helpers/testEnv");
+    const ownerUser = seedUser(keyed.sqlite, { name: "Olive Owner" });
+    const famId = seedFamily(keyed.sqlite, ownerUser.id).id;
+    const owner2 = seedActor(keyed.sqlite, famId, "owner", { name: "Olive Owner" });
+
+    async function keyedReq(
+      method: string,
+      path: string,
+      cookie: string,
+      body?: unknown,
+    ) {
+      return app.request(
+        path,
+        {
+          method,
+          headers: {
+            Origin: "https://vault.example",
+            Referer: "https://vault.example/",
+            "Content-Type": "application/json",
+            Cookie: cookie,
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        },
+        keyed.env,
+      );
+    }
+
+    const invite = await keyedReq(
+      "POST",
+      `/api/families/${famId}/invites`,
+      owner2.cookie,
+      { email: "  New.Cousin@Example.com ", role: "member" },
+    );
+    expect(invite.status).toBe(201);
+    const { invite: inv } = (await invite.json()) as {
+      invite: {
+        email: string;
+        token: string;
+        emailSent: boolean;
+        inviteUrl: string;
+      };
+    };
+    expect(inv.email).toBe("new.cousin@example.com");
+    expect(inv.emailSent).toBe(true);
+    expect(inv.inviteUrl).toBe(`https://vault.example/invite/${inv.token}`);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("new.cousin@example.com");
+    expect(sent[0].html).toContain(inv.inviteUrl);
+    expect(sent[0].subject).toMatch(/invited/i);
+
+    // Closed-signup gate: invitee can now sign in (no pre-existing user row).
+    const gate = await canSignIn(getDb(keyed.env), keyed.env, {
+      email: "new.cousin@example.com",
+      googleSub: "sub-brand-new-cousin",
+    });
+    expect(gate).toEqual({ ok: true });
+
+    vi.unstubAllGlobals();
   });
 
   it("a different account cannot use someone else's invite token", async () => {

@@ -50,6 +50,11 @@ export function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get("error");
+  const nextRaw = params.get("next");
+  const nextPath =
+    nextRaw && nextRaw.startsWith("/") && !nextRaw.startsWith("//")
+      ? nextRaw
+      : "/";
 
   const initialMode: Mode =
     oauthError === "access_denied" || oauthError === "access_revoked"
@@ -72,15 +77,18 @@ export function Login() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (isAuthenticated) navigate("/", { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (isAuthenticated) navigate(nextPath, { replace: true });
+  }, [isAuthenticated, navigate, nextPath]);
 
   async function startGoogle() {
     setStarting(true);
     setError("");
     setSuccess("");
     // Full-page GET so phones never sit on a JSON 404. The Worker 302s to Google.
-    window.location.assign("/api/auth/google/start");
+    // Preserve deep links (invite accept) via ?next= through OAuth state.
+    const startUrl = new URL("/api/auth/google/start", window.location.origin);
+    if (nextPath !== "/") startUrl.searchParams.set("next", nextPath);
+    window.location.assign(startUrl.pathname + startUrl.search);
   }
 
   async function submitDemo(e: FormEvent) {

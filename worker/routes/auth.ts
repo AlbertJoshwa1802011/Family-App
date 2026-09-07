@@ -19,7 +19,7 @@ import {
   ensureBootstrapSuperAdmin,
   listAppRoles,
 } from "../lib/appAccess";
-import { loginBounceHtml, requestOrigin } from "../lib/publicUrl";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -32,6 +32,11 @@ const PKCE_TTL_SECS = 600; // 10 minutes
 
 function oauthRedirectUri(origin: string): string {
   return `${origin.replace(/\/$/, "")}/api/auth/google/callback`;
+}
+
+/** Post-login path from ?next= — same-origin relative only. */
+function returnPathFromRequest(c: AppContext): string {
+  return safeAppPath(c.req.query("next") ?? "/");
 }
 
 async function beginGoogleOAuth(
@@ -54,10 +59,11 @@ async function beginGoogleOAuth(
   const codeChallenge = await sha256Base64url(codeVerifier);
   const state = generateRandom(16);
   const redirectUri = oauthRedirectUri(origin);
+  const returnTo = returnPathFromRequest(c);
 
   await c.env.KV.put(
     `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier, redirectUri }),
+    JSON.stringify({ codeVerifier, redirectUri, returnTo }),
     { expirationTtl: PKCE_TTL_SECS },
   );
 
@@ -198,11 +204,18 @@ authRoutes.get("/google/callback", async (c) => {
   const stored = await c.env.KV.get(kvKey, "json") as {
     codeVerifier: string;
     redirectUri?: string;
+    returnTo?: string;
   } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
 
   const redirectUri = stored.redirectUri ?? oauthRedirectUri(origin);
+  const returnTo = safeAppPath(stored.returnTo ?? "/");
+  const loginError = (code: string) => {
+    const q = new URLSearchParams({ error: code });
+    if (returnTo !== "/") q.set("next", returnTo);
+    return redirect(`/login?${q.toString()}`);
+  };
 
   // Exchange authorization code for tokens
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -220,7 +233,7 @@ authRoutes.get("/google/callback", async (c) => {
 
   if (!tokenRes.ok) {
     console.error("Token exchange failed:", await tokenRes.text());
-    return redirect("/login?error=token_exchange_failed");
+    return loginError("token_exchange_failed");
   }
 
   const tokens = (await tokenRes.json()) as {
@@ -242,7 +255,7 @@ authRoutes.get("/google/callback", async (c) => {
     picture = payload["picture"] as string | undefined;
   } catch (e) {
     console.error("ID token verification failed:", e);
-    return redirect("/login?error=token_invalid");
+    return loginError("token_invalid");
   }
 
   const db = getDb(c.env);
@@ -250,7 +263,7 @@ authRoutes.get("/google/callback", async (c) => {
   // Closed signup: only approved emails / bootstrap admins / returning users.
   const access = await canSignIn(db, c.env, { email, googleSub: sub });
   if (!access.ok) {
-    return redirect(`/login?error=${encodeURIComponent(access.reason)}`);
+    return loginError(access.reason);
   }
 
   // Upsert user: update profile fields on conflict (user might have changed their name/picture)
@@ -281,7 +294,7 @@ authRoutes.get("/google/callback", async (c) => {
     .where(eq(schema.users.googleSub, sub))
     .get();
 
-  if (!user) return redirect("/login?error=user_create_failed");
+  if (!user) return loginError("user_create_failed");
 
   await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
@@ -299,7 +312,8 @@ authRoutes.get("/google/callback", async (c) => {
 
   // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
   // follows Google's cross-site redirect, which looks like a failed phone login.
-  return c.html(loginBounceHtml("/"), 200);
+  // returnTo restores deep links (e.g. /invite/:token) after sign-in.
+  return c.html(loginBounceHtml(returnTo), 200);
 });
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.

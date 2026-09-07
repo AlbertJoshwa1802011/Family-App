@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
@@ -27,8 +27,14 @@ import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
 
+function loginRedirect(nextPath: string) {
+  const next = encodeURIComponent(nextPath);
+  return <Navigate to={`/login?next=${next}`} replace />;
+}
+
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, families } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-slate-400">
@@ -36,7 +42,9 @@ function Protected({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    return loginRedirect(location.pathname + location.search);
+  }
   // Every screen is family-scoped; a user with no family must create one first.
   if (families.length === 0) return <CreateFamily />;
   return <>{children}</>;
@@ -45,6 +53,7 @@ function Protected({ children }: { children: ReactNode }) {
 /** Super-admin only — no family gate (ops before onboarding a vault). */
 function SuperAdminOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-slate-400">
@@ -52,7 +61,9 @@ function SuperAdminOnly({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    return loginRedirect(location.pathname + location.search);
+  }
   if (!user?.appRoles?.includes("super_admin")) {
     return <Navigate to="/" replace />;
   }
@@ -62,6 +73,7 @@ function SuperAdminOnly({ children }: { children: ReactNode }) {
 /** Auth required but NO family gate — invitees usually have no family yet. */
 function AuthOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-slate-400">
@@ -69,7 +81,9 @@ function AuthOnly({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    return loginRedirect(location.pathname + location.search);
+  }
   return <>{children}</>;
 }
 

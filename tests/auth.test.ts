@@ -268,6 +268,44 @@ describe("OAuth start uses the request origin (not a stale APP_URL)", () => {
       "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
     );
   });
+
+  it("stores ?next= in OAuth state so invite links survive sign-in", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "test-client-id",
+      APP_URL: "http://localhost:5173",
+    });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start?next=/invite/abc-token",
+      { method: "GET" },
+      t.env,
+    );
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    const google = new URL(location);
+    const state = google.searchParams.get("state");
+    expect(state).toBeTruthy();
+    const stored = await t.env.KV.get(`oauth:state:${state}`, "json") as {
+      returnTo?: string;
+    } | null;
+    expect(stored?.returnTo).toBe("/invite/abc-token");
+  });
+
+  it("rejects protocol-relative ?next= values", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "test-client-id",
+    });
+    const res = await app.request(
+      "/api/auth/google/start?next=//evil.example",
+      { method: "GET" },
+      t.env,
+    );
+    const location = res.headers.get("location") ?? "";
+    const state = new URL(location).searchParams.get("state");
+    const stored = await t.env.KV.get(`oauth:state:${state}`, "json") as {
+      returnTo?: string;
+    } | null;
+    expect(stored?.returnTo).toBe("/");
+  });
 });
 
 describe("publicUrl helpers", () => {
@@ -280,14 +318,15 @@ describe("publicUrl helpers", () => {
   it("safeAppPath rejects protocol-relative and empty junk", () => {
     expect(safeAppPath("/")).toBe("/");
     expect(safeAppPath("/tasks")).toBe("/tasks");
+    expect(safeAppPath("/invite/tok")).toBe("/invite/tok");
     expect(safeAppPath("//evil.example")).toBe("/");
     expect(safeAppPath("https://evil.example")).toBe("/");
   });
 
   it("login bounce is first-party HTML with no inline script", () => {
-    const html = loginBounceHtml("/");
+    const html = loginBounceHtml("/invite/abc");
     expect(html).toContain('http-equiv="refresh"');
-    expect(html).toContain("url=/");
+    expect(html).toContain("url=/invite/abc");
     expect(html).not.toMatch(/<script/i);
   });
 });
