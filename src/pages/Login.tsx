@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/Button";
@@ -27,9 +27,28 @@ function GoogleIcon() {
   );
 }
 
+const LOGIN_ERRORS: Record<string, string> = {
+  access_denied: "Google sign-in was cancelled — try again.",
+  rate_limited: "Too many sign-in attempts — wait a moment and try again.",
+  oauth_not_configured: "Sign-in isn't configured on this server yet.",
+  missing_params: "Sign-in didn't finish — please try again.",
+  invalid_state: "Sign-in expired — please try again.",
+  token_exchange_failed: "Google sign-in failed — please try again.",
+  token_invalid: "Google sign-in failed — please try again.",
+  user_create_failed: "We couldn't create your account — please try again.",
+};
+
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const oauthError = params.get("error");
+  const [starting, setStarting] = useState(false);
+  const [error] = useState(() =>
+    oauthError
+      ? (LOGIN_ERRORS[oauthError] ?? "Sign-in didn't work — please try again.")
+      : "",
+  );
 
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
@@ -50,22 +69,29 @@ export function Login() {
       </p>
 
       <Button
+        type="button"
         size="lg"
         variant="white"
         fullWidth
-        loading={isLoading}
+        loading={isLoading || starting}
         leadingIcon={<GoogleIcon />}
         onClick={() => {
-          // Phase 1: kick off Google OAuth (Auth Code + PKCE).
-          window.location.href = "/api/auth/google/start";
+          setStarting(true);
+          // Full-page GET — Worker 302s to Google (reliable on phones).
+          window.location.assign("/api/auth/google/start");
         }}
         className="mt-10 max-w-xs"
       >
         Continue with Google
       </Button>
+      {error && (
+        <p className="mt-3 max-w-xs text-xs text-danger" role="alert">
+          {error}
+        </p>
+      )}
 
       <p className="mt-8 text-xs text-fg-subtle">
-        Phase 0 scaffold · sign-in activates in Phase 1
+        Sign in with the Google account you use for this family.
       </p>
     </div>
   );

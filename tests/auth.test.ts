@@ -41,18 +41,18 @@ describe("1. GET /api/auth/me — no session", () => {
 // 2. /auth/google/start — shape test without env
 // ---------------------------------------------------------------------------
 describe("2. GET /api/auth/google/start", () => {
-  it("returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
-    // No env bindings → GOOGLE_CLIENT_ID is undefined
+  it("redirects to login when GOOGLE_CLIENT_ID is not configured", async () => {
+    // Full-page GET must never leave phones on a JSON 404/503.
     const res = await app.request("/api/auth/google/start", { method: "GET" });
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("oauth_not_configured");
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    expect(res.headers.get("location") ?? "").toContain(
+      "/login?error=oauth_not_configured",
+    );
   });
 
   it("redirects to Google OAuth when configured", async () => {
-    // Mock env would have GOOGLE_CLIENT_ID set; without it, we get 503 above.
-    // This test verifies the happy path is a 302 redirect, not JSON.
-    // (Skipped here because we can't easily mock env without a full setup.)
+    // Mock env would have GOOGLE_CLIENT_ID set; without it, we get login redirect above.
+    // Happy path covered in tests/mobile-oauth.test.ts with createTestEnv.
   });
 });
 

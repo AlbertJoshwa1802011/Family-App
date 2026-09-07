@@ -6,6 +6,17 @@ export const SESSION_ABSOLUTE_SECS = 30 * 24 * 3600; // 30 days
 export const SESSION_IDLE_SECS = 2 * 3600;           // 2 hours
 export const COOKIE_NAME = "sid";
 
+/**
+ * Cookie flags MUST match on set and delete. Browsers (especially Safari /
+ * iOS) ignore a Max-Age=0 overwrite that omits Secure or SameSite.
+ */
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "Lax" as const,
+  path: "/",
+};
+
 function nowSecs(): number {
   return Math.floor(Date.now() / 1000);
 }
