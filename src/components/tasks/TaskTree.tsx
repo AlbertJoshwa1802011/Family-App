@@ -48,7 +48,7 @@ export function TaskBranch({
       {hasVisibleChildren && expanded && (
         <ul
           className={cn(
-            "ml-5 border-l-2 border-white/12 pl-2",
+            "ml-5 border-l-2 border-white/30 pl-3",
             node.status === "done" && "opacity-80",
           )}
         >
