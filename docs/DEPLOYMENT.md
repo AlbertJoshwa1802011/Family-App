@@ -58,8 +58,11 @@ SESSION_SECRET=dev-secret
 
 ### 2.6 Production vars
 In `wrangler.jsonc`, set `vars.APP_URL` to the public origin
-(e.g. `https://vault.example.com`). APP_URL drives OAuth redirects **and** the
-CSRF allow-list, so it must exactly match the deployed origin.
+(e.g. `https://fam.connect-cloud.workers.dev`). APP_URL is used in emails
+and CSRF. Google OAuth `redirect_uri` follows the **request host** (so phone
+logins on this URL stay on this URL). Register that callback in Google Cloud:
+
+`https://fam.connect-cloud.workers.dev/api/auth/google/callback`
 
 ## 3. Deploy
 

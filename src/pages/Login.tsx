@@ -52,9 +52,9 @@ export function Login() {
   const oauthError = params.get("error");
 
   const initialMode: Mode =
-    oauthError && oauthError !== "access_denied" && oauthError !== "access_revoked"
-      ? "signin"
-      : "request";
+    oauthError === "access_denied" || oauthError === "access_revoked"
+      ? "request"
+      : "signin";
 
   const [mode, setMode] = useState<Mode>(initialMode);
   const [starting, setStarting] = useState(false);
@@ -79,16 +79,8 @@ export function Login() {
     setStarting(true);
     setError("");
     setSuccess("");
-    try {
-      const { url } = await api<{ url: string }>("/auth/google/start", {
-        method: "POST",
-        body: "{}",
-      });
-      window.location.assign(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start sign-in.");
-      setStarting(false);
-    }
+    // Full-page GET so phones never sit on a JSON 404. The Worker 302s to Google.
+    window.location.assign("/api/auth/google/start");
   }
 
   async function submitDemo(e: FormEvent) {
@@ -144,20 +136,11 @@ export function Login() {
         Family Vault
       </h1>
       <p className="mt-3 max-w-xs text-sm leading-relaxed text-fg-muted">
-        Invite-only for your team. Request a demo and a super admin will approve
-        your access.
+        Sign in with Google to open your family vault. New teammates can request
+        a demo for approval.
       </p>
 
       <div className="mt-8 flex w-full max-w-xs gap-2">
-        <button
-          type="button"
-          onClick={() => setMode("request")}
-          className={`lq lq-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium ${
-            mode === "request" ? "lq-primary text-white" : "text-fg-muted"
-          }`}
-        >
-          Request demo
-        </button>
         <button
           type="button"
           onClick={() => setMode("signin")}
@@ -166,6 +149,15 @@ export function Login() {
           }`}
         >
           Sign in
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("request")}
+          className={`lq lq-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium ${
+            mode === "request" ? "lq-primary text-white" : "text-fg-muted"
+          }`}
+        >
+          Request demo
         </button>
       </div>
 
@@ -239,13 +231,13 @@ export function Login() {
       )}
 
       <p className="mt-8 text-xs text-fg-subtle">
-        Already approved? Use{" "}
+        New here?{" "}
         <button
           type="button"
           className="underline underline-offset-2"
-          onClick={() => setMode("signin")}
+          onClick={() => setMode("request")}
         >
-          Sign in with Google
+          Request a demo
         </button>
         .
       </p>

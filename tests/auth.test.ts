@@ -12,6 +12,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { app } from "../worker/index";
+import { createTestEnv } from "./helpers/testEnv";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../worker/lib/publicUrl";
 
 // ---------------------------------------------------------------------------
 // 1. /auth/me — unauthenticated path (no D1 needed since no cookie)
@@ -52,6 +54,33 @@ describe("2. POST /api/auth/google/start", () => {
   it("returns JSON with content-type header", async () => {
     const res = await app.request("/api/auth/google/start", { method: "POST" });
     expect(res.headers.get("content-type")).toContain("application/json");
+  });
+});
+
+describe("GET /api/auth/google/start (phone full-page navigation)", () => {
+  it("redirects to login when OAuth is not configured (not a JSON 404)", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    expect(res.headers.get("location")).toContain("/login?error=oauth_not_configured");
+  });
+
+  it("302s to Google when configured", async () => {
+    const t = createTestEnv({ GOOGLE_CLIENT_ID: "test-client-id" });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "GET" },
+      t.env,
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const location = res.headers.get("location") ?? "";
+    expect(location.startsWith("https://accounts.google.com/")).toBe(true);
+    expect(location).toContain(
+      encodeURIComponent(
+        "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+      ),
+    );
   });
 });
 
@@ -208,5 +237,57 @@ describe("9. GET /api/auth/google/callback error handling", () => {
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("missing_params");
+  });
+
+  it("callback error redirect stays on the host the phone actually opened", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback?error=access_denied",
+    );
+    const location = res.headers.get("location") ?? "";
+    expect(location).toBe(
+      "https://fam.connect-cloud.workers.dev/login?error=access_denied",
+    );
+  });
+});
+
+describe("OAuth start uses the request origin (not a stale APP_URL)", () => {
+  it("puts the incoming host in Google redirect_uri", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "test-client-id",
+      APP_URL: "http://localhost:5173",
+    });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "POST" },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    const google = new URL(body.url);
+    expect(google.searchParams.get("redirect_uri")).toBe(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+    );
+  });
+});
+
+describe("publicUrl helpers", () => {
+  it("requestOrigin reads the Worker host", () => {
+    expect(
+      requestOrigin("https://fam.connect-cloud.workers.dev/api/auth/google/start"),
+    ).toBe("https://fam.connect-cloud.workers.dev");
+  });
+
+  it("safeAppPath rejects protocol-relative and empty junk", () => {
+    expect(safeAppPath("/")).toBe("/");
+    expect(safeAppPath("/tasks")).toBe("/tasks");
+    expect(safeAppPath("//evil.example")).toBe("/");
+    expect(safeAppPath("https://evil.example")).toBe("/");
+  });
+
+  it("login bounce is first-party HTML with no inline script", () => {
+    const html = loginBounceHtml("/");
+    expect(html).toContain('http-equiv="refresh"');
+    expect(html).toContain("url=/");
+    expect(html).not.toMatch(/<script/i);
   });
 });

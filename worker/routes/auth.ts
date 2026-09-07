@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
-import type { HonoEnv } from "../types";
+import type { HonoEnv, AppContext } from "../types";
 import { getDb, schema } from "../db/client";
 import {
   createSession,
@@ -19,6 +19,7 @@ import {
   ensureBootstrapSuperAdmin,
   listAppRoles,
 } from "../lib/appAccess";
+import { loginBounceHtml, requestOrigin } from "../lib/publicUrl";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -28,6 +29,75 @@ const GOOGLE_JWKS = createRemoteJWKSet(
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const PKCE_TTL_SECS = 600; // 10 minutes
+
+function oauthRedirectUri(origin: string): string {
+  return `${origin.replace(/\/$/, "")}/api/auth/google/callback`;
+}
+
+async function beginGoogleOAuth(
+  c: AppContext,
+): Promise<{ url: string } | Response> {
+  const clientId = c.env?.GOOGLE_CLIENT_ID;
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+
+  if (!clientId) {
+    return c.json({ error: "oauth_not_configured" }, 503);
+  }
+
+  const limited = await checkRateLimit(c, `auth-start:${clientIp(c)}`, {
+    limit: 10,
+    windowSecs: 60,
+  });
+  if (limited) return limited;
+
+  const codeVerifier = generateRandom(32);
+  const codeChallenge = await sha256Base64url(codeVerifier);
+  const state = generateRandom(16);
+  const redirectUri = oauthRedirectUri(origin);
+
+  await c.env.KV.put(
+    `oauth:state:${state}`,
+    JSON.stringify({ codeVerifier, redirectUri }),
+    { expirationTtl: PKCE_TTL_SECS },
+  );
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: [
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/drive.file",
+    ].join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+
+  return { url: `${GOOGLE_AUTH_URL}?${params.toString()}` };
+}
+
+// GET /auth/google/start — full-page navigation (phones / in-app browsers).
+// 302s to Google. A GET used to 404 JSON, which is what you see if the
+// address bar stops on /api/auth/google/start.
+authRoutes.get("/google/start", async (c) => {
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+  const result = await beginGoogleOAuth(c);
+  if (result instanceof Response) {
+    if (result.status === 503) {
+      return c.redirect(`${origin}/login?error=oauth_not_configured`);
+    }
+    if (result.status === 429) {
+      return c.redirect(`${origin}/login?error=rate_limited`);
+    }
+    return result;
+  }
+  return c.redirect(result.url);
+});
 
 // GET /auth/me — return authenticated user + their families (or nulls).
 // Not protected by requireSession; we gracefully return null if no valid session.
@@ -92,60 +162,18 @@ authRoutes.get("/me", async (c) => {
   });
 });
 
-// POST /auth/google/start — build the Google OAuth redirect URL (PKCE).
-// Returns { url } so the SPA can redirect (avoids CORS issues with 302s).
+// POST /auth/google/start — JSON { url } for clients that prefer fetch.
 authRoutes.post("/google/start", async (c) => {
-  const clientId = c.env?.GOOGLE_CLIENT_ID;
-  const appUrl = c.env?.APP_URL ?? "";
-
-  if (!clientId) {
-    return c.json({ error: "oauth_not_configured" }, 503);
-  }
-
-  // Per-IP throttle: OAuth start writes to KV; don't let one client spam it.
-  const limited = await checkRateLimit(c, `auth-start:${clientIp(c)}`, {
-    limit: 10,
-    windowSecs: 60,
-  });
-  if (limited) return limited;
-
-  // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
-  const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
-  const codeChallenge = await sha256Base64url(codeVerifier);
-  const state = generateRandom(16);
-
-  // Persist {codeVerifier} in KV keyed by state; expires in 10 minutes
-  await c.env.KV.put(
-    `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier }),
-    { expirationTtl: PKCE_TTL_SECS },
-  );
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: `${appUrl}/api/auth/google/callback`,
-    response_type: "code",
-    scope: [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/drive.file",
-    ].join(" "),
-    access_type: "offline",
-    prompt: "consent",
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-  });
-
-  return c.json({ url: `${GOOGLE_AUTH_URL}?${params.toString()}` });
+  const result = await beginGoogleOAuth(c);
+  if (result instanceof Response) return result;
+  return c.json({ url: result.url });
 });
 
 // GET /auth/google/callback — OAuth redirect handler. Exchanges code for tokens,
 // verifies the ID token, upserts the user in D1, creates a session, sets cookie.
 authRoutes.get("/google/callback", async (c) => {
-  const appUrl = c.env?.APP_URL ?? "";
-  const redirect = (path: string) => c.redirect(`${appUrl}${path}`);
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+  const redirect = (path: string) => c.redirect(`${origin}${path}`);
 
   const code = c.req.query("code");
   const state = c.req.query("state");
@@ -167,9 +195,14 @@ authRoutes.get("/google/callback", async (c) => {
 
   // Verify + consume state from KV
   const kvKey = `oauth:state:${state}`;
-  const stored = await c.env.KV.get(kvKey, "json") as { codeVerifier: string } | null;
+  const stored = await c.env.KV.get(kvKey, "json") as {
+    codeVerifier: string;
+    redirectUri?: string;
+  } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
+
+  const redirectUri = stored.redirectUri ?? oauthRedirectUri(origin);
 
   // Exchange authorization code for tokens
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -178,7 +211,7 @@ authRoutes.get("/google/callback", async (c) => {
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${appUrl}/api/auth/google/callback`,
+      redirect_uri: redirectUri,
       client_id: clientId,
       client_secret: clientSecret,
       code_verifier: stored.codeVerifier,
@@ -264,7 +297,9 @@ authRoutes.get("/google/callback", async (c) => {
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
-  return redirect("/");
+  // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
+  // follows Google's cross-site redirect, which looks like a failed phone login.
+  return c.html(loginBounceHtml("/"), 200);
 });
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.
