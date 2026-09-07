@@ -48,10 +48,24 @@ export function Assistant() {
 
   const statusQ = useQuery({
     queryKey: ["assistant", "status"],
-    queryFn: () => api<{ configured: boolean }>("/assistant/status"),
+    queryFn: () =>
+      api<{ configured: boolean; keyOk?: boolean; message?: string }>("/assistant/status"),
     staleTime: 5 * 60_000,
     retry: false,
   });
+
+  // If the key is present but Gemini rejects it, probe once and surface why.
+  const probeQ = useQuery({
+    queryKey: ["assistant", "status", "probe"],
+    queryFn: () =>
+      api<{ configured: boolean; keyOk?: boolean; message?: string }>(
+        "/assistant/status?probe=1",
+      ),
+    enabled: Boolean(statusQ.data?.configured),
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+
 
   // Keep the newest turn in view as the conversation grows.
   useEffect(() => {
@@ -115,6 +129,12 @@ export function Assistant() {
   }
 
   if (!statusQ.data?.configured || !activeFamilyId) return null;
+
+  const keyWarning =
+    probeQ.data?.configured && probeQ.data.keyOk === false
+      ? probeQ.data.message ??
+        "Gemini rejected this API key. Create a new one at aistudio.google.com/apikey."
+      : null;
 
   async function send(text: string) {
     const message = text.trim();
@@ -217,13 +237,19 @@ export function Assistant() {
                     <p className="text-sm text-fg-muted">
                       Tell me what you spent and I'll record it, or ask how you're doing this month.
                     </p>
+                    {keyWarning && (
+                      <p role="alert" className="rounded-2xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+                        {keyWarning}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2">
                       {SUGGESTIONS.map((s) => (
                         <button
                           key={s}
                           type="button"
                           onClick={() => send(s)}
-                          className="rounded-full border border-line px-3 py-2 text-xs text-fg-muted transition-colors hover:bg-white/5"
+                          disabled={Boolean(keyWarning)}
+                          className="rounded-full border border-line px-3 py-2 text-xs text-fg-muted transition-colors hover:bg-white/5 disabled:opacity-40"
                         >
                           {s}
                         </button>

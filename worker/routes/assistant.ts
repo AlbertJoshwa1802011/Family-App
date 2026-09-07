@@ -27,6 +27,8 @@ import { insertAuditEvent } from "../lib/audit";
 import {
   runAssistant,
   GeminiError,
+  friendlyGeminiMessage,
+  probeGeminiKey,
   type FunctionDeclaration,
   type GeminiContent,
 } from "../lib/ai/gemini";
@@ -439,14 +441,46 @@ assistantRoutes.post("/chat", requireSession, zValidator("json", chatSchema, (r,
   } catch (err) {
     if (err instanceof GeminiError) {
       console.error(`[assistant] gemini ${err.status}: ${err.message}`);
-      return c.json({ error: "assistant_failed", message: "The assistant is unavailable right now." }, 502);
+      return c.json(
+        {
+          error: "assistant_failed",
+          message: friendlyGeminiMessage(err),
+        },
+        502,
+      );
     }
     console.error("[assistant] failed:", err);
-    return c.json({ error: "assistant_failed" }, 500);
+    return c.json(
+      {
+        error: "assistant_failed",
+        message: "The assistant hit an unexpected error. Please try again.",
+      },
+      500,
+    );
   }
 });
 
 /** Lets the UI hide the assistant entirely when no key is configured. */
 assistantRoutes.get("/status", requireSession, async (c) => {
-  return c.json({ configured: Boolean(c.env?.GEMINI_API_KEY) });
+  const configured = Boolean(c.env?.GEMINI_API_KEY?.trim());
+  if (!configured) {
+    return c.json({ configured: false, keyOk: false });
+  }
+
+  // Optional live probe — used when the UI suspects a bad key.
+  if (c.req.query("probe") === "1") {
+    const probe = await probeGeminiKey(c.env.GEMINI_API_KEY!);
+    return c.json({
+      configured: true,
+      keyOk: probe.ok,
+      message: probe.ok ? undefined : probe.message,
+      model: c.env.GEMINI_MODEL?.trim() || undefined,
+    });
+  }
+
+  return c.json({
+    configured: true,
+    keyOk: true,
+    model: c.env.GEMINI_MODEL?.trim() || undefined,
+  });
 });

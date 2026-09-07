@@ -2,18 +2,26 @@
  * Gemini function-calling loop — stubbed fetch, no real API key.
  *
  * Guards the bug where tool results were sent with role "function" (rejected
- * by current Gemini models) instead of role "user" + functionResponse.
+ * by current Gemini models) instead of role "user" + functionResponse, and
+ * covers model fallback when a model id 404s.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MODEL, runAssistant } from "../worker/lib/ai/gemini";
+import {
+  DEFAULT_MODEL,
+  FALLBACK_MODELS,
+  friendlyGeminiMessage,
+  GeminiError,
+  runAssistant,
+} from "../worker/lib/ai/gemini";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("runAssistant Gemini loop", () => {
-  it("defaults to gemini-2.5-flash", () => {
+  it("defaults to gemini-2.5-flash with flash fallbacks", () => {
     expect(DEFAULT_MODEL).toBe("gemini-2.5-flash");
+    expect(FALLBACK_MODELS).toContain("gemini-2.0-flash");
   });
 
   it("sends functionResponse under role user (not function)", async () => {
@@ -76,14 +84,14 @@ describe("runAssistant Gemini loop", () => {
           parameters: { type: "object", properties: {}, required: [] },
         },
       ],
-      execute: async () => ({ ok: true, amountMajor: 70 }),
+      execute: async () => ({ ok: true, summary: "Added ₹70 for noodles" }),
     });
 
     expect(result.text).toBe("Logged ₹70 for noodles.");
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0].name).toBe("add_expense");
+    expect(result.model).toBe(DEFAULT_MODEL);
 
-    // Second generateContent call must include the tool result as a user turn.
     expect(bodies).toHaveLength(2);
     const secondContents = bodies[1].contents as {
       role: string;
@@ -98,38 +106,111 @@ describe("runAssistant Gemini loop", () => {
       name: "add_expense",
       id: "call_1",
     });
+
+    const headers = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(headers["x-goog-api-key"]).toBe("test-key");
   });
 
-  it("returns plain text when the model does not call a tool", async () => {
+  it("falls back to the next model when the preferred id 404s", async () => {
+    const modelsHit: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
+      vi.fn(async (url: string) => {
+        const model = decodeURIComponent(String(url).split("/models/")[1]?.split(":")[0] ?? "");
+        modelsHit.push(model);
+        if (model === "gemini-2.5-flash") {
+          return new Response(
+            JSON.stringify({ error: { message: "models/gemini-2.5-flash is not found" } }),
+            { status: 404 },
+          );
+        }
+        return new Response(
           JSON.stringify({
-            candidates: [
-              { content: { role: "model", parts: [{ text: "You can spend ₹200 today." }] } },
-            ],
+            candidates: [{ content: { parts: [{ text: "Hi from fallback." }] } }],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
+          { status: 200 },
+        );
+      }),
     );
 
     const result = await runAssistant({
       apiKey: "test-key",
       systemInstruction: "sys",
-      history: [{ role: "user", parts: [{ text: "how much left?" }] }],
+      history: [{ role: "user", parts: [{ text: "hi" }] }],
       tools: [],
       execute: async () => ({}),
     });
-    expect(result.text).toBe("You can spend ₹200 today.");
-    expect(result.toolCalls).toEqual([]);
+
+    expect(modelsHit[0]).toBe("gemini-2.5-flash");
+    expect(modelsHit[1]).toBe("gemini-2.0-flash");
+    expect(result.model).toBe("gemini-2.0-flash");
+    expect(result.text).toBe("Hi from fallback.");
+  });
+
+  it("synthesizes a reply from tool results when the model returns empty text", async () => {
+    let round = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        round += 1;
+        if (round === 1) {
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        functionCall: {
+                          name: "add_expense",
+                          args: { amountMajor: 70 },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({ candidates: [{ content: { parts: [] } }] }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await runAssistant({
+      apiKey: "k",
+      systemInstruction: "s",
+      history: [{ role: "user", parts: [{ text: "spent 70" }] }],
+      tools: [
+        {
+          name: "add_expense",
+          description: "d",
+          parameters: { type: "object", properties: { amountMajor: { type: "number" } } },
+        },
+      ],
+      execute: async () => ({ summary: "Added ₹70 for noodles" }),
+    });
+    expect(result.text).toContain("Added ₹70");
+  });
+
+  it("maps GeminiError to a helpful user message", () => {
+    expect(friendlyGeminiMessage(new GeminiError("API key not valid", 400))).toMatch(/API key/i);
+    expect(friendlyGeminiMessage(new GeminiError("quota exceeded", 429))).toMatch(/rate-limited|quota/i);
   });
 
   it("throws GeminiError on non-2xx so the route can 502", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ error: { message: "quota" } }), { status: 429 })),
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "API_KEY_INVALID" } }), { status: 400 }),
+      ),
     );
 
     await expect(
@@ -140,6 +221,6 @@ describe("runAssistant Gemini loop", () => {
         tools: [],
         execute: async () => ({}),
       }),
-    ).rejects.toMatchObject({ name: "GeminiError", status: 429 });
+    ).rejects.toMatchObject({ name: "GeminiError", status: 400 });
   });
 });

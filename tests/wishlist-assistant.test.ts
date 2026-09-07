@@ -1,7 +1,7 @@
 /**
  * Wishlist affordability, sub-categories, and the assistant's guard rails.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { app } from "../worker/index";
 import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
 import type { Env } from "../worker/types";
@@ -227,8 +227,9 @@ describe("assistant", () => {
     const { env, alice } = setup();
     const body = (await (
       await req(env, "GET", "/api/assistant/status", alice.cookie)
-    ).json()) as { configured: boolean };
+    ).json()) as { configured: boolean; keyOk?: boolean };
     expect(body.configured).toBe(false);
+    expect(body.keyOk).toBe(false);
   });
 
   it("returns 501 with guidance rather than failing obscurely", async () => {
@@ -241,6 +242,27 @@ describe("assistant", () => {
     const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe("not_configured");
     expect(body.message).toContain("GEMINI_API_KEY");
+  });
+
+  it("probes a present-but-bad key and surfaces guidance", async () => {
+    const { env, alice } = setup();
+    env.GEMINI_API_KEY = "bad-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 }),
+      ),
+    );
+    try {
+      const res = await req(env, "GET", "/api/assistant/status?probe=1", alice.cookie);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { configured: boolean; keyOk: boolean; message?: string };
+      expect(body.configured).toBe(true);
+      expect(body.keyOk).toBe(false);
+      expect(body.message).toMatch(/API key/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("checks family membership before doing anything", async () => {
