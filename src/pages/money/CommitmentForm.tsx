@@ -12,9 +12,8 @@ import { api } from "../../lib/api";
 import { formatMajorFromMinor, parseMajorToMinor, todayIsoDate } from "../../lib/money";
 import { CADENCES, COMMITMENT_KINDS, type Cadence, type Commitment, type CommitmentKind } from "../../lib/finance";
 import { cn } from "../../lib/cn";
+import { inputCls as inputClass } from "../../lib/fieldCls";
 
-const inputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 export function CommitmentForm() {
   const { id } = useParams<{ id: string }>();

@@ -152,8 +152,7 @@ export function Assistant() {
               aria-modal="true"
               aria-label="Money assistant"
               className={cn(
-                "pb-safe fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-3xl",
-                "border border-line bg-surface shadow-pop",
+                "pb-safe liquid-bubble fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-3xl shadow-pop",
                 "animate-[slideUp_220ms_cubic-bezier(0.22,1,0.36,1)]",
                 "md:inset-x-auto md:right-4 md:bottom-4 md:w-96 md:rounded-3xl",
               )}
@@ -239,7 +238,7 @@ export function Assistant() {
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="I spent 70 on noodles…"
                   aria-label="Message the assistant"
-                  className="flex-1 rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+                  className="liquid-field flex-1 rounded-2xl px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
                 />
                 <Button type="submit" loading={busy} aria-label="Send">
                   <CornerDownLeft className="size-4" />

@@ -16,6 +16,7 @@ import {
   todayIsoDate,
 } from "../lib/money";
 import { cn } from "../lib/cn";
+import { inputCls as inputClass } from "../lib/fieldCls";
 
 interface Category {
   id: string;
@@ -54,8 +55,6 @@ function memberLabel(m: FamilyMember): string {
   return m.displayName || m.name || m.email || "Member";
 }
 
-const inputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 /**
  * Outer shell: resolves the expense being edited, then mounts the form with its

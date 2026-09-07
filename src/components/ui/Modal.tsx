@@ -50,7 +50,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
       {/* Panel */}
       <div
         className={cn(
-          "pb-safe relative w-full max-w-lg rounded-t-3xl border border-line bg-surface shadow-pop",
+          "pb-safe liquid-bubble relative w-full max-w-lg rounded-t-3xl shadow-pop",
           "animate-[slideUp_220ms_cubic-bezier(0.22,1,0.36,1)]",
           "sm:rounded-3xl sm:animate-[fadeIn_150ms_ease-out]",
           className,
