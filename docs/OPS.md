@@ -66,28 +66,36 @@ npx wrangler secret put EMAIL_FROM
 `EMAIL_FROM` must be a domain you verified in Resend (not a personal
 `@gmail.com` From address).
 
-## 4. Church `church_not_configured`
+## 4. Church funds + `CONTRIBUTIONS_API_TOKEN`
 
 The contributions site
-(https://light-of-jesus-ministry-contributions.pages.dev) already holds live
-totals. **GET `/api/funds` and GET `/api/purchases` are public** — this Worker
-only reads them. Production already sets `CONTRIBUTIONS_API_URL` in
-`wrangler.jsonc` vars, so Money → Funds should show Tech Fund / Christmas Fund
-after deploy. No family admin action and no `ADMIN_API_TOKEN` are required for
-those public totals.
+(https://light-of-jesus-ministry-contributions.pages.dev) holds live totals.
+This app **reads** them and only stores monthly settlements.
 
-`church_not_configured` only happens when **both** `CONTRIBUTIONS_API_URL` and
-`CONTRIBUTIONS_API_TOKEN` are unset (local tests, or a Worker built without
-the wrangler var).
+**Already in `wrangler.jsonc` vars**
 
-Optional: to include **members-only** funds in the snapshot, set the machine
-token to the same value as that site’s `ADMIN_API_TOKEN`:
+- `CONTRIBUTIONS_API_URL` = that Pages origin
+
+**Also set the shared machine token** (recommended — you said you’ve set both
+ends). Paste the **same** value into both places:
+
+1. Contributions Pages → Environment variables → `ADMIN_API_TOKEN`
+2. This Worker:
 
 ```bash
 npx wrangler secret put CONTRIBUTIONS_API_TOKEN
 ```
 
-Then reload Money → Funds.
+After deploy, Money → Funds should say **Connected with admin token
+(api-token)**. The Worker verifies the secret with `GET /api/auth` on the
+contributions site before loading funds. If the values differ you get
+`church_token_invalid` instead of silent public-only data.
+
+Public fund totals still work with URL alone (no token). The token is what
+includes members-only funds and proves the two apps share the same secret.
+
+`church_not_configured` only happens when **both** URL and token are unset
+(local tests without either).
 
 ## 5. Google Contacts `google_sync_failed` / “unsecured app”
 

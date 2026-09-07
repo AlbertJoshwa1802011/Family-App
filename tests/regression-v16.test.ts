@@ -63,6 +63,34 @@ function churchFundsResponse(slug = "tech-fund") {
   );
 }
 
+function churchAuthOk() {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      isAdmin: true,
+      email: "api-token",
+      permissions: ["*"],
+    }),
+    { status: 200 },
+  );
+}
+
+function mockChurchFetch(
+  route?: (url: string) => Response | undefined,
+) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/api/auth")) return churchAuthOk();
+    const custom = route?.(url);
+    if (custom) return custom;
+    if (url.includes("/api/funds")) return churchFundsResponse();
+    if (url.includes("/api/purchases")) {
+      return new Response(JSON.stringify({ purchases: [] }), { status: 200 });
+    }
+    return new Response("nope", { status: 404 });
+  });
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -558,7 +586,9 @@ describe("Church snapshot + settle", () => {
   });
 
   it("POST /settle unknown fund → 404", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => churchFundsResponse("other"));
+    mockChurchFetch((url) =>
+      url.includes("/api/funds") ? churchFundsResponse("other") : undefined,
+    );
     const { env, sqlite } = createTestEnv({ CONTRIBUTIONS_API_TOKEN: "tok" });
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
@@ -572,7 +602,7 @@ describe("Church snapshot + settle", () => {
   });
 
   it("snapshot and settle are family-scoped (other family → 404)", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => churchFundsResponse());
+    mockChurchFetch();
     const { env, sqlite } = createTestEnv({ CONTRIBUTIONS_API_TOKEN: "tok" });
     const ownerA = seedUser(sqlite);
     const famA = seedFamily(sqlite, ownerA.id);
@@ -598,7 +628,9 @@ describe("Church snapshot + settle", () => {
   });
 
   it("snapshot surfaces upstream failure as 502", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }));
+    mockChurchFetch((url) =>
+      url.includes("/api/funds") ? new Response("boom", { status: 500 }) : undefined,
+    );
     const { env, sqlite } = createTestEnv({ CONTRIBUTIONS_API_TOKEN: "tok" });
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
@@ -614,14 +646,7 @@ describe("Church snapshot + settle", () => {
   });
 
   it("snapshot lists the settlement after a successful settle", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes("/api/funds")) return churchFundsResponse();
-      if (url.includes("/api/purchases")) {
-        return new Response(JSON.stringify({ purchases: [] }), { status: 200 });
-      }
-      return new Response("nope", { status: 404 });
-    });
+    mockChurchFetch();
     const { env, sqlite } = createTestEnv({ CONTRIBUTIONS_API_TOKEN: "tok" });
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
@@ -642,8 +667,14 @@ describe("Church snapshot + settle", () => {
     );
     expect(snap.status).toBe(200);
     const body = (await snap.json()) as {
+      auth: { mode: string; tokenOk: boolean; actor?: string };
       settlements: { periodKey: string; collectedMinor: number }[];
     };
+    expect(body.auth).toEqual({
+      mode: "token",
+      tokenOk: true,
+      actor: "api-token",
+    });
     expect(body.settlements[0]?.periodKey).toBe("2026-09");
     expect(body.settlements[0]?.collectedMinor).toBe(100_000);
   });

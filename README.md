@@ -24,12 +24,11 @@ migrations (`.github/workflows/deploy.yml`).
 - **Money / expenses** — fast add, nested spends, coloured categories (built-in
   + family-created). Private by default.
 - **Church funds** — live collected / purchase totals from
-  [light-of-jesus-ministry-contributions](https://light-of-jesus-ministry-contributions.pages.dev)
-  (public GET `/api/funds` + `/api/purchases`). Worker var
-  `CONTRIBUTIONS_API_URL` is set in `wrangler.jsonc`. This app only records
-  **monthly settlements**; it does not duplicate every contribution. Optional
-  secret `CONTRIBUTIONS_API_TOKEN` (same value as the contributions app
-  `ADMIN_API_TOKEN`) is only needed for members-only funds.
+  [light-of-jesus-ministry-contributions](https://light-of-jesus-ministry-contributions.pages.dev).
+  Worker var `CONTRIBUTIONS_API_URL` is in `wrangler.jsonc`. Set secret
+  `CONTRIBUTIONS_API_TOKEN` to the same value as that site’s `ADMIN_API_TOKEN`
+  (Worker verifies via `GET /api/auth`). This app only records **monthly
+  settlements**; it does not duplicate every contribution.
 - **Calendar** — create/edit events (edit form hydrates from `GET /events/:id`).
   On save, events email you and write to **Google Calendar** (`calendar.events`
   scope). ICS download + optional subscribe feed as backup (Google polls feeds
@@ -75,7 +74,7 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put SESSION_SECRET
 npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put EMAIL_FROM
-npx wrangler secret put CONTRIBUTIONS_API_TOKEN   # optional; members-only church funds
+npx wrangler secret put CONTRIBUTIONS_API_TOKEN   # same as contributions ADMIN_API_TOKEN
 # optional:
 npx wrangler secret put GEMINI_API_KEY
 ```

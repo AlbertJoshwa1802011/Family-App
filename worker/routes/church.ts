@@ -2,8 +2,9 @@
  * Church fund snapshot + settlements.
  *
  * Live collected / spent numbers come from the contributions Pages app
- * (public GET /api/funds and /api/purchases). This Worker only stores monthly
- * settlement records the family adds here.
+ * (public GET /api/funds and /api/purchases, plus admin listing when
+ * CONTRIBUTIONS_API_TOKEN matches that site's ADMIN_API_TOKEN). This Worker
+ * only stores monthly settlement records the family adds here.
  */
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -18,6 +19,7 @@ import {
   contributionsConfigured,
   fetchChurchFunds,
   fetchChurchPurchases,
+  resolveContributionsAuth,
   rupeesToMinor,
 } from "../lib/contributions";
 
@@ -45,6 +47,7 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
       {
         error: "church_not_configured",
         configured: false,
+        auth: { mode: "public", tokenOk: null },
         funds: [],
         purchases: [],
         settlements: [],
@@ -53,10 +56,33 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
     );
   }
 
+  const auth = await resolveContributionsAuth(c.env);
+  if (auth.mode === "token" && auth.tokenOk === false) {
+    return c.json(
+      {
+        error: auth.error,
+        configured: true,
+        auth: { mode: "token", tokenOk: false },
+      },
+      502,
+    );
+  }
+
   const fundsRes = await fetchChurchFunds(c.env);
   if (!fundsRes.ok) {
     const status = fundsRes.status === 503 ? 503 : 502;
-    return c.json({ error: fundsRes.error, configured: true }, status);
+    return c.json(
+      {
+        error: fundsRes.error,
+        configured: true,
+        auth: {
+          mode: auth.mode,
+          tokenOk: auth.tokenOk,
+          ...(auth.mode === "token" && auth.tokenOk ? { actor: auth.actor } : {}),
+        },
+      },
+      status,
+    );
   }
   const purchasesRes = await fetchChurchPurchases(c.env);
   const purchases = purchasesRes.ok ? purchasesRes.purchases : [];
@@ -71,6 +97,11 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
   return c.json({
     configured: true,
     currency: fundsRes.currency,
+    auth: {
+      mode: auth.mode,
+      tokenOk: auth.tokenOk,
+      ...(auth.mode === "token" && auth.tokenOk ? { actor: auth.actor } : {}),
+    },
     funds: fundsRes.funds,
     purchases,
     settlements,
@@ -92,6 +123,11 @@ churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
 
   if (!contributionsConfigured(c.env)) {
     return c.json({ error: "church_not_configured" }, 503);
+  }
+
+  const auth = await resolveContributionsAuth(c.env);
+  if (auth.mode === "token" && auth.tokenOk === false) {
+    return c.json({ error: auth.error }, 502);
   }
 
   const fundsRes = await fetchChurchFunds(c.env);

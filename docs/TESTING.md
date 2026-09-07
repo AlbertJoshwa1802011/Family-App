@@ -73,7 +73,8 @@ These cases lock the bugs this branch fixed. They live in
 ### Church funds
 - Snapshot / settle require a session.
 - Missing both `CONTRIBUTIONS_API_URL` and `CONTRIBUTIONS_API_TOKEN` → `503 church_not_configured`.
-- `CONTRIBUTIONS_API_URL` alone is enough for public fund/purchase totals (no Authorization header).
+- `CONTRIBUTIONS_API_URL` alone is enough for public fund/purchase totals (no Authorization header; `auth.mode=public`).
+- With `CONTRIBUTIONS_API_TOKEN`, Worker probes `GET /api/auth` first; mismatch → `502 church_token_invalid`; success → `auth.mode=token` + Bearer on fund/purchase fetches.
 - Unknown fund → 404; other family → 404; invalid `periodKey` → `400 validation_error`.
 - Duplicate month → 409; upstream 500 → 502.
 - Settle stores rupees as minor units (`1000` → `100000`) and snapshot lists it.

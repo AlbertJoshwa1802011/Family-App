@@ -4,10 +4,10 @@
  * Both apps are Cloudflare-hosted. Worker `fetch()` to the Pages origin is a
  * normal HTTPS call — no CORS, no browser cookies.
  *
- * GET /api/funds and GET /api/purchases are public on that site (active,
- * visibility=public funds). CONTRIBUTIONS_API_URL (already a wrangler var) is
- * enough to read live totals. CONTRIBUTIONS_API_TOKEN is optional: send it
- * when set so members-only funds are included.
+ * GET /api/funds and GET /api/purchases are public for active, visibility=public
+ * funds. When CONTRIBUTIONS_API_TOKEN is set (same value as that site's
+ * ADMIN_API_TOKEN), we authenticate with Bearer and verify via GET /api/auth so
+ * members-only funds are included and a mismatched secret fails loudly.
  */
 import type { Env } from "../types";
 
@@ -41,6 +41,46 @@ export interface ChurchPurchase {
   status: string;
   vendor?: string | null;
   description?: string | null;
+}
+
+export type ContributionsAuth =
+  | { mode: "token"; tokenOk: true; actor: string }
+  | { mode: "token"; tokenOk: false; error: "church_token_invalid" | "church_unreachable" }
+  | { mode: "public"; tokenOk: null };
+
+/**
+ * When CONTRIBUTIONS_API_TOKEN is set, probe GET /api/auth on the contributions
+ * site. ADMIN_API_TOKEN returns `{ success: true, isAdmin: true, email: "api-token" }`.
+ */
+export async function resolveContributionsAuth(env: Env): Promise<ContributionsAuth> {
+  const token = env.CONTRIBUTIONS_API_TOKEN?.trim();
+  if (!token) return { mode: "public", tokenOk: null };
+  try {
+    const res = await fetch(`${origin(env)}/api/auth`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    const text = await res.text();
+    let body: { success?: boolean; isAdmin?: boolean; email?: string | null } = {};
+    try {
+      body = JSON.parse(text) as typeof body;
+    } catch {
+      return { mode: "token", tokenOk: false, error: "church_token_invalid" };
+    }
+    if (res.ok && body.success === true && body.isAdmin === true) {
+      return {
+        mode: "token",
+        tokenOk: true,
+        actor: String(body.email ?? "api-token"),
+      };
+    }
+    return { mode: "token", tokenOk: false, error: "church_token_invalid" };
+  } catch (err) {
+    console.error("[church] auth probe failed:", err);
+    return { mode: "token", tokenOk: false, error: "church_unreachable" };
+  }
 }
 
 async function churchGet(

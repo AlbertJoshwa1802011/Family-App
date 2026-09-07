@@ -44,7 +44,8 @@ export interface Env {
   CONTRIBUTIONS_API_URL?: string;
   /**
    * Optional machine token accepted by the contributions app as
-   * ADMIN_API_TOKEN. Only needed for members-only funds.
+   * ADMIN_API_TOKEN. When set, Worker verifies via GET /api/auth and
+   * sends Bearer on fund/purchase fetches (members-only funds included).
    */
   CONTRIBUTIONS_API_TOKEN?: string;
 }

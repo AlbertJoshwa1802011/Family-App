@@ -47,6 +47,11 @@ interface ChurchSettlement {
 interface Snapshot {
   configured: boolean;
   currency: string;
+  auth?: {
+    mode: "token" | "public";
+    tokenOk: boolean | null;
+    actor?: string;
+  };
   funds: ChurchFund[];
   purchases: ChurchPurchase[];
   settlements: ChurchSettlement[];
@@ -57,13 +62,25 @@ interface LocalFund {
   name: string;
 }
 
-
 function rupees(n: number): string {
   return formatMoney(Math.round(n * 100), "INR");
 }
 
 function ChurchSnapshotError({ error }: { error: unknown }) {
   const code = error instanceof ApiError ? error.code : undefined;
+  if (code === "church_token_invalid") {
+    return (
+      <Card className="space-y-2 p-4">
+        <p className="text-sm font-semibold text-fg">Church admin token was rejected</p>
+        <p className="text-sm text-fg-muted">
+          <span className="font-mono text-xs">CONTRIBUTIONS_API_TOKEN</span> on this
+          Worker must match the contributions site’s{" "}
+          <span className="font-mono text-xs">ADMIN_API_TOKEN</span> exactly. See
+          docs/OPS.md §4.
+        </p>
+      </Card>
+    );
+  }
   const unreachable =
     code === "church_unreachable" || code === "church_upstream_error";
   const title = unreachable
@@ -71,7 +88,7 @@ function ChurchSnapshotError({ error }: { error: unknown }) {
     : "Church data isn’t connected yet";
   const body = unreachable
     ? "The contributions site didn’t respond. Try again in a moment."
-    : "Live totals are public on the contributions site. This Worker needs CONTRIBUTIONS_API_URL (already in wrangler.jsonc for production). Reload after deploy.";
+    : "Set Worker var CONTRIBUTIONS_API_URL and secret CONTRIBUTIONS_API_TOKEN (same value as that site’s ADMIN_API_TOKEN). Steps are in docs/OPS.md.";
   return (
     <Card className="space-y-2 p-4">
       <p className="text-sm font-semibold text-fg">{title}</p>
@@ -153,13 +170,24 @@ export function Funds() {
       <Page width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
 
-        <Card className="p-4">
+        <Card className="p-4 space-y-2">
           <p className="text-sm text-fg-muted">
             Live collection and purchase totals come from the church contributions
             site. This page is for <span className="font-medium text-fg">settlements only</span>{" "}
             — reconcile the bank, then record the month here. Do not re-enter
             every contribution.
           </p>
+          {snap?.auth?.mode === "token" && snap.auth.tokenOk === true ? (
+            <p className="text-xs text-emerald-300">
+              Connected with admin token
+              {snap.auth.actor ? ` (${snap.auth.actor})` : ""}.
+            </p>
+          ) : snap && !snapQ.isError ? (
+            <p className="text-xs text-fg-subtle">
+              Connected with public fund totals. Set CONTRIBUTIONS_API_TOKEN to
+              also include members-only funds.
+            </p>
+          ) : null}
         </Card>
 
         {snapQ.isLoading ? (
