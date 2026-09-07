@@ -30,9 +30,9 @@ describe("responsive shell — laptop vs mobile", () => {
   });
 
   it("styles side nav with liquid glass chrome, not flat opaque ink", () => {
-    expect(shell).toContain("backdrop-blur-2xl");
-    expect(shell).toContain("bg-ink-950/55");
-    expect(shell).not.toMatch(/bg-ink-950\/70 backdrop-blur-xl md:flex/);
+    expect(shell).toContain("liquid-bubble");
+    expect(shell).toContain("liquid-chrome");
+    expect(shell).not.toMatch(/bg-ink-950\/70/);
   });
 
   it("widens Page presets from md upward without shrinking mobile", () => {

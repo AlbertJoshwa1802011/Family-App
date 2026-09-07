@@ -6,14 +6,9 @@ import { VaultMark } from "../brand/VaultMark";
 import { cn } from "../../lib/cn";
 
 /**
- * AppBar — the single application header.
- *
- * Every in-shell page renders exactly one of these, so it carries the brand and
- * the account menu rather than duplicating them in the shell. Layout is
- * [back | brand] · title · [page actions] · account.
- *
- * The brand mark is mobile-only: on md+ the nav rail/sidebar already shows it,
- * and repeating it in the header reads as a duplicate.
+ * Floating liquid-bubble title bar — same frosted capsule on phone and laptop.
+ * A scrim behind it fades scrolled content so the blur always has colour to
+ * refract (the ambient orbs on body::before do the rest).
  */
 export function AppBar({
   title,
@@ -29,31 +24,37 @@ export function AppBar({
 }) {
   const navigate = useNavigate();
   return (
-    <header className="pt-safe sticky top-0 z-20 border-b border-white/10 bg-ink-950/55 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 w-full max-w-5xl items-center gap-2 px-3 sm:px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl">
-        {back ? (
-          <button
-            onClick={() => navigate(-1)}
-            aria-label="Go back"
-            className="flex size-11 shrink-0 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5 active:scale-95"
-          >
-            <ChevronLeft className="size-6" aria-hidden="true" />
-          </button>
-        ) : (
-          <VaultMark className="size-7 shrink-0 md:hidden" />
-        )}
-
-        <h1
-          className={cn(
-            "min-w-0 flex-1 truncate text-lg font-semibold text-fg",
-            back ? "px-1" : "px-0.5",
+    <header className="pt-safe sticky top-0 z-20">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 -top-8 -bottom-6 bg-gradient-to-b from-ink-950 via-ink-950/75 to-transparent"
+      />
+      <div className="relative mx-auto w-full max-w-5xl px-3 pt-2 pb-1 sm:px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl">
+        <div className="liquid-bubble liquid-chrome flex h-14 items-center gap-1 rounded-full pr-1.5 pl-2">
+          {back ? (
+            <button
+              onClick={() => navigate(-1)}
+              aria-label="Go back"
+              className="liquid-press flex size-11 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-white/8 hover:text-fg"
+            >
+              <ChevronLeft className="size-6" aria-hidden="true" />
+            </button>
+          ) : (
+            <VaultMark className="ml-1.5 size-7 shrink-0 md:hidden" />
           )}
-        >
-          {title}
-        </h1>
 
-        {trailing}
-        {!hideAccount && <AccountMenu />}
+          <h1
+            className={cn(
+              "min-w-0 flex-1 truncate text-[17px] font-semibold tracking-tight text-fg",
+              back ? "px-0.5" : "px-3",
+            )}
+          >
+            {title}
+          </h1>
+
+          {trailing}
+          {!hideAccount && <AccountMenu />}
+        </div>
       </div>
     </header>
   );
