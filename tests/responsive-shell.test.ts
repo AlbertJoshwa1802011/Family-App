@@ -52,6 +52,16 @@ describe("responsive shell — laptop vs mobile", () => {
   it("raises Fab above the dock on phones but sits lower on laptop", () => {
     expect(fab).toMatch(/bottom-24/);
     expect(fab).toMatch(/md:bottom-6/);
+    expect(fab).toMatch(/z-40/);
+  });
+
+  it("keeps the AI sparkles out of the FAB thumb zone", () => {
+    const assistant = read("src/components/money/Assistant.tsx");
+    const assistantBtn = read("src/components/money/AssistantButton.tsx");
+    const appBar = read("src/components/ui/AppBar.tsx");
+    expect(appBar).toContain("<AssistantButton");
+    expect(assistantBtn).toContain("Ask the money assistant");
+    expect(assistant).not.toMatch(/fixed right-4 z-40/);
   });
 
   it("Money Overview uses a two-column laptop layout", () => {

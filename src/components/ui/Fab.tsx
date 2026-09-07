@@ -17,7 +17,9 @@ export function Fab({
       aria-label={label}
       className={cn(
         "liquid-bubble liquid-raised liquid-primary liquid-press",
-        "fixed right-4 bottom-24 z-30 flex size-14 items-center justify-center rounded-full md:bottom-6",
+        // z-40 keeps Add event / Add task above any leftover chrome; never
+        // compete with the assistant (which lives in the AppBar, not here).
+        "fixed right-4 bottom-24 z-40 flex size-14 items-center justify-center rounded-full md:bottom-6",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         className,
       )}
