@@ -356,6 +356,12 @@ body::after {
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
+/* Clears the floating BottomNav capsule (~5.25rem content + margins) and the
+   home-indicator. Content that sits under the translucent nav looks tappable
+   but the nav steals the hit — see Settings Sign out regression. */
+.pb-nav {
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
 
 /* Skeleton shimmer */
 @keyframes shimmer {

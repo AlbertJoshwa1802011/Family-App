@@ -13,7 +13,7 @@ export function Page({
   className?: string;
 }) {
   return (
-    <div className={cn("mx-auto max-w-md px-4 pt-3 pb-36", className)}>
+    <div className={cn("mx-auto max-w-md px-4 pt-3 pb-nav", className)}>
       {children}
     </div>
   );
