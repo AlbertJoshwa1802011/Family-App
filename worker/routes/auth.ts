@@ -5,7 +5,6 @@ import { and, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
-import { createSession, deleteSession, validateSession, SESSION_ABSOLUTE_SECS, COOKIE_NAME } from "../lib/session";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { audit, ACTIONS } from "../lib/audit";
 import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
@@ -18,6 +17,15 @@ import {
   GOOGLE_SCOPES,
   userHasScope,
 } from "../lib/google";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
+import {
+  createSession,
+  deleteSession,
+  validateSession,
+  SESSION_ABSOLUTE_SECS,
+  COOKIE_NAME,
+  SESSION_COOKIE_OPTIONS,
+} from "../lib/session";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -37,7 +45,7 @@ authRoutes.get("/me", async (c) => {
   const db = getDb(c.env);
   const result = await validateSession(db, sessionId);
   if (!result) {
-    deleteCookie(c, COOKIE_NAME, { path: "/" });
+    deleteCookie(c, COOKIE_NAME, SESSION_COOKIE_OPTIONS);
     return c.json({ user: null, families: [] });
   }
 
@@ -140,10 +148,10 @@ authRoutes.get("/google/status", requireSession, async (c) => {
 // Returns 302 redirect to the Google auth URL.
 authRoutes.get("/google/start", async (c) => {
   const clientId = c.env?.GOOGLE_CLIENT_ID;
-  const appUrl = c.env?.APP_URL ?? "";
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
 
   if (!clientId) {
-    return c.json({ error: "oauth_not_configured" }, 503);
+    return c.redirect(`${origin}/login?error=oauth_not_configured`);
   }
 
   const connect = c.req.query("connect") ?? "";
@@ -158,17 +166,18 @@ authRoutes.get("/google/start", async (c) => {
   const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
   const codeChallenge = await sha256Base64url(codeVerifier);
   const state = generateRandom(16);
+  const redirectUri = `${origin}/api/auth/google/callback`;
 
-  // Persist {codeVerifier} in KV keyed by state; expires in 10 minutes
+  // Persist verifier + exact redirect_uri (token exchange must match).
   await c.env.KV.put(
     `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier, extra, returnTo }),
+    JSON.stringify({ codeVerifier, extra, returnTo, redirectUri }),
     { expirationTtl: PKCE_TTL_SECS },
   );
 
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: `${appUrl}/api/auth/google/callback`,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: [...LOGIN_SCOPES, ...extra].join(" "),
     access_type: "offline",
@@ -185,8 +194,8 @@ authRoutes.get("/google/start", async (c) => {
 // GET /auth/google/callback — OAuth redirect handler. Exchanges code for tokens,
 // verifies the ID token, upserts the user in D1, creates a session, sets cookie.
 authRoutes.get("/google/callback", async (c) => {
-  const appUrl = c.env?.APP_URL ?? "";
-  const redirect = (path: string) => c.redirect(`${appUrl}${path}`);
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+  const redirect = (path: string) => c.redirect(`${origin}${path}`);
 
   const code = c.req.query("code");
   const state = c.req.query("state");
@@ -205,9 +214,12 @@ authRoutes.get("/google/callback", async (c) => {
     codeVerifier: string;
     extra?: string[];
     returnTo?: string;
+    redirectUri?: string;
   } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
+
+  const redirectUri = stored.redirectUri ?? `${origin}/api/auth/google/callback`;
 
   // Exchange authorization code for tokens
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -216,7 +228,7 @@ authRoutes.get("/google/callback", async (c) => {
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${appUrl}/api/auth/google/callback`,
+      redirect_uri: redirectUri,
       client_id: clientId,
       client_secret: clientSecret,
       code_verifier: stored.codeVerifier,
@@ -305,10 +317,7 @@ authRoutes.get("/google/callback", async (c) => {
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
 
   setCookie(c, COOKIE_NAME, sessionId, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "Lax",
-    path: "/",
+    ...SESSION_COOKIE_OPTIONS,
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
@@ -318,11 +327,10 @@ authRoutes.get("/google/callback", async (c) => {
     meta: { userAgent: c.req.header("user-agent") },
   });
 
-  const dest =
-    stored.returnTo && stored.returnTo.startsWith("/")
-      ? stored.returnTo
-      : "/";
-  return redirect(dest);
+  const dest = safeAppPath(stored.returnTo ?? "/");
+  // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
+  // follows Google's cross-site redirect, which looks like a failed phone login.
+  return c.html(loginBounceHtml(dest), 200);
 });
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.
@@ -343,6 +351,6 @@ authRoutes.post("/logout", async (c) => {
       // Best-effort — still clear the cookie even if the DB call fails
     }
   }
-  deleteCookie(c, COOKIE_NAME, { path: "/" });
+  deleteCookie(c, COOKIE_NAME, SESSION_COOKIE_OPTIONS);
   return c.json({ ok: true });
 });
