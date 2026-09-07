@@ -34,9 +34,10 @@ migrations (`.github/workflows/deploy.yml`).
   slowly).
 - **Emails** — event create/update/cancel, daily expiry/event reminders, test
   send in Settings. Needs `RESEND_API_KEY` and `EMAIL_FROM` on a verified domain.
-- **Navigation** — pinned liquid-glass tab bar (Home, Vault, Docs, Money,
-  Family) like WhatsApp / iOS. Long-press and drag slides the active pill
-  *inside* the bar; the bar stays at the bottom.
+- **Navigation** — free-floating coloured bubble (Home, Vault, Docs, Money,
+  Family) like GitHub / Tamil Bible / iOS AssistiveTouch. Drag the whole pill;
+  it coasts with inertia, bounces off the edges, then snaps left or right.
+  Position is remembered. Active tab is a saturated colour, not grey glass.
 
 ## Quick start
 
