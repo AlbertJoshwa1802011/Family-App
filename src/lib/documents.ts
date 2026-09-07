@@ -51,6 +51,38 @@ export const DOCUMENT_CATEGORIES = [
   { value: "other", label: "Other" },
 ] as const;
 
+/** Soft cap so a single picker action stays under upload rate limits. */
+export const MAX_MULTI_UPLOAD = 20;
+
+/** Matches FileUploadZone — reject oversized files before creating a document. */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Derive a human document title from an uploaded file name.
+ * Strips a final extension and collapses leftover whitespace / underscores.
+ */
+export function titleFromFileName(fileName: string): string {
+  const base = fileName.trim().split(/[/\\]/).pop() ?? fileName.trim();
+  const withoutExt = base.replace(/\.[^.]+$/, "");
+  const cleaned = withoutExt.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
+  return (cleaned || base || "Untitled document").slice(0, 300);
+}
+
+/** Lightweight filename → category guess (no AI). Unknown → other. */
+export function guessCategoryFromFileName(fileName: string): string {
+  const hay = fileName.toLowerCase().replace(/[_-]+/g, " ");
+  if (/\b(passport|visa|aadhaar|aadhar|pan)\b/.test(hay)) return "passport";
+  if (/\b(licen[cs]e|dl|driving)\b/.test(hay)) return "license";
+  if (/\b(insurance|policy|mediclaim)\b/.test(hay)) return "insurance";
+  if (/\b(medical|prescription|vaccine|hospital|lab)\b/.test(hay)) return "medical";
+  if (/\b(warranty|guarantee|amc)\b/.test(hay)) return "warranty";
+  if (/\b(bank|tax|invoice|loan|statement|salary)\b/.test(hay)) return "financial";
+  if (/\b(school|college|degree|diploma|transcript|marksheet)\b/.test(hay)) {
+    return "education";
+  }
+  return "other";
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return "—";
   const units = ["B", "KB", "MB", "GB"];
@@ -163,4 +195,40 @@ export async function uploadDocumentFileViaDrive(
       sizeBytes: file.size,
     }),
   });
+}
+
+export interface CreatedDocument {
+  id: string;
+  title: string;
+  category: string;
+}
+
+/**
+ * Create a document from a file (title + guessed category) and upload bytes
+ * via the normal R2→Drive path.
+ */
+export async function createAndUploadDocument(
+  file: File,
+  opts?: { familyId?: string; onProgress?: (fraction: number) => void },
+): Promise<CreatedDocument> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("File too large. Maximum size is 25 MB.");
+  }
+
+  const title = titleFromFileName(file.name);
+  const category = guessCategoryFromFileName(file.name);
+  const body: Record<string, string> = {
+    title,
+    category,
+    visibility: "family",
+  };
+  if (opts?.familyId) body.familyId = opts.familyId;
+
+  const { document } = await api<{ document: CreatedDocument }>("/documents", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  await uploadDocumentFile(document.id, file, opts?.onProgress);
+  return document;
 }
