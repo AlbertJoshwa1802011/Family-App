@@ -1,6 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
-import { FileText, FolderOpen, Lock, Plus, Search, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CheckCircle2,
+  FileText,
+  FolderOpen,
+  Lock,
+  Plus,
+  Search,
+  Upload,
+  X,
+  XCircle,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
@@ -14,7 +24,13 @@ import { Fab } from "../components/ui/Fab";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
+import { titleFromFileName } from "../lib/documentTitle";
+import { createAndUploadDocument } from "../lib/uploadDocumentFile";
 import { useAuth } from "../context/AuthContext";
+import { cn } from "../lib/cn";
+
+/** Stay under the upload-url rate limit (30/min) with headroom for retries. */
+const MAX_BATCH = 20;
 
 interface DocumentSummary {
   id: string;
@@ -22,6 +38,17 @@ interface DocumentSummary {
   category: string;
   visibility: "family" | "private";
   expiryDate?: string | null;
+}
+
+type BatchItemStatus = "pending" | "uploading" | "done" | "error";
+
+interface BatchItem {
+  key: string;
+  fileName: string;
+  title: string;
+  status: BatchItemStatus;
+  error?: string;
+  documentId?: string;
 }
 
 function DocSkeleton() {
@@ -36,11 +63,39 @@ function DocSkeleton() {
   );
 }
 
+function statusIcon(status: BatchItemStatus) {
+  if (status === "done") {
+    return <CheckCircle2 className="size-4 text-success" aria-hidden="true" />;
+  }
+  if (status === "error") {
+    return <XCircle className="size-4 text-danger" aria-hidden="true" />;
+  }
+  if (status === "uploading") {
+    return (
+      <span
+        className="size-4 animate-pulse rounded-full bg-vault-400"
+        aria-hidden="true"
+      />
+    );
+  }
+  return (
+    <span
+      className="size-4 rounded-full border border-white/20"
+      aria-hidden="true"
+    />
+  );
+}
+
 export function Documents() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { activeFamily } = useAuth();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [batch, setBatch] = useState<BatchItem[] | null>(null);
+  const [batchError, setBatchError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   // Debounce so we don't hit the API per keystroke.
   useEffect(() => {
@@ -63,10 +118,109 @@ export function Documents() {
   const docs = data?.documents ?? [];
   const searching = debounced.length > 0;
 
+  async function runBatch(files: File[]) {
+    if (!activeFamily) return;
+    setBatchError("");
+    if (files.length === 0) return;
+    if (files.length > MAX_BATCH) {
+      setBatchError(
+        `You can upload up to ${MAX_BATCH} files at once. Selected ${files.length}.`,
+      );
+      return;
+    }
+
+    const items: BatchItem[] = files.map((file, i) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}-${i}`,
+      fileName: file.name,
+      title: titleFromFileName(file.name),
+      status: "pending",
+    }));
+    setBatch(items);
+    setBusy(true);
+
+    for (let i = 0; i < files.length; i++) {
+      setBatch((prev) =>
+        prev
+          ? prev.map((item, idx) =>
+              idx === i ? { ...item, status: "uploading" } : item,
+            )
+          : prev,
+      );
+      try {
+        const doc = await createAndUploadDocument(activeFamily.id, files[i]!);
+        setBatch((prev) =>
+          prev
+            ? prev.map((item, idx) =>
+                idx === i
+                  ? { ...item, status: "done", documentId: doc.id }
+                  : item,
+              )
+            : prev,
+        );
+      } catch (e) {
+        setBatch((prev) =>
+          prev
+            ? prev.map((item, idx) =>
+                idx === i
+                  ? {
+                      ...item,
+                      status: "error",
+                      error: (e as Error).message,
+                    }
+                  : item,
+              )
+            : prev,
+        );
+      }
+    }
+
+    setBusy(false);
+    void qc.invalidateQueries({ queryKey: ["documents", activeFamily.id] });
+  }
+
+  // After a one-file success, open that document once the batch row has an id.
+  useEffect(() => {
+    if (!batch || busy || batch.length !== 1) return;
+    const only = batch[0];
+    if (only?.status === "done" && only.documentId) {
+      navigate(`/documents/${only.documentId}`, { replace: false });
+    }
+  }, [batch, busy, navigate]);
+
+  function onFilesPicked(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    void runBatch(Array.from(list));
+  }
+
   return (
     <>
-      <AppBar title="Documents" />
+      <AppBar
+        title="Documents"
+        trailing={
+          <button
+            type="button"
+            aria-label="Upload files"
+            disabled={busy || !activeFamily}
+            onClick={() => fileInputRef.current?.click()}
+            className="lq-press flex size-10 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-white/8 hover:text-fg disabled:opacity-40"
+          >
+            <Upload className="size-5" aria-hidden="true" />
+          </button>
+        }
+      />
       <Page className="space-y-4">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.heic"
+          hidden
+          onChange={(e) => {
+            onFilesPicked(e.target.files);
+            e.target.value = "";
+          }}
+        />
+
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3.5 z-1 size-4 -translate-y-1/2 text-fg-subtle" />
           <input
@@ -87,6 +241,82 @@ export function Documents() {
             </button>
           )}
         </div>
+
+        {batchError && (
+          <p className="text-sm text-danger" role="alert">
+            {batchError}
+          </p>
+        )}
+
+        {batch && (
+          <Card className="space-y-3 p-4" aria-live="polite">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-fg">
+                  {busy
+                    ? `Uploading ${batch.filter((b) => b.status === "done").length + 1} of ${batch.length}…`
+                    : `Uploaded ${batch.filter((b) => b.status === "done").length} of ${batch.length}`}
+                </div>
+                <p className="mt-0.5 text-xs text-fg-muted">
+                  Each file becomes its own document. You can edit details
+                  after.
+                </p>
+              </div>
+              {!busy && (
+                <button
+                  type="button"
+                  aria-label="Dismiss upload progress"
+                  onClick={() => setBatch(null)}
+                  className="lq-press rounded-full p-1.5 text-fg-subtle hover:text-fg"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+            <ul className="divide-y divide-white/8 overflow-hidden rounded-xl">
+              {batch.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex min-h-11 items-center gap-3 px-1 py-2"
+                >
+                  {statusIcon(item.status)}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-fg">{item.title}</div>
+                    {item.error ? (
+                      <div className="truncate text-xs text-danger">
+                        {item.error}
+                      </div>
+                    ) : (
+                      <div className="truncate text-xs text-fg-subtle">
+                        {item.fileName}
+                      </div>
+                    )}
+                  </div>
+                  {item.status === "done" && item.documentId && (
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-vault-300"
+                      onClick={() => navigate(`/documents/${item.documentId}`)}
+                    >
+                      Open
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {!busy && (
+              <Button
+                variant="secondary"
+                fullWidth
+                leadingIcon={<Upload className="size-4" />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Upload more
+              </Button>
+            )}
+          </Card>
+        )}
+
         {isLoading ? (
           <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -138,14 +368,24 @@ export function Documents() {
           <EmptyState
             icon={FolderOpen}
             title="No documents yet"
-            description="Add your family's passports, insurance, licenses and more — and we'll remind you before they expire."
+            description="Upload passports, insurance, licenses and more — pick one file or many at once."
             action={
-              <Button
-                leadingIcon={<Plus className="size-4" />}
-                onClick={() => navigate("/documents/new")}
-              >
-                Add document
-              </Button>
+              <div className="flex w-full flex-col gap-2">
+                <Button
+                  leadingIcon={<Upload className="size-4" />}
+                  disabled={busy || !activeFamily}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Upload files
+                </Button>
+                <Button
+                  variant="secondary"
+                  leadingIcon={<Plus className="size-4" />}
+                  onClick={() => navigate("/documents/new")}
+                >
+                  Add without a file
+                </Button>
+              </div>
             }
           />
         )}
@@ -153,6 +393,7 @@ export function Documents() {
       <Fab
         icon={Plus}
         label="Add document"
+        className={cn(busy && "pointer-events-none opacity-40")}
         onClick={() => navigate("/documents/new")}
       />
     </>
