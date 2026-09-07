@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Bell, CalendarPlus, Check, Copy, Info, LogOut, Mail } from "lucide-react";
+import { Bell, CalendarPlus, Check, Copy, Info, LogOut, Mail, Shield } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -235,6 +235,22 @@ export function Settings() {
             />
           </Card>
         </section>
+
+        {user?.appRoles?.includes("super_admin") && (
+          <section className="space-y-2">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              Platform
+            </h3>
+            <Card className="divide-y divide-white/8 overflow-hidden">
+              <ListItem
+                to="/admin"
+                leading={<Shield className="size-5 text-fg-muted" />}
+                title="App access"
+                subtitle="Approve demos & invite teammates"
+              />
+            </Card>
+          </section>
+        )}
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">

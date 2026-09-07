@@ -90,10 +90,15 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | liveness |
-| GET | `/auth/me` | user + families (null when signed out) |
+| GET | `/auth/me` | user (+ `appRoles`) + families (null when signed out) |
 | POST | `/auth/google/start` | PKCE + state in KV · RL 10/min/IP |
-| GET | `/auth/google/callback` | token exchange, jose ID-token verify, session cookie · RL 10/min/IP |
+| GET | `/auth/google/callback` | token exchange, jose ID-token verify, **closed-signup gate**, session cookie · RL 10/min/IP |
 | POST | `/auth/logout` | revokes session server-side |
+| POST | `/access/demo-requests` | public demo request → email admin + requester · RL 5/h/IP |
+| POST | `/access/review` | tokenized approve/reject from email link · RL 20/h/IP |
+| GET | `/access/admin/demo-requests` | list demo requests · **super_admin** |
+| POST | `/access/admin/demo-requests/:id/approve\|reject` | in-app review · **super_admin** |
+| GET/POST | `/access/admin/grants` · POST `/access/admin/grants/revoke` | invite/revoke app access by email · **super_admin** |
 | GET/POST | `/families` | list / create (creator = owner) |
 | GET | `/families/:id` · `/families/:id/members` · `/families/me/members` | details / member lists |
 | POST | `/families/:id/members` | add **dependent** (admin+) |

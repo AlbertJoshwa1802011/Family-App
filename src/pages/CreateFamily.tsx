@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Home, LogOut, ShieldCheck } from "lucide-react";
+import { Home, LogOut, Shield, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { inputCls } from "../lib/fieldCls";
@@ -18,6 +19,7 @@ export function CreateFamily() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const isSuperAdmin = Boolean(user?.appRoles?.includes("super_admin"));
 
   const create = useMutation({
     mutationFn: () =>
@@ -94,6 +96,16 @@ export function CreateFamily() {
         You'll be the owner. Invite family members afterwards from the Family
         tab — you control who sees what.
       </p>
+
+      {isSuperAdmin && (
+        <Link
+          to="/admin"
+          className="lq lq-press mt-6 flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-fg"
+        >
+          <Shield className="size-4" aria-hidden="true" />
+          Review demo requests
+        </Link>
+      )}
 
       <Button
         type="button"

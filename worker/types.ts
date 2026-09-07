@@ -25,6 +25,13 @@ export interface Env {
   GEMINI_API_KEY?: string;
   /** Secret used to sign/derive session + invite token hashes. */
   SESSION_SECRET?: string;
+  /**
+   * Comma-separated emails that always receive app access + the `super_admin`
+   * role on login (bootstrap for the first platform operator).
+   */
+  SUPER_ADMIN_EMAILS?: string;
+  /** Inbox for new demo-request notifications (defaults to first SUPER_ADMIN_EMAILS). */
+  ACCESS_NOTIFY_EMAIL?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

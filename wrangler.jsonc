@@ -34,6 +34,9 @@
     "crons": ["0 8 * * *"]
   },
   "vars": {
-    "APP_URL": "http://localhost:5173"
+    "APP_URL": "http://localhost:5173",
+    // Bootstrap platform operators (comma-separated). On login these emails
+    // receive durable `super_admin` and always pass the closed-signup gate.
+    "SUPER_ADMIN_EMAILS": ""
   }
 }

@@ -13,6 +13,8 @@ export interface User {
   email: string;
   name?: string | null;
   picture?: string | null;
+  /** Platform roles (e.g. super_admin). Orthogonal to family role. */
+  appRoles?: string[];
 }
 
 export interface Family {

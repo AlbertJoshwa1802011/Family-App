@@ -22,3 +22,8 @@ GEMINI_API_KEY=""
 # Claude API key for document category suggestions + assistant fallback.
 # Optional: without it, category heuristics still work.
 ANTHROPIC_API_KEY=""
+
+# Comma-separated emails that become platform super_admins on login (closed signup).
+SUPER_ADMIN_EMAILS=""
+# Optional inbox for demo-request notifications (defaults to first SUPER_ADMIN_EMAILS).
+ACCESS_NOTIFY_EMAIL=""
