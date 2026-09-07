@@ -2,9 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Circle,
   Flag,
   ListTodo,
   Plus,
@@ -12,54 +9,83 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
-import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { Chip } from "../components/ui/Chip";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { cn } from "../lib/cn";
 import {
   ancestorPath,
   applyTaskView,
   attachChildCounts,
   buildForest,
-  dueStatus,
-  formatTaskPath,
-  isTreeView,
-  priorityLabel,
+  nextPriority,
   searchTasks,
-  type TaskNode,
-  type TaskPriority,
+  sortForest,
+  type TaskLayout,
   type TaskRecord,
-  type TaskView,
+  type TaskSort,
 } from "../lib/taskTree";
+import { TaskBoard } from "../components/tasks/TaskBoard";
+import { TaskComposer } from "../components/tasks/TaskComposer";
+import { TaskTree } from "../components/tasks/TaskTree";
+import type { FamilyMember, TasksResponse } from "../components/tasks/types";
 
-interface TasksResponse {
-  tasks: TaskRecord[];
-}
+export { TaskComposer } from "../components/tasks/TaskComposer";
 
-interface FamilyMember {
-  id: string;
-  userId: string | null;
-  displayName: string | null;
-  name: string | null;
-}
-
-const VIEW_CHIPS: { id: TaskView; label: string }[] = [
+const VIEW_CHIPS = [
   { id: "todo", label: "To do" },
-  { id: "priority", label: "Priority" },
   { id: "due", label: "Due soon" },
   { id: "recent", label: "Recent" },
   { id: "mine", label: "Mine" },
   { id: "completed", label: "Completed" },
+] as const;
+
+type UiTaskView = (typeof VIEW_CHIPS)[number]["id"];
+
+const SORT_CHIPS: { id: TaskSort; label: string }[] = [
+  { id: "due", label: "Due" },
+  { id: "added_desc", label: "Newest" },
+  { id: "added_asc", label: "Oldest" },
+  { id: "priority", label: "Priority" },
 ];
+
+const LAYOUTS: { value: TaskLayout; label: string }[] = [
+  { value: "list", label: "List" },
+  { value: "board", label: "Board" },
+];
+
+const SORT_KEY = "fv.taskSort";
+const LAYOUT_KEY = "fv.taskLayout";
+
+function readStored<T extends string>(
+  key: string,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  try {
+    const v = sessionStorage.getItem(key);
+    if (v && (allowed as readonly string[]).includes(v)) return v as T;
+  } catch {
+    /* private mode */
+  }
+  return fallback;
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
 
 function utcTodayIso(): string {
   const n = new Date();
@@ -81,200 +107,29 @@ function TaskSkeleton() {
   );
 }
 
-function PriorityDot({ priority }: { priority: TaskPriority }) {
-  if (priority === "medium") return null;
-  return (
-    <span
-      className={cn(
-        "inline-block size-1.5 shrink-0 rounded-full",
-        priority === "high" ? "bg-danger" : "bg-fg-subtle",
-      )}
-      title={priorityLabel(priority)}
-    />
-  );
-}
-
-function TaskRow({
-  task,
-  depth,
-  path,
-  expanded,
-  hasVisibleChildren,
-  onToggleExpand,
-  onToggleDone,
-  onAddSubtask,
-  pending,
-  showPath,
-}: {
-  task: TaskRecord;
-  depth: number;
-  path?: string;
-  expanded: boolean;
-  hasVisibleChildren: boolean;
-  onToggleExpand: () => void;
-  onToggleDone: () => void;
-  onAddSubtask: () => void;
-  pending: boolean;
-  showPath: boolean;
-}) {
-  const navigate = useNavigate();
-  const done = task.status === "done";
-  const due = dueStatus(task.dueDate);
-  const indent = Math.min(depth, 6) * 14;
-  const progress =
-    task.childCount > 0 ? `${task.doneChildCount}/${task.childCount}` : null;
-
-  return (
-    <div
-      className="flex min-h-14 items-center gap-1.5 py-2 pr-3"
-      style={{ paddingLeft: 10 + indent }}
-    >
-      {hasVisibleChildren ? (
-        <button
-          type="button"
-          onClick={onToggleExpand}
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-fg-subtle hover:bg-white/5 hover:text-fg"
-        >
-          {expanded ? (
-            <ChevronDown className="size-4" />
-          ) : (
-            <ChevronRight className="size-4" />
-          )}
-        </button>
-      ) : (
-        <span className="size-8 shrink-0" aria-hidden="true" />
-      )}
-
-      <button
-        type="button"
-        onClick={onToggleDone}
-        disabled={pending || task.status === "archived"}
-        aria-label={
-          done ? "Reopen task" : "Mark task complete"
-        }
-        className="flex size-8 shrink-0 items-center justify-center text-fg-subtle transition-colors hover:text-vault-300 disabled:opacity-50"
-      >
-        {done ? (
-          <CheckCircle2 className="size-6 text-success" />
-        ) : (
-          <Circle className="size-6" />
-        )}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => navigate(`/tasks/${task.id}`)}
-        className="min-w-0 flex-1 py-1 text-left"
-      >
-        <div className="flex items-center gap-1.5">
-          <PriorityDot priority={task.priority} />
-          <span
-            className={cn(
-              "truncate text-sm font-medium",
-              done ? "text-fg-subtle line-through" : "text-fg",
-            )}
-          >
-            {task.title}
-          </span>
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-fg-muted">
-          {showPath && path && <span className="truncate">{path}</span>}
-          {task.assignedToName && <span>{task.assignedToName}</span>}
-          {progress && (
-            <span className="font-medium text-vault-300">{progress} done</span>
-          )}
-        </div>
-      </button>
-
-      <div className="flex shrink-0 items-center gap-1">
-        {!done && due && (
-          <Badge tone={due.tone === "neutral" ? "neutral" : due.tone}>
-            {due.label}
-          </Badge>
-        )}
-        {task.priority === "high" && !done && (
-          <span className="sr-only">High priority</span>
-        )}
-        {!done && (
-          <button
-            type="button"
-            onClick={onAddSubtask}
-            aria-label="Add subtask"
-            className="flex size-8 items-center justify-center rounded-lg text-fg-subtle hover:bg-white/5 hover:text-fg"
-          >
-            <Plus className="size-4" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TreeList({
-  forest,
-  expanded,
-  onToggleExpand,
-  onToggleDone,
-  onAddSubtask,
-  pending,
-  allTasks,
-}: {
-  forest: TaskNode[];
-  expanded: Set<string>;
-  onToggleExpand: (id: string) => void;
-  onToggleDone: (t: TaskRecord) => void;
-  onAddSubtask: (parent: TaskRecord) => void;
-  pending: boolean;
-  allTasks: TaskRecord[];
-}) {
-  const rows: { node: TaskNode; path: string }[] = [];
-  function walk(nodes: TaskNode[]) {
-    for (const n of nodes) {
-      rows.push({
-        node: n,
-        path: formatTaskPath(ancestorPath(allTasks, n.id)),
-      });
-      if (expanded.has(n.id) && n.children.length) walk(n.children);
-    }
-  }
-  walk(forest);
-
-  return (
-    <Card className="divide-y divide-white/8 overflow-hidden">
-      {rows.map(({ node }) => (
-        <TaskRow
-          key={node.id}
-          task={node}
-          depth={node.depth}
-          expanded={expanded.has(node.id)}
-          hasVisibleChildren={node.children.length > 0}
-          onToggleExpand={() => onToggleExpand(node.id)}
-          onToggleDone={() => onToggleDone(node)}
-          onAddSubtask={() => onAddSubtask(node)}
-          pending={pending}
-          showPath={false}
-        />
-      ))}
-    </Card>
-  );
-}
-
 export function Tasks() {
   const qc = useQueryClient();
   const { activeFamily, user } = useAuth();
-  const [view, setView] = useState<TaskView>("todo");
-  const [search, setSearch] = useState("");
-  const [composerParent, setComposerParent] = useState<TaskRecord | null | undefined>(
-    undefined,
+  const [view, setView] = useState<UiTaskView>("todo");
+  const [sort, setSort] = useState<TaskSort>(() =>
+    readStored(SORT_KEY, SORT_CHIPS.map((s) => s.id), "due"),
   );
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [layout, setLayout] = useState<TaskLayout>(() =>
+    readStored(LAYOUT_KEY, ["list", "board"] as const, "list"),
+  );
+  const [search, setSearch] = useState("");
+  const [composerParent, setComposerParent] = useState<
+    TaskRecord | null | undefined
+  >(undefined);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [forcedOpen, setForcedOpen] = useState<Set<string>>(new Set());
   const [now] = useState(() => Math.floor(Date.now() / 1000));
   const [todayIso] = useState(() => utcTodayIso());
 
+  const queryKey = ["tasks", activeFamily?.id] as const;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["tasks", activeFamily?.id],
+    queryKey,
     queryFn: () =>
       api<TasksResponse>(`/tasks?familyId=${activeFamily!.id}`),
     enabled: Boolean(activeFamily),
@@ -298,7 +153,49 @@ export function Tasks() {
           status: t.status === "done" ? "open" : "done",
         }),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
+    onMutate: async (t) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<TasksResponse>(queryKey);
+      const nextStatus = t.status === "done" ? "open" : "done";
+      const completedAt = nextStatus === "done" ? Math.floor(Date.now() / 1000) : null;
+      qc.setQueryData<TasksResponse>(queryKey, (old) => {
+        if (!old) return old;
+        return {
+          tasks: old.tasks.map((x) =>
+            x.id === t.id ? { ...x, status: nextStatus, completedAt } : x,
+          ),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _t, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+
+  const cyclePriority = useMutation({
+    mutationFn: (t: TaskRecord) =>
+      api(`/tasks/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ priority: nextPriority(t.priority) }),
+      }),
+    onMutate: async (t) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<TasksResponse>(queryKey);
+      const priority = nextPriority(t.priority);
+      qc.setQueryData<TasksResponse>(queryKey, (old) => {
+        if (!old) return old;
+        return {
+          tasks: old.tasks.map((x) => (x.id === t.id ? { ...x, priority } : x)),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _t, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
   const all = useMemo(
@@ -307,50 +204,81 @@ export function Tasks() {
   );
 
   const viewed = useMemo(() => {
-    const base = applyTaskView(all, {
+    let base = applyTaskView(all, {
       view,
       myMemberId,
       nowSecs: now,
       todayIso,
+      includeDoneChildren: view !== "completed",
     });
-    if (!search.trim()) return base;
-    const hits = searchTasks(base, search);
-    const keep = new Set(hits.map((t) => t.id));
-    for (const t of hits) {
-      for (const a of ancestorPath(all, t.id)) keep.add(a.id);
+    if (search.trim()) {
+      const hits = searchTasks(base, search);
+      const keep = new Set(hits.map((t) => t.id));
+      for (const t of hits) {
+        for (const a of ancestorPath(all, t.id)) keep.add(a.id);
+      }
+      base = all.filter((t) => keep.has(t.id));
     }
-    return all.filter((t) => keep.has(t.id));
+    return base;
   }, [all, view, myMemberId, now, todayIso, search]);
 
-  const forest = useMemo(() => buildForest(viewed), [viewed]);
+  const forest = useMemo(
+    () => sortForest(buildForest(viewed), sort),
+    [viewed, sort],
+  );
 
-  const tree = isTreeView(view);
+  function isExpanded(id: string, depth: number, hasChildren: boolean) {
+    if (!hasChildren) return false;
+    if (search.trim()) return true;
+    if (collapsed.has(id)) return false;
+    if (forcedOpen.has(id)) return true;
+    return depth === 0;
+  }
 
   function toggleExpand(id: string) {
-    setExpanded((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        setForcedOpen((open) => new Set(open).add(id));
+        return next;
+      }
+      // Currently showing (default or forced) → collapse
+      next.add(id);
+      setForcedOpen((open) => {
+        const o = new Set(open);
+        o.delete(id);
+        return o;
+      });
       return next;
     });
   }
 
   function expandAll() {
-    setExpanded(new Set(viewed.filter((t) => t.childCount > 0).map((t) => t.id)));
+    setCollapsed(new Set());
+    setForcedOpen(
+      new Set(
+        viewed.filter((t) => t.childCount > 0).map((t) => t.id),
+      ),
+    );
   }
 
+  function collapseAll() {
+    setForcedOpen(new Set());
+    setCollapsed(
+      new Set(forest.filter((n) => n.children.length > 0).map((n) => n.id)),
+    );
+  }
+
+  const anyForced = forcedOpen.size > 0;
   const composerOpen = composerParent !== undefined;
   const empty = viewed.length === 0 && !composerOpen && !search.trim();
   const noSearchHits = viewed.length === 0 && search.trim().length > 0;
 
-  const emptyCopy: Record<TaskView, { title: string; description: string }> = {
+  const emptyCopy: Record<UiTaskView, { title: string; description: string }> = {
     todo: {
       title: "All done",
       description: "Nothing left on the list. Add a task when something comes up.",
-    },
-    priority: {
-      title: "No open tasks",
-      description: "High-priority work will show up here, strongest first.",
     },
     due: {
       title: "Nothing due soon",
@@ -370,42 +298,64 @@ export function Tasks() {
     },
   };
 
+  const pending = toggle.isPending || cyclePriority.isPending;
+  const openRootCount = forest.length;
+
   return (
     <>
       <AppBar
         title="Tasks"
         back
         trailing={
-          tree && viewed.length > 0 ? (
+          layout === "list" && forest.length > 0 ? (
             <button
               type="button"
-              onClick={() =>
-                expanded.size > 0 ? setExpanded(new Set()) : expandAll()
-              }
+              onClick={() => (anyForced ? collapseAll() : expandAll())}
               className="px-2 text-xs font-medium text-vault-300"
             >
-              {expanded.size > 0 ? "Collapse" : "Expand"}
+              {anyForced ? "Collapse" : "Expand"}
             </button>
           ) : null
         }
       />
       <Page className="space-y-4">
+        <SegmentedControl
+          label="Layout"
+          options={LAYOUTS}
+          value={layout}
+          onChange={(v) => {
+            setLayout(v);
+            writeStored(LAYOUT_KEY, v);
+          }}
+        />
+
         <div className="flex flex-wrap gap-2">
           {VIEW_CHIPS.map((chip) => (
-            <button
+            <Chip
               key={chip.id}
-              type="button"
+              selected={view === chip.id}
               onClick={() => setView(chip.id)}
-              aria-pressed={view === chip.id}
-              className={cn(
-                "lq lq-flat lq-press min-h-9 shrink-0 rounded-full px-3.5 text-xs font-semibold",
-                view === chip.id
-                  ? "lq-primary text-white"
-                  : "text-fg-muted hover:text-fg",
-              )}
             >
               {chip.label}
-            </button>
+            </Chip>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+            Sort
+          </span>
+          {SORT_CHIPS.map((chip) => (
+            <Chip
+              key={chip.id}
+              selected={sort === chip.id}
+              onClick={() => {
+                setSort(chip.id);
+                writeStored(SORT_KEY, chip.id);
+              }}
+            >
+              {chip.label}
+            </Chip>
           ))}
         </div>
 
@@ -437,7 +387,9 @@ export function Tasks() {
               <TaskSkeleton key={i} />
             ))}
           </Card>
-        ) : empty && view === "todo" && all.filter((t) => t.status !== "archived").length === 0 ? (
+        ) : empty &&
+          view === "todo" &&
+          all.filter((t) => t.status !== "archived").length === 0 ? (
           <EmptyState
             icon={ListTodo}
             title="No tasks yet"
@@ -456,10 +408,10 @@ export function Tasks() {
             icon={
               view === "due"
                 ? AlertTriangle
-                : view === "priority"
-                  ? Flag
-                  : view === "completed"
-                    ? CheckCircle2
+                : view === "completed"
+                  ? CheckCircle2
+                  : layout === "board"
+                    ? Flag
                     : ListTodo
             }
             title={noSearchHits ? "No matches" : emptyCopy[view].title}
@@ -469,53 +421,34 @@ export function Tasks() {
                 : emptyCopy[view].description
             }
           />
-        ) : tree ? (
+        ) : layout === "board" ? (
           <section className="space-y-2">
             <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              {VIEW_CHIPS.find((c) => c.id === view)?.label} ({viewed.length})
+              {VIEW_CHIPS.find((c) => c.id === view)?.label} ({openRootCount})
             </h3>
-            <TreeList
+            <TaskBoard
               forest={forest}
-              expanded={search.trim() ? new Set(viewed.map((t) => t.id)) : expanded}
+              isExpanded={isExpanded}
               onToggleExpand={toggleExpand}
               onToggleDone={(t) => toggle.mutate(t)}
               onAddSubtask={(parent) => setComposerParent(parent)}
-              pending={toggle.isPending}
-              allTasks={all}
+              onCyclePriority={(t) => cyclePriority.mutate(t)}
+              pending={pending}
             />
           </section>
         ) : (
           <section className="space-y-2">
             <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              {VIEW_CHIPS.find((c) => c.id === view)?.label} ({viewed.length})
+              {VIEW_CHIPS.find((c) => c.id === view)?.label} ({openRootCount})
             </h3>
-            {view === "priority" ? (
-              <PrioritySections
-                tasks={viewed}
-                allTasks={all}
-                onToggleDone={(t) => toggle.mutate(t)}
-                onAddSubtask={(parent) => setComposerParent(parent)}
-                pending={toggle.isPending}
-              />
-            ) : (
-              <Card className="divide-y divide-white/8 overflow-hidden">
-                {viewed.map((t) => (
-                  <TaskRow
-                    key={t.id}
-                    task={t}
-                    depth={0}
-                    path={formatTaskPath(ancestorPath(all, t.id))}
-                    expanded={false}
-                    hasVisibleChildren={false}
-                    onToggleExpand={() => undefined}
-                    onToggleDone={() => toggle.mutate(t)}
-                    onAddSubtask={() => setComposerParent(t)}
-                    pending={toggle.isPending}
-                    showPath
-                  />
-                ))}
-              </Card>
-            )}
+            <TaskTree
+              forest={forest}
+              isExpanded={isExpanded}
+              onToggleExpand={toggleExpand}
+              onToggleDone={(t) => toggle.mutate(t)}
+              onAddSubtask={(parent) => setComposerParent(parent)}
+              pending={pending}
+            />
           </section>
         )}
 
@@ -527,7 +460,12 @@ export function Tasks() {
             onClose={() => setComposerParent(undefined)}
             onCreated={() => {
               if (composerParent) {
-                setExpanded((prev) => new Set(prev).add(composerParent.id));
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  next.delete(composerParent.id);
+                  return next;
+                });
+                setForcedOpen((prev) => new Set(prev).add(composerParent.id));
               }
             }}
           />
@@ -539,201 +477,5 @@ export function Tasks() {
         onClick={() => setComposerParent(null)}
       />
     </>
-  );
-}
-
-function PrioritySections({
-  tasks,
-  allTasks,
-  onToggleDone,
-  onAddSubtask,
-  pending,
-}: {
-  tasks: TaskRecord[];
-  allTasks: TaskRecord[];
-  onToggleDone: (t: TaskRecord) => void;
-  onAddSubtask: (t: TaskRecord) => void;
-  pending: boolean;
-}) {
-  const groups: { key: TaskPriority; label: string }[] = [
-    { key: "high", label: "High" },
-    { key: "medium", label: "Medium" },
-    { key: "low", label: "Low" },
-  ];
-  return (
-    <div className="space-y-4">
-      {groups.map((g) => {
-        const items = tasks.filter((t) => t.priority === g.key);
-        if (items.length === 0) return null;
-        return (
-          <section key={g.key} className="space-y-2">
-            <h4 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              {g.label} ({items.length})
-            </h4>
-            <Card className="divide-y divide-white/8 overflow-hidden">
-              {items.map((t) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  depth={0}
-                  path={formatTaskPath(ancestorPath(allTasks, t.id))}
-                  expanded={false}
-                  hasVisibleChildren={false}
-                  onToggleExpand={() => undefined}
-                  onToggleDone={() => onToggleDone(t)}
-                  onAddSubtask={() => onAddSubtask(t)}
-                  pending={pending}
-                  showPath
-                />
-              ))}
-            </Card>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-export function TaskComposer({
-  familyId,
-  parent,
-  members,
-  onClose,
-  onCreated,
-}: {
-  familyId: string;
-  parent: TaskRecord | null;
-  members: FamilyMember[];
-  onClose: () => void;
-  onCreated?: (id: string) => void;
-}) {
-  const qc = useQueryClient();
-  const [title, setTitle] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [priority, setPriority] = useState<TaskPriority>(
-    parent?.priority ?? "medium",
-  );
-  const [assignee, setAssignee] = useState("");
-  const [error, setError] = useState("");
-
-  const create = useMutation({
-    mutationFn: () =>
-      api<{ task: TaskRecord }>("/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          familyId,
-          title: title.trim(),
-          dueDate: dueDate || undefined,
-          priority,
-          assignedToMemberId: assignee || undefined,
-          parentTaskId: parent?.id,
-        }),
-      }),
-    onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ["tasks"] });
-      onCreated?.(res.task.id);
-      onClose();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) {
-      setError("What needs doing?");
-      return;
-    }
-    setError("");
-    create.mutate();
-  }
-
-  return (
-    <form onSubmit={submit} noValidate className="mt-2">
-      <Card className="space-y-3 p-4">
-        {parent && (
-          <p className="text-xs text-fg-muted">
-            Subtask of <span className="font-medium text-fg">{parent.title}</span>
-          </p>
-        )}
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-            {parent ? "New subtask" : "New task"}{" "}
-            <span className="text-danger">*</span>
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={parent ? "e.g. Scan the photo page" : "e.g. Renew car insurance"}
-            autoFocus
-            className={inputCls}
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-              Due date
-            </label>
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-              Assign to
-            </label>
-            <select
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">Anyone</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.displayName || m.name || "Member"}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <fieldset>
-          <legend className="mb-1.5 text-xs font-semibold text-fg-muted">
-            Priority
-          </legend>
-          <div className="flex gap-2">
-            {(["low", "medium", "high"] as const).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPriority(p)}
-                aria-pressed={priority === p}
-                className={cn(
-                  "lq lq-flat lq-press min-h-10 flex-1 rounded-full text-sm font-semibold",
-                  priority === p
-                    ? p === "high"
-                      ? "lq-danger text-danger"
-                      : "lq-primary text-white"
-                    : "text-fg-muted",
-                )}
-              >
-                {priorityLabel(p)}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex gap-2">
-          <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
-            {parent ? "Add subtask" : "Add task"}
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card>
-    </form>
   );
 }

@@ -117,8 +117,8 @@ a dependency (see §5).
 | Create document with all fields → list → get → update → **clear fields with null** → trash → audit-logged | `integration-flows` |
 | Record file v1, v2 → version increments, currentFileId advances | `integration-flows` |
 | Create event with attendees → range query finds it → cancel keeps it visible as cancelled | `integration-flows` |
-| Create task → nest subtasks → toggle done (leaves To-do / appears in Completed) → unassign via null → cascade-delete descendants | `integration-flows`, `tasks` |
-| Task views: todo / priority / due / recent / mine / completed; search includes ancestors; depth cap; cycle reject | `tasks`, `taskTree` |
+| Create task → nest subtasks → toggle done (root leaves To-do / appears in Completed; done child stays nested under an open parent) → unassign via null → cascade-delete descendants | `integration-flows`, `tasks` |
+| Task views: todo / priority / due / recent / mine / completed; sorts due/added/priority; search includes ancestors; depth cap; cycle reject | `tasks`, `taskTree` |
 | Contact create → update → delete | `integration-flows` |
 | Invite → accept with matching email → new member can read family docs | `integration-flows` |
 | **Reminder pipeline**: expiring doc → cron run → in-app notification for every active member → second run dedupes → mark read works | `integration-flows` |
