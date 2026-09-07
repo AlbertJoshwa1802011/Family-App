@@ -350,7 +350,7 @@ export function Dashboard() {
             <QuickBubble icon={CalendarDays} label="Calendar" to="/calendar" tone="vault" />
             <QuickBubble icon={ListTodo} label="Tasks" to="/tasks" tone="info" />
             <QuickBubble icon={Contact} label="Contacts" to="/contacts" tone="danger" />
-            <QuickBubble icon={Wallet} label="Expenses" to="/expenses" tone="warning" />
+            <QuickBubble icon={Wallet} label="Money" to="/expenses" tone="warning" />
             <QuickBubble icon={Sparkles} label="Assistant" to="/assistant" tone="success" />
           </div>
         </section>

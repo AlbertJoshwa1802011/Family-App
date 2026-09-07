@@ -293,9 +293,9 @@ worker/
   cron.ts               runExpiryReminders() — range-based scan + per-window dedupe (docs+events+tasks)
   db/schema.ts          ★ single source of truth for all 26 tables
   lib/                   crypto, session, audit, drive, reminders, email, notify, assistant,
-                        expenses, scheduleNotify (who to tell), conflicts (double-booking)
+                        expenses, money, scheduleNotify (who to tell), conflicts (double-booking)
   routes/               auth, families, documents, notifications, events, tasks, contacts,
-                        chat, calendar, expenses, assistant
+                        chat, calendar, expenses, money, assistant
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
@@ -352,7 +352,12 @@ Friendly API error copy lives in `src/lib/api.ts` (`ApiError.code` keeps the mac
 Gemini (`GEMINI_API_KEY`) and falls back to Claude. It loads a
 visibility-filtered D1 snapshot (you, family, members, docs, tasks, events,
 expenses, stats) and can write via tools (add expense/task/event/contact,
-complete a task). Family expenses (`/expenses`) store integer cents. Daily cron
+complete a task). Family expenses (`/expenses`) store integer cents.
+
+**Money settlements (done):** `/expenses` Money page has Settlements | Expenses.
+Settlements use `settlement_destinations` (Mom, Church, …) + `money_movements`
+(`received` / `settled`). Summary exposes available / settled / inHand; any
+family member can log entries (pastor included once invited). Daily cron
 now also reminds open tasks at 7/2/1 days (email + in-app). Documents remain on
 the owner's Google Drive — not GCS.
 

@@ -15,6 +15,7 @@ import { contactRoutes } from "./routes/contacts";
 import { calendarRoutes } from "./routes/calendar";
 import { chatRoutes } from "./routes/chat";
 import { expenseRoutes } from "./routes/expenses";
+import { moneyRoutes } from "./routes/money";
 import { assistantRoutes } from "./routes/assistant";
 import { accessRoutes } from "./routes/access";
 import { csrfProtect } from "./middleware/csrf";
@@ -64,6 +65,7 @@ api.route("/contacts", contactRoutes);
 api.route("/calendar", calendarRoutes);
 api.route("/chat", chatRoutes);
 api.route("/expenses", expenseRoutes);
+api.route("/money", moneyRoutes);
 api.route("/assistant", assistantRoutes);
 api.route("/access", accessRoutes);
 
