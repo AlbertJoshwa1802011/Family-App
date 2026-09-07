@@ -30,6 +30,8 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Comma-separated emails bootstrapped as platform admins on first login. */
   PLATFORM_ADMIN_EMAILS?: string;
+  /** Inbox for new access-request notifications (defaults to bootstrap admin). */
+  ACCESS_NOTIFY_EMAIL?: string;
   /** Google Gemini API key. Without it the assistant returns 501. */
   GEMINI_API_KEY?: string;
   /** Gemini model id. Overridable so the model can be changed without a deploy. */

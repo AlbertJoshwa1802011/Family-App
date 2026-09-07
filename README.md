@@ -12,7 +12,9 @@ migrations (`.github/workflows/deploy.yml`).
 - **Storage:** Documents upload to Cloudflare R2 when bound; otherwise the
   connected family Google Drive (Admin → Storage). R2 is optional.
 - **Auth:** Google OAuth 2.0 (Auth Code + PKCE), opaque session cookie.
-  Money and Vault ask for Face ID / fingerprint (or a 6-digit PIN) each visit.
+  Closed signup — strangers request access; platform admin approves (email
+  lands on `ACCESS_NOTIFY_EMAIL`). Money and Vault ask for Face ID /
+  fingerprint (or a 6-digit PIN) each visit.
 - **Reminders:** Daily Cron → in-app notifications + email via Gmail
   (`albertjoshrock101@gmail.com` after reconnecting Admin → Storage) or Resend.
 - **Contacts:** Two-way sync with Google Contacts (phone address book must
@@ -34,10 +36,9 @@ migrations (`.github/workflows/deploy.yml`).
   slowly).
 - **Emails** — event create/update/cancel, daily expiry/event reminders, test
   send in Settings. Needs `RESEND_API_KEY` and `EMAIL_FROM` on a verified domain.
-- **Navigation** — free-floating coloured bubble (Home, Vault, Docs, Money,
-  Family) like GitHub / Tamil Bible / iOS AssistiveTouch. Drag the whole pill;
-  it coasts with inertia, bounces off the edges, then snaps left or right.
-  Position is remembered. Active tab is a saturated colour, not grey glass.
+- **Navigation** — pinned liquid bottom tabs (Home, Vault, Docs, Money,
+  Family) on phones; tablet rail + laptop sidebar. Active tab uses a
+  saturated colour wash. Long-press slides the pill inside the dock only.
 
 ## Quick start
 

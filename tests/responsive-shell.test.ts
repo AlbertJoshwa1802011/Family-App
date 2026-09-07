@@ -22,12 +22,12 @@ describe("responsive shell — laptop vs mobile", () => {
     expect(shell).toMatch(/lg:flex/);
   });
 
-  it("mobile tabs are a free-floating bubble, not a pinned dock", () => {
-    expect(shell).toContain("snapBubbleToEdge");
-    expect(shell).toContain("stepBubbleMotion");
-    expect(shell).toContain("BUBBLE_NAV_STORAGE_KEY");
-    expect(shell).not.toContain("LONG_PRESS_MS");
-    expect(shell).not.toMatch(/fixed inset-x-0 bottom-0/);
+  it("mobile tabs stay pinned to the bottom edge (not free-floating)", () => {
+    expect(shell).toMatch(/fixed inset-x-0 bottom-0/);
+    expect(shell).toContain("LONG_PRESS_MS");
+    expect(shell).not.toContain("snapBubbleToEdge");
+    expect(shell).not.toContain("stepBubbleMotion");
+    expect(shell).not.toContain("BUBBLE_NAV_STORAGE_KEY");
   });
 
   it("offsets main content for rail (md) and sidebar (lg)", () => {
