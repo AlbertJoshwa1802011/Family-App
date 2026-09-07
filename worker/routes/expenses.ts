@@ -28,6 +28,7 @@ import {
   resolveFinancialActors,
 } from "../lib/expenses/financialActors";
 import { ensureBuiltinCategories } from "../lib/expenses/builtinCategories";
+import { resolveCategoryEmoji } from "../lib/expenses/categoryEmoji";
 import {
   expenseSearchWhere,
   expenseVisibilityWhere,
@@ -94,6 +95,8 @@ const createCategorySchema = z.object({
   name: z.string().min(1).max(80),
   parentCategoryId: z.string().min(1).nullable().optional(),
   icon: z.string().max(40).optional().nullable(),
+  // Money Manager–style emoji; stored in `icon` when lucide icon is omitted.
+  emoji: z.string().trim().min(1).max(16).optional().nullable(),
   color: z.string().max(20).optional().nullable(),
 });
 
@@ -289,7 +292,11 @@ expenseRoutes.get("/categories", requireSession, async (c) => {
     .where(and(...filters))
     .orderBy(schema.expenseCategories.name);
 
-  const decorated = rows.map((r) => ({ ...r, builtin: r.familyId === null }));
+  const decorated = rows.map((r) => ({
+    ...r,
+    builtin: r.familyId === null,
+    emoji: resolveCategoryEmoji(r),
+  }));
   const roots = decorated.filter((r) => !r.parentCategoryId);
   const childrenOf = new Map<string, typeof decorated>();
   for (const r of decorated) {
@@ -349,13 +356,14 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
   }
 
   const id = crypto.randomUUID();
+  const iconValue = data.icon ?? data.emoji ?? null;
   try {
     await db.insert(schema.expenseCategories).values({
       id,
       familyId: data.familyId,
       parentCategoryId: data.parentCategoryId ?? null,
       name: data.name.trim(),
-      icon: data.icon ?? null,
+      icon: iconValue,
       color: data.color ?? null,
       archived: false,
     });
@@ -389,7 +397,16 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
     .from(schema.expenseCategories)
     .where(eq(schema.expenseCategories.id, id))
     .get();
-  return c.json({ category: { ...category!, builtin: false } }, 201);
+  return c.json(
+    {
+      category: {
+        ...category!,
+        builtin: false,
+        emoji: resolveCategoryEmoji(category!),
+      },
+    },
+    201,
+  );
 });
 
 expenseRoutes.post("/categories/:id/archive", requireSession, async (c) => {
@@ -520,6 +537,112 @@ expenseRoutes.get("/", requireSession, async (c) => {
     .reduce((sum, r) => sum + r.amountMinor, 0);
 
   return c.json({ expenses, totalMinor });
+});
+
+/**
+ * GET /expenses/lookup?familyId=&q=
+ *
+ * Fast merchant/note autocomplete while typing a new expense (Money Manager
+ * style). Ranks prefix matches first, then frequency, then recency.
+ */
+expenseRoutes.get("/lookup", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const familyId = c.req.query("familyId");
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+
+  const membership = await requireFamilyMember(c, familyId);
+  if (membership instanceof Response) return membership;
+
+  const rawQ = (c.req.query("q") ?? "").trim().slice(0, 120);
+  const q = rawQ.replace(/[%_]/g, "");
+  const db = getDb(c.env);
+
+  const rows = await db
+    .select({
+      amountMinor: schema.expenses.amountMinor,
+      currency: schema.expenses.currency,
+      expenseDate: schema.expenses.expenseDate,
+      merchant: schema.expenses.merchant,
+      description: schema.expenses.description,
+      categoryId: schema.expenses.categoryId,
+      categoryName: schema.expenseCategories.name,
+      categoryIcon: schema.expenseCategories.icon,
+      categoryBuiltinId: schema.expenseCategories.id,
+    })
+    .from(schema.expenses)
+    .leftJoin(
+      schema.expenseCategories,
+      eq(schema.expenses.categoryId, schema.expenseCategories.id),
+    )
+    .where(
+      and(
+        expenseVisibilityWhere(familyId, userId),
+        or(
+          sql`length(trim(coalesce(${schema.expenses.merchant}, ''))) > 0`,
+          sql`length(trim(coalesce(${schema.expenses.description}, ''))) > 0`,
+        ),
+      ),
+    )
+    .orderBy(desc(schema.expenses.expenseDate), desc(sql`"expenses".rowid`))
+    .limit(100);
+
+  type Agg = {
+    label: string;
+    merchant: string | null;
+    description: string | null;
+    amountMinor: number;
+    currency: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    categoryEmoji: string;
+    count: number;
+    lastExpenseDate: string;
+  };
+  const byLabel = new Map<string, Agg>();
+  const qLower = q.toLowerCase();
+
+  for (const r of rows) {
+    const merchant = r.merchant?.trim() || null;
+    const description = r.description?.trim() || null;
+    const label = merchant || description;
+    if (!label) continue;
+    if (qLower && !label.toLowerCase().includes(qLower)) continue;
+    const key = label.toLowerCase();
+    const existing = byLabel.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    byLabel.set(key, {
+      label,
+      merchant,
+      description: merchant ? description : null,
+      amountMinor: r.amountMinor,
+      currency: r.currency,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      categoryEmoji: resolveCategoryEmoji({
+        id: r.categoryBuiltinId,
+        icon: r.categoryIcon,
+      }),
+      count: 1,
+      lastExpenseDate: r.expenseDate,
+    });
+  }
+
+  const suggestions = [...byLabel.values()]
+    .sort((a, b) => {
+      if (qLower) {
+        const aPrefix = a.label.toLowerCase().startsWith(qLower) ? 1 : 0;
+        const bPrefix = b.label.toLowerCase().startsWith(qLower) ? 1 : 0;
+        if (aPrefix !== bPrefix) return bPrefix - aPrefix;
+      }
+      if (a.count !== b.count) return b.count - a.count;
+      return b.lastExpenseDate.localeCompare(a.lastExpenseDate);
+    })
+    .slice(0, 8);
+
+  return c.json({ suggestions });
 });
 
 /**

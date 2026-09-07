@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, Users } from "lucide-react";
@@ -17,13 +17,31 @@ import {
 } from "../lib/money";
 import { cn } from "../lib/cn";
 import { inputCls as inputClass } from "../lib/fieldCls";
+import {
+  QUICK_CATEGORY_EMOJIS,
+  resolveCategoryEmoji,
+} from "../lib/categoryEmoji";
 
 interface Category {
   id: string;
   name: string;
   icon: string | null;
   color: string | null;
+  emoji?: string;
   parentCategoryId: string | null;
+}
+
+interface LookupSuggestion {
+  label: string;
+  merchant: string | null;
+  description: string | null;
+  amountMinor: number;
+  currency: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryEmoji: string;
+  count: number;
+  lastExpenseDate: string;
 }
 
 interface ExpenseDetail {
@@ -154,8 +172,12 @@ function ExpenseFormFields({
 
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryEmoji, setNewCategoryEmoji] = useState("📦");
   const [newCategoryUnderRoot, setNewCategoryUnderRoot] = useState(true);
   const [categoryCreateError, setCategoryCreateError] = useState<string | null>(null);
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const merchantWrapRef = useRef<HTMLDivElement>(null);
+  const lookupListId = useId();
 
   const categoriesQ = useQuery({
     queryKey: ["expenses", "categories", activeFamilyId],
@@ -163,6 +185,28 @@ function ExpenseFormFields({
       api<{ categories: Category[] }>(`/expenses/categories?familyId=${activeFamilyId}`),
     enabled: Boolean(activeFamilyId),
   });
+
+  const lookupQ = useQuery({
+    queryKey: ["expenses", "lookup", activeFamilyId, merchant.trim()],
+    queryFn: () => {
+      const qs = new URLSearchParams({ familyId: activeFamilyId! });
+      const q = merchant.trim();
+      if (q) qs.set("q", q);
+      return api<{ suggestions: LookupSuggestion[] }>(`/expenses/lookup?${qs}`);
+    },
+    enabled: Boolean(activeFamilyId) && lookupOpen,
+    placeholderData: (prev) => prev,
+  });
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!merchantWrapRef.current?.contains(e.target as Node)) {
+        setLookupOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   const membersQ = useQuery({
     queryKey: ["family", "members", activeFamilyId],
@@ -196,6 +240,7 @@ function ExpenseFormFields({
         body: JSON.stringify({
           familyId: activeFamilyId,
           name,
+          emoji: newCategoryEmoji,
           parentCategoryId:
             newCategoryUnderRoot && rootId ? rootId : null,
         }),
@@ -205,6 +250,7 @@ function ExpenseFormFields({
       setCategoryId(data.category.id);
       setShowNewCategory(false);
       setNewCategoryName("");
+      setNewCategoryEmoji("📦");
       setCategoryCreateError(null);
       await qc.invalidateQueries({ queryKey: ["expenses", "categories"] });
     },
@@ -435,11 +481,9 @@ function ExpenseFormFields({
                             : undefined
                       }
                     >
-                      <span
-                        aria-hidden="true"
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: cat.color ?? "var(--color-fg-subtle)" }}
-                      />
+                      <span aria-hidden="true" className="text-sm leading-none">
+                        {cat.emoji ?? resolveCategoryEmoji(cat)}
+                      </span>
                       {cat.name}
                     </button>
                   ))}
@@ -460,13 +504,9 @@ function ExpenseFormFields({
                               : "border-line text-fg-muted hover:bg-white/5",
                           )}
                         >
-                          <span
-                            aria-hidden="true"
-                            className="size-2 rounded-full"
-                            style={{
-                              backgroundColor: cat.color ?? "var(--color-fg-subtle)",
-                            }}
-                          />
+                          <span aria-hidden="true" className="text-sm leading-none">
+                            {cat.emoji ?? resolveCategoryEmoji(cat)}
+                          </span>
                           {cat.name}
                         </button>
                       ))}
@@ -495,6 +535,27 @@ function ExpenseFormFields({
                       maxLength={80}
                       className={inputClass}
                     />
+                    <div>
+                      <p className="text-xs font-medium text-fg-subtle">Emoji</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {QUICK_CATEGORY_EMOJIS.map((em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            aria-pressed={newCategoryEmoji === em}
+                            onClick={() => setNewCategoryEmoji(em)}
+                            className={cn(
+                              "flex size-9 items-center justify-center rounded-lg border text-base",
+                              newCategoryEmoji === em
+                                ? "border-vault-500/40 bg-vault-500/15"
+                                : "border-line hover:bg-white/5",
+                            )}
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     {activeRootId && (
                       <label className="flex items-center gap-2 text-xs text-fg-muted">
                         <input
@@ -549,18 +610,74 @@ function ExpenseFormFields({
               />
             </div>
 
-            <div>
+            <div ref={merchantWrapRef} className="relative">
               <label htmlFor="merchant" className="text-xs font-medium text-fg-subtle">
                 Merchant
               </label>
               <input
                 id="merchant"
                 value={merchant}
-                onChange={(e) => setMerchant(e.target.value)}
+                onChange={(e) => {
+                  setMerchant(e.target.value);
+                  setLookupOpen(true);
+                }}
+                onFocus={() => setLookupOpen(true)}
                 placeholder="Where did you spend?"
                 maxLength={200}
                 className={cn(inputClass, "mt-1")}
+                role="combobox"
+                aria-expanded={
+                  lookupOpen && (lookupQ.data?.suggestions.length ?? 0) > 0
+                }
+                aria-controls={lookupListId}
+                aria-autocomplete="list"
+                autoComplete="off"
               />
+              {lookupOpen && (lookupQ.data?.suggestions.length ?? 0) > 0 && (
+                <ul
+                  id={lookupListId}
+                  role="listbox"
+                  className="lq lq-chrome absolute inset-x-0 top-[calc(100%+0.35rem)] z-20 max-h-56 overflow-y-auto rounded-2xl py-1 shadow-lg"
+                >
+                  {lookupQ.data!.suggestions.map((s) => (
+                    <li key={`${s.label}-${s.lastExpenseDate}`}>
+                      <button
+                        type="button"
+                        role="option"
+                        className="lq-press flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-white/6"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setMerchant(s.merchant ?? s.label);
+                          if (s.description) setDescription(s.description);
+                          setAmount(
+                            formatMajorFromMinor(s.amountMinor, s.currency),
+                          );
+                          if (s.categoryId) setCategoryId(s.categoryId);
+                          setLookupOpen(false);
+                        }}
+                      >
+                        <span className="text-lg" aria-hidden="true">
+                          {s.categoryEmoji}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-fg">
+                            {s.label}
+                          </span>
+                          <span className="block truncate text-xs text-fg-muted">
+                            {s.categoryName ?? "Uncategorized"}
+                            {s.count > 1 ? ` · ${s.count}×` : ""}
+                            {" · last "}
+                            {s.lastExpenseDate}
+                          </span>
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums text-fg">
+                          {formatMajorFromMinor(s.amountMinor, s.currency)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div>
