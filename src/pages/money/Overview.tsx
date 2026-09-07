@@ -53,7 +53,7 @@ function Figure({
   sub?: string;
 }) {
   return (
-    <Card className="rounded-[28px] border-white/15 bg-white/8 p-4 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+    <Card className="p-4">
       <div className="flex items-center gap-1.5 text-fg-subtle">
         {Icon && <Icon className="size-3.5" aria-hidden="true" />}
         <p className="text-[11px] font-medium uppercase tracking-wide">{label}</p>
@@ -229,9 +229,6 @@ function TrendChart({
   );
 }
 
-const glassBubble =
-  "rounded-[28px] border border-white/15 bg-white/8 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl";
-
 interface Suggestion {
   label: string;
   merchant: string | null;
@@ -257,10 +254,10 @@ function LikelyThisWeek({
 
   if (q.isLoading) {
     return (
-      <div className={cn(glassBubble, "p-4")}>
+      <Card className="p-4">
         <Skeleton className="h-4 w-32" />
         <Skeleton className="mt-3 h-10 w-full" />
-      </div>
+      </Card>
     );
   }
 
@@ -268,7 +265,7 @@ function LikelyThisWeek({
   if (suggestions.length === 0) return null;
 
   return (
-    <div className={cn(glassBubble, "overflow-hidden")}>
+    <Card>
       <div className="px-4 pt-4 pb-2">
         <h2 className="text-sm font-semibold text-fg">Likely this week</h2>
         <p className="text-xs text-fg-muted">Based on your past months</p>
@@ -298,7 +295,7 @@ function LikelyThisWeek({
           );
         })}
       </ul>
-    </div>
+    </Card>
   );
 }
 
@@ -317,10 +314,7 @@ function PrimaryCtas({
         <button
           type="button"
           onClick={() => navigate("/money/expenses/new")}
-          className={cn(
-            glassBubble,
-            "flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]",
-          )}
+          className="liquid-bubble flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]"
         >
           <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
             <Plus className="size-5" aria-hidden="true" />
@@ -333,10 +327,7 @@ function PrimaryCtas({
           onClick={() =>
             window.dispatchEvent(new CustomEvent("family-vault:open-assistant"))
           }
-          className={cn(
-            glassBubble,
-            "flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]",
-          )}
+          className="liquid-bubble flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]"
         >
           <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
             <Sparkles className="size-5" aria-hidden="true" />
@@ -349,10 +340,7 @@ function PrimaryCtas({
       {thisWeekMinor !== null && (
         <Link
           to="/money/expenses"
-          className={cn(
-            glassBubble,
-            "flex min-h-11 items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/10",
-          )}
+          className="liquid-bubble flex min-h-11 items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/10"
         >
           <span className="text-sm text-fg-muted">This week</span>
           <span className="text-sm font-semibold tabular-nums text-fg">
@@ -428,10 +416,10 @@ export function MoneyOverview() {
             </Card>
             <div className="grid grid-cols-2 gap-3">
               {Array.from({ length: 2 }).map((_, i) => (
-                <div key={i} className={cn(glassBubble, "p-4")}>
+                <Card key={i} className="p-4">
                   <Skeleton className="h-10 w-10 rounded-2xl" />
                   <Skeleton className="mt-3 h-4 w-24" />
-                </div>
+                </Card>
               ))}
             </div>
           </>
@@ -452,7 +440,7 @@ export function MoneyOverview() {
           </>
         ) : (
           <>
-            <Card className="relative overflow-hidden rounded-[28px] border-white/15 bg-white/8 p-5 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <Card className="relative overflow-hidden p-5">
               <span
                 aria-hidden="true"
                 className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full bg-vault-500/25 blur-3xl"
@@ -479,7 +467,7 @@ export function MoneyOverview() {
               </div>
 
               {plan.dailyAllowanceMinor !== null && plan.daysLeft > 0 && (
-                <div className="mt-4 rounded-xl border border-line bg-ink-950/40 px-3 py-2.5">
+                <div className="liquid-field mt-4 rounded-2xl px-3 py-2.5">
                   <p className="text-xs text-fg-muted">
                     You can spend{" "}
                     <span className="font-semibold text-vault-300">

@@ -12,6 +12,7 @@ import { MoneySubNav } from "../../components/money/MoneySubNav";
 import { useAuth } from "../../context/AuthContext";
 import { api, ApiError } from "../../lib/api";
 import { formatMoney } from "../../lib/money";
+import { inputCls as inputClass } from "../../lib/fieldCls";
 
 interface ChurchFund {
   slug: string;
@@ -56,8 +57,6 @@ interface LocalFund {
   name: string;
 }
 
-const inputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 function rupees(n: number): string {
   return formatMoney(Math.round(n * 100), "INR");

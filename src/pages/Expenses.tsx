@@ -189,7 +189,7 @@ function TrendStrip({
   const selectedKey = selectedMonth.slice(0, 7);
 
   return (
-    <Card className="rounded-[28px] border-white/15 bg-white/8 p-4 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+    <Card className="p-4">
       <h2 className="text-sm font-semibold text-fg">Last 6 months</h2>
       <div className="mt-3 flex items-end justify-between gap-2">
         {byMonth.map((m) => {
@@ -240,7 +240,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClear}
-      className="inline-flex min-h-8 items-center gap-1 rounded-full border border-white/15 bg-white/10 px-2.5 text-xs text-fg"
+      className="liquid-pill-track inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs text-fg"
     >
       {label}
       <X className="size-3" aria-hidden="true" />
@@ -441,7 +441,7 @@ export function Expenses() {
           ]}
         />
 
-        <Card className="rounded-[28px] border-white/15 bg-white/8 p-5 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+        <Card className="p-5">
           {summaryQ.isLoading ? (
             <>
               <Skeleton className="h-3 w-24" />
@@ -502,7 +502,7 @@ export function Expenses() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search merchant or note…"
-            className="w-full rounded-2xl border border-line bg-surface-2 py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none"
+            className="liquid-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             aria-label="Search expenses"
           />
         </div>
@@ -540,7 +540,7 @@ export function Expenses() {
         )}
 
         {summaryQ.data && summaryQ.data.byCategory.length > 0 && (
-          <Card className="rounded-[28px] border-white/15 bg-white/8 p-4 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          <Card className="p-4">
             <h2 className="text-sm font-semibold text-fg">Where it went</h2>
             <p className="mt-0.5 text-[11px] text-fg-subtle">Tap a slice or row to filter the list</p>
             <div className="mt-3">
@@ -563,7 +563,7 @@ export function Expenses() {
         )}
 
         {summaryQ.data && (
-          <Card className="rounded-[28px] border-white/15 bg-white/8 p-4 shadow-[0_8px_32px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          <Card className="p-4">
             <h2 className="text-sm font-semibold text-fg">This month</h2>
             <p className="mt-0.5 text-[11px] text-fg-subtle">Darker days spent more. Tap a day to zoom in.</p>
             <div className="mt-3">

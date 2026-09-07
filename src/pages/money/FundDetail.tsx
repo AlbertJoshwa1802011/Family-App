@@ -11,6 +11,7 @@ import { Skeleton } from "../../components/ui/Skeleton";
 import { LiquidPillTabs } from "../../components/ui/LiquidPillTabs";
 import { useAuth } from "../../context/AuthContext";
 import { api, ApiError } from "../../lib/api";
+import { inputCls as inputClass } from "../../lib/fieldCls";
 import {
   formatMoney,
   parseMajorToMinor,
@@ -61,8 +62,6 @@ interface ActivityRow {
 
 type Tab = "contributions" | "spends" | "settle" | "activity";
 
-const inputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 function paidAtLabel(secs: number): string {
   return new Intl.DateTimeFormat(undefined, {

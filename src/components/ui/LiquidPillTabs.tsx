@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { MONEY_ACCENT } from "../../lib/liquidGlass";
 
 export interface LiquidPillTab<T extends string> {
   id: T;
@@ -16,11 +17,13 @@ export function LiquidPillTabs<T extends string>({
   value,
   onChange,
   items,
+  accentColor = MONEY_ACCENT,
 }: {
   ariaLabel: string;
   value: T;
   onChange: (id: T) => void;
   items: LiquidPillTab<T>[];
+  accentColor?: string;
 }) {
   const activeIndex = items.findIndex((item) => item.id === value);
 
@@ -31,23 +34,22 @@ export function LiquidPillTabs<T extends string>({
       className="-mx-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div
-        className={cn(
-          "relative w-full overflow-hidden",
-          "rounded-full border border-white/15 bg-white/10 shadow-lg backdrop-blur-2xl",
-        )}
+        className="liquid-pill-track relative w-full overflow-hidden rounded-full"
+        style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (
           <span
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute top-1 bottom-1 rounded-full",
-              "bg-white/18 shadow-inner",
               "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
               "motion-reduce:transition-none",
             )}
             style={{
               left: `calc(${activeIndex} * (100% / ${items.length}) + 4px)`,
               width: `calc(100% / ${items.length} - 8px)`,
+              background: `linear-gradient(180deg, ${accentColor}55, ${accentColor}28)`,
+              boxShadow: `0 0 22px ${accentColor}55, inset 0 1px 0 rgba(255,255,255,0.35)`,
             }}
           />
         )}
@@ -65,9 +67,10 @@ export function LiquidPillTabs<T extends string>({
                 className={cn(
                   "flex min-h-11 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2.5 text-xs font-medium transition-colors",
                   selected
-                    ? "font-semibold text-white"
+                    ? "font-semibold"
                     : "text-fg-subtle/90 hover:text-fg-muted",
                 )}
+                style={selected ? { color: accentColor } : undefined}
               >
                 {Icon ? <Icon className="size-3.5" aria-hidden="true" /> : null}
                 {item.label}

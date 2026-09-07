@@ -119,9 +119,7 @@ function MobileBottomTabs() {
       <div
         ref={barRef}
         className={cn(
-          "pointer-events-auto relative mx-auto max-w-md touch-none select-none overflow-hidden",
-          "rounded-[28px] border border-white/20 shadow-[0_8px_40px_-8px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.28)]",
-          "bg-white/12 backdrop-blur-2xl backdrop-saturate-150",
+          "pointer-events-auto liquid-pill-track relative mx-auto max-w-md touch-none select-none overflow-hidden rounded-[28px]",
           dragging && "scale-[1.015]",
         )}
         style={{ borderColor: `${activeColor}66` }}

@@ -12,9 +12,8 @@ import { api } from "../../lib/api";
 import { formatMajorFromMinor, formatMoney, parseMajorToMinor, todayIsoDate } from "../../lib/money";
 import type { Income } from "../../lib/finance";
 import { cn } from "../../lib/cn";
+import { inputCls as inputClass } from "../../lib/fieldCls";
 
-const inputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
 
 interface Settings {
   savingsTargetKind: "none" | "amount" | "percent";
