@@ -64,6 +64,13 @@ adminRoutes.get("/integrations", async (c) => {
       resend: Boolean(c.env.RESEND_API_KEY),
       gmailStorage: Boolean(storageToken),
     },
+    church: {
+      configured: Boolean(
+        c.env.CONTRIBUTIONS_API_URL?.trim() || c.env.CONTRIBUTIONS_API_TOKEN?.trim(),
+      ),
+      url: (c.env.CONTRIBUTIONS_API_URL ?? "").replace(/\/$/, "") || null,
+      tokenSet: Boolean(c.env.CONTRIBUTIONS_API_TOKEN?.trim()),
+    },
   });
 });
 

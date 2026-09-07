@@ -43,6 +43,8 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
     return c.json(
       {
         error: "church_not_configured",
+        message:
+          "Church funds URL is not set on this Worker. Production uses CONTRIBUTIONS_API_URL in wrangler.jsonc; after deploy, reload Money → Funds.",
         configured: false,
         funds: [],
         purchases: [],
@@ -55,7 +57,13 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
   const fundsRes = await fetchChurchFunds(c.env);
   if (!fundsRes.ok) {
     const status = fundsRes.status === 503 ? 503 : 502;
-    return c.json({ error: fundsRes.error, configured: true }, status);
+    const message =
+      fundsRes.error === "church_auth_failed"
+        ? "The contributions site rejected the Worker token. Re-set CONTRIBUTIONS_API_TOKEN on Worker fam to match ADMIN_API_TOKEN."
+        : fundsRes.error === "church_unreachable"
+          ? "Could not reach the contributions site. Check CONTRIBUTIONS_API_URL."
+          : "Church contributions returned an error. Try again in a minute.";
+    return c.json({ error: fundsRes.error, message, configured: true }, status);
   }
   const purchasesRes = await fetchChurchPurchases(c.env);
   const purchases = purchasesRes.ok ? purchasesRes.purchases : [];

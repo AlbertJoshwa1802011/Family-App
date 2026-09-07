@@ -151,13 +151,25 @@ export function Funds() {
           </Card>
         ) : snapQ.isError ? (
           <Card className="space-y-2 p-4">
-            <p className="text-sm font-semibold text-fg">Church data isn’t connected yet</p>
-            <p className="text-sm text-fg-muted">
-              Live totals come from the contributions site. A family admin must set
-              the Worker secret <span className="font-mono text-xs">CONTRIBUTIONS_API_TOKEN</span>{" "}
-              to the same value as that site’s <span className="font-mono text-xs">ADMIN_API_TOKEN</span>.
-              Steps are in the repo file docs/OPS.md.
+            <p className="text-sm font-semibold text-fg">
+              {snapQ.error instanceof ApiError && snapQ.error.code === "church_auth_failed"
+                ? "Church token was rejected"
+                : snapQ.error instanceof ApiError && snapQ.error.code === "church_unreachable"
+                  ? "Church site unreachable"
+                  : "Church data isn’t connected yet"}
             </p>
+            <p className="text-sm text-fg-muted">
+              {snapQ.error instanceof ApiError && snapQ.error.message
+                ? snapQ.error.message
+                : "Live totals come from the contributions site. After the latest deploy, Money → Funds should load automatically from CONTRIBUTIONS_API_URL. Optional: set Worker secret CONTRIBUTIONS_API_TOKEN on fam if that site requires ADMIN_API_TOKEN."}
+            </p>
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => void snapQ.refetch()}
+            >
+              Try again
+            </Button>
           </Card>
         ) : funds.length === 0 ? (
           <EmptyState

@@ -36,7 +36,7 @@ describe("/api/church", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /snapshot without a machine token → 503 church_not_configured", async () => {
+  it("GET /snapshot without URL or token → 503 church_not_configured", async () => {
     const { env, sqlite } = createTestEnv();
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
@@ -50,6 +50,75 @@ describe("/api/church", () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("church_not_configured");
+  });
+
+  it("GET /snapshot works with CONTRIBUTIONS_API_URL alone (no token)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/funds")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            funds: [
+              {
+                slug: "tech-fund",
+                name: "Tech fund",
+                totalCollected: 1000,
+                spentOnProducts: 250,
+                availableBalance: 750,
+                status: "active",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/purchases")) {
+        return new Response(JSON.stringify({ purchases: [] }), { status: 200 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const { env, sqlite } = createTestEnv({
+      CONTRIBUTIONS_API_URL: "https://church.example",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+    const res = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      configured: boolean;
+      funds: { slug: string }[];
+    };
+    expect(body.configured).toBe(true);
+    expect(body.funds[0]?.slug).toBe("tech-fund");
+  });
+
+  it("GET /snapshot maps upstream 401 to church_auth_failed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("unauthorized", { status: 401 }),
+    );
+    const { env, sqlite } = createTestEnv({
+      CONTRIBUTIONS_API_TOKEN: "bad",
+      CONTRIBUTIONS_API_URL: "https://church.example",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+    const res = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe("church_auth_failed");
   });
 
   it("GET /snapshot returns live funds and purchases when configured", async () => {
