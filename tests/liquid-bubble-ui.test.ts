@@ -153,6 +153,13 @@ describe("Money sub-nav matches Home/Vault/Docs liquid pill", () => {
     expect(spending).toMatch(/tabular-nums/);
   });
 
+  it("AccountMenu profile sheet is liquid-chrome (not flat bg-surface)", () => {
+    const menu = read("src/components/AccountMenu.tsx");
+    expect(menu).toContain("liquid-bubble liquid-chrome");
+    expect(menu).toContain("liquid-press");
+    expect(menu).not.toMatch(/border border-line bg-surface shadow-pop/);
+  });
+
   it("assistant sheet is an edge-to-edge phone sheet, not a fully-rounded liquid bubble", () => {
     const src = read("src/components/money/Assistant.tsx");
     expect(src).toContain("rounded-t-3xl");
