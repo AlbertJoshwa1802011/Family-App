@@ -8,7 +8,8 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -62,9 +63,11 @@ export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
   const calendarFromSave = (location.state as { calendar?: CalendarSyncState } | null)
     ?.calendar;
+  const autoSyncTried = useRef(false);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["events", id],
@@ -90,6 +93,27 @@ export function EventDetailPage() {
       await qc.invalidateQueries({ queryKey: ["events", id] });
     },
   });
+
+  // After OAuth return (?sync=1) or a save that couldn't write Calendar, push once.
+  useEffect(() => {
+    if (!data?.event || autoSyncTried.current || syncCalendar.isPending) return;
+    const wantsSync = searchParams.get("sync") === "1";
+    const saveMissed =
+      calendarFromSave?.status === "needs_reconnect" ||
+      calendarFromSave?.status === "skipped_no_token" ||
+      calendarFromSave?.status === "needs_api_enabled";
+    if (!wantsSync && !saveMissed) return;
+    if (data.event.googleCalendarEventId && !wantsSync) return;
+    autoSyncTried.current = true;
+    if (wantsSync) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("sync");
+      setSearchParams(next, { replace: true });
+    }
+    syncCalendar.mutate();
+    // Intentionally once per mount when the trigger is present.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is unstable
+  }, [data?.event, calendarFromSave, searchParams, setSearchParams]);
 
   const cancelMutation = useMutation({
     mutationFn: () => api(`/events/${id}/cancel`, { method: "POST" }),
@@ -201,23 +225,32 @@ export function EventDetailPage() {
 
         <Card className="space-y-3 p-4">
           <p className="text-xs font-semibold text-fg-muted">Phone calendar</p>
-          <p className="text-sm text-fg-subtle">
+          <p
+            className={
+              (syncCalendar.data?.calendar?.status ?? calendarFromSave?.status) === "synced" ||
+              ev.googleCalendarEventId
+                ? "text-sm text-success"
+                : "text-sm text-fg-subtle"
+            }
+          >
             {syncCalendar.data?.calendar?.message
               ?? calendarFromSave?.message
               ?? (ev.googleCalendarEventId
                 ? "This event is on your Google Calendar."
-                : "Not on Google Calendar yet. Enable Calendar API on the Cloud project, connect Calendar in Settings, then tap Sync.")}
+                : "Not on Google Calendar yet. Connect Calendar once, then Sync — it appears on your phone immediately.")}
           </p>
           {(syncCalendar.data?.calendar?.status === "needs_reconnect"
             || syncCalendar.data?.calendar?.status === "needs_api_enabled"
+            || syncCalendar.data?.calendar?.status === "skipped_no_token"
             || calendarFromSave?.status === "needs_reconnect"
             || calendarFromSave?.status === "needs_api_enabled"
+            || calendarFromSave?.status === "skipped_no_token"
             || !ev.googleCalendarEventId) && (
             <a
-              href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(`/calendar/events/${ev.id}`)}`}
+              href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(`/calendar/events/${ev.id}?sync=1`)}`}
               className="block text-center text-xs font-medium text-vault-400"
             >
-              Reconnect Google Calendar
+              Connect Google Calendar
             </a>
           )}
           <Button
@@ -226,14 +259,14 @@ export function EventDetailPage() {
             loading={syncCalendar.isPending}
             onClick={() => syncCalendar.mutate()}
           >
-            Sync to Google Calendar
+            Sync to Google Calendar now
           </Button>
           <a
             href={`/api/calendar/events/${ev.id}/ics`}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"
           >
             <Download className="size-4" />
-            Download .ics
+            Download .ics (backup)
           </a>
         </Card>
 

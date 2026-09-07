@@ -259,6 +259,81 @@ describe("Event edit hydration + notify", () => {
     expect(created.calendar.message).toMatch(/Calendar API/i);
   });
 
+  it("known missing calendar.events scope is needs_reconnect without calling Calendar API", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+    await env.KV.put(`user:access_token:${alice.userId}`, "ya29.test");
+    await env.KV.put(
+      `user:google_scopes:${alice.userId}`,
+      JSON.stringify(["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"]),
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response("should not hit Google", { status: 500 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Needs calendar scope",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      event: { googleCalendarEventId: string | null };
+      calendar: { status: string; message: string };
+    };
+    expect(created.calendar.status).toBe("needs_reconnect");
+    expect(created.calendar.message).toMatch(/Connect Google Calendar/i);
+    expect(created.event.googleCalendarEventId).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("successful Calendar write returns googleCalendarEventId on the event", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+    await env.KV.put(
+      `user:google_scopes:${alice.userId}`,
+      JSON.stringify(["https://www.googleapis.com/auth/calendar.events"]),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }));
+      }
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "POST") {
+        return new Response(JSON.stringify({ id: "gcal-instant" }), { status: 200 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Instant phone event",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      event: { id: string; googleCalendarEventId: string | null };
+      calendar: { status: string; googleCalendarEventId: string | null };
+    };
+    expect(created.calendar.status).toBe("synced");
+    expect(created.calendar.googleCalendarEventId).toBe("gcal-instant");
+    expect(created.event.googleCalendarEventId).toBe("gcal-instant");
+  });
+
   it("POST /events/:id/sync-calendar retries a Google write", async () => {
     const { env, sqlite } = createTestEnv({
       GOOGLE_CLIENT_ID: "cid",

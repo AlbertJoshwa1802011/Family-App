@@ -137,9 +137,10 @@ export function Funds() {
 
         <Card className="p-4">
           <p className="text-sm text-fg-muted">
-            Collection and purchase totals come from the church contributions
-            app. Record a monthly settlement here after you reconcile the bank
-            — no need to re-enter every contribution.
+            Live collection and purchase totals come from the church contributions
+            site. This page is for <span className="font-medium text-fg">settlements only</span>{" "}
+            — reconcile the bank, then record the month here. Do not re-enter
+            every contribution.
           </p>
         </Card>
 

@@ -9,7 +9,13 @@ import type { Env } from "../types";
 import type { Db } from "../db/client";
 import { schema } from "../db/client";
 import { eq } from "drizzle-orm";
-import { classifyGoogleApiError, getUserGoogleAccessToken } from "./google";
+import {
+  GOOGLE_SCOPES,
+  classifyGoogleApiError,
+  getUserGoogleAccessToken,
+  scopesKey,
+  userHasScope,
+} from "./google";
 
 const CAL_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
@@ -73,13 +79,13 @@ function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
 export function calendarStatusMessage(status: CalendarSyncStatus): string {
   switch (status) {
     case "synced":
-      return "Saved to Google Calendar.";
+      return "Saved to Google Calendar — it should show on your phone now.";
     case "skipped_no_token":
-      return "Sign in again in Settings to grant Google Calendar access.";
+      return "Connect Google Calendar once (Settings or the button below), then Sync.";
     case "needs_reconnect":
-      return "Reconnect Google Calendar in Settings (calendar.events).";
+      return "Google Calendar permission is missing. Tap Connect Google Calendar, accept calendar access, then Sync.";
     case "needs_api_enabled":
-      return "Enable Google Calendar API on the Cloud project, then tap Sync again.";
+      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then tap Sync again.";
     case "failed":
       return "Google Calendar could not save this event. Try Sync again or download an .ics file.";
   }
@@ -126,6 +132,16 @@ export async function upsertGoogleCalendarEvent(
   try {
     const token = await getUserGoogleAccessToken(env, userId);
     if (!token) return result("skipped_no_token", ev.googleCalendarEventId);
+
+    // If we already know this login never granted calendar.events, fail fast
+    // with a reconnect prompt instead of a opaque Google 403.
+    const scopesKnown = Boolean(await env.KV.get(scopesKey(userId)));
+    if (
+      scopesKnown &&
+      !(await userHasScope(env, userId, GOOGLE_SCOPES.calendarEvents))
+    ) {
+      return result("needs_reconnect", ev.googleCalendarEventId);
+    }
 
     const body = JSON.stringify(toGcalBody(ev));
     let res: Response;

@@ -256,6 +256,18 @@ function EventFormFields({
     <>
       <AppBar title={isEdit ? "Edit event" : "New event"} back />
       <Page className="space-y-4">
+        <Card className="space-y-2 p-4">
+          <p className="text-sm text-fg-muted">
+            Saving writes this event to <span className="font-medium text-fg">Google Calendar instantly</span>{" "}
+            (Calendar API). Connect Calendar once if you have not already.
+          </p>
+          <a
+            href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(isEdit && id ? `/calendar/events/${id}/edit` : "/calendar/events/new")}`}
+            className="text-xs font-medium text-vault-400"
+          >
+            Connect Google Calendar
+          </a>
+        </Card>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">

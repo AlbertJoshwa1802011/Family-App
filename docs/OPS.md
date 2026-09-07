@@ -101,12 +101,15 @@ Until verification, Google can revoke Contacts access. Login + Drive
 
 ## 6. Google Calendar sync not writing to the phone
 
-Calendar write uses the **Google Calendar API** (`calendar.events` on login).
+Calendar write uses the **Google Calendar API**. Ordinary login does **not**
+ask for `calendar.events` (that scope is sensitive and triggers Google’s
+unverified-app warning). Grant it once via **Connect Google Calendar**.
+
 The ICS subscribe URL is a backup and can take hours to refresh in Google Calendar.
 
 1. Google Cloud Console → **APIs & Services → Library** → search **Google Calendar API** → **Enable**.
-2. In the app: Settings → Google Calendar → **Connect** (or open an event → Reconnect).
-3. Open the event → **Sync to Google Calendar**. Existing events do not backfill until you tap Sync (or edit and save).
+2. In the app: Settings → **Connect Google Calendar**, or open an event → Connect.
+3. Create or edit an event and save — it should appear on the phone immediately. Existing events: open them → **Sync to Google Calendar now**.
 4. If the banner says the API is disabled, you skipped step 1. Reconnect will not help until the API is enabled.
 
 ## 7. Enable Cloudflare R2 (document files)

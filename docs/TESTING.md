@@ -61,11 +61,14 @@ These cases lock the bugs this branch fixed. They live in
 - Successful Calendar upsert stores `googleCalendarEventId`.
 
 ### Google Calendar + ICS
-- OAuth start includes `calendar.events`, `drive.file`, and `include_granted_scopes=true`.
+- OAuth start includes `calendar.events` only with `connect=calendar` (+ `prompt=consent`).
 - Timed ICS uses `DTSTART:`; all-day ICS uses `VALUE=DATE`.
 - Feed token is 401 without a session; `url` is null before mint; rotate invalidates the old URL.
 - Feed does not leak another family's events or private document expiries.
 - Per-event ICS is 401 unauthenticated, 404 for another family / unknown id.
+- Create/PATCH re-reads the event so `googleCalendarEventId` is present after a successful write.
+- Known missing `calendar.events` scope → `needs_reconnect` without calling Calendar API.
+- Calendar API disabled → `needs_api_enabled`.
 
 ### Church funds
 - Snapshot / settle require a session.

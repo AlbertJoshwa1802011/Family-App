@@ -104,4 +104,12 @@ describe("calendarStatusMessage", () => {
   it("tells the user to enable the Calendar API", () => {
     expect(calendarStatusMessage("needs_api_enabled")).toMatch(/Calendar API/i);
   });
+
+  it("tells the user the event is on their phone when synced", () => {
+    expect(calendarStatusMessage("synced")).toMatch(/phone/i);
+  });
+
+  it("points needs_reconnect at Connect Google Calendar", () => {
+    expect(calendarStatusMessage("needs_reconnect")).toMatch(/Connect Google Calendar/i);
+  });
 });

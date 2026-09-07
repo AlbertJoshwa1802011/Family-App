@@ -226,6 +226,13 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     }
   }
 
+  // Re-read so googleCalendarEventId from a successful sync is in the payload.
+  const latest = await db
+    .select()
+    .from(schema.events)
+    .where(eq(schema.events.id, eventId))
+    .get();
+
   try {
     await notifyEventChange(c.env, db, {
       familyId,
@@ -240,7 +247,7 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     console.error("[events] notify failed:", err);
   }
 
-  return c.json({ event, calendar }, 201);
+  return c.json({ event: latest ?? event, calendar }, 201);
 });
 
 // GET /events/:id — get event with attendees.
@@ -347,24 +354,30 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     }
   }
 
+  const latest = await db
+    .select()
+    .from(schema.events)
+    .where(eq(schema.events.id, eventId))
+    .get();
+
   try {
     await notifyEventChange(c.env, db, {
       familyId: event.familyId,
       actorUserId: userId,
       eventId,
-      title: updatedEvent?.title ?? event.title,
+      title: latest?.title ?? updatedEvent?.title ?? event.title,
       kind: "updated",
       attendeeMemberIds: updates.attendeeMemberIds ?? [],
       whenLabel: whenLabel(
-        updatedEvent?.startAt ?? event.startAt,
-        updatedEvent?.allDay ?? event.allDay,
+        latest?.startAt ?? updatedEvent?.startAt ?? event.startAt,
+        latest?.allDay ?? updatedEvent?.allDay ?? event.allDay,
       ),
     });
   } catch (err) {
     console.error("[events] notify failed:", err);
   }
 
-  return c.json({ event: updatedEvent, calendar });
+  return c.json({ event: latest ?? updatedEvent, calendar });
 });
 
 // DELETE /events/:id — soft delete (status=trashed).

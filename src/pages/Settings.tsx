@@ -325,9 +325,10 @@ function CalendarFeedCard() {
       </h3>
       <Card className="space-y-3 p-4">
         <p className="text-sm text-fg-muted">
-          Events write to your Google Calendar on save. If sync failed, open the
-          event and tap Sync, or Connect Google Calendar above. The ICS feed is
-          a backup (Google may take hours to refresh a feed).
+          Events write to your Google Calendar on save (instant). Use
+          Connections → Google Calendar above if Sync says permission is
+          missing. The ICS feed below is only a backup — Google may take hours
+          to refresh a feed.
         </p>
         {shown && (
           <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
