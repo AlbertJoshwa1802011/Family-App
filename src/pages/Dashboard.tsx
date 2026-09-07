@@ -7,6 +7,7 @@ import {
   Contact,
   FileText,
   ListTodo,
+  NotebookPen,
   Plus,
   Sparkles,
   Users,
@@ -349,6 +350,7 @@ export function Dashboard() {
           <div className="-mx-4 flex justify-between gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <QuickBubble icon={CalendarDays} label="Calendar" to="/calendar" tone="vault" />
             <QuickBubble icon={ListTodo} label="Tasks" to="/tasks" tone="info" />
+            <QuickBubble icon={NotebookPen} label="Notes" to="/notes" tone="success" />
             <QuickBubble icon={Contact} label="Contacts" to="/contacts" tone="danger" />
             <QuickBubble icon={Wallet} label="Money" to="/expenses" tone="warning" />
             <QuickBubble icon={Sparkles} label="Assistant" to="/assistant" tone="success" />
