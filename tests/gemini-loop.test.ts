@@ -49,6 +49,7 @@ describe("runAssistant Gemini loop", () => {
                           name: "add_expense",
                           args: { amountMajor: 70, description: "noodles" },
                         },
+                        thoughtSignature: "sig-abc-123",
                       },
                     ],
                   },
@@ -96,8 +97,20 @@ describe("runAssistant Gemini loop", () => {
     expect(bodies).toHaveLength(2);
     const secondContents = bodies[1].contents as {
       role: string;
-      parts: { functionResponse?: { name: string; id?: string } }[];
+      parts: {
+        functionCall?: { name: string; id?: string };
+        functionResponse?: { name: string; id?: string };
+        thoughtSignature?: string;
+      }[];
     }[];
+    const modelToolTurn = secondContents.find((c) => c.parts.some((p) => p.functionCall));
+    expect(modelToolTurn?.role).toBe("model");
+    expect(modelToolTurn?.parts[0].thoughtSignature).toBe("sig-abc-123");
+    expect(modelToolTurn?.parts[0].functionCall).toMatchObject({
+      name: "add_expense",
+      id: "call_1",
+    });
+
     const toolResultTurn = secondContents.find((c) =>
       c.parts.some((p) => p.functionResponse),
     );
@@ -113,6 +126,17 @@ describe("runAssistant Gemini loop", () => {
       string
     >;
     expect(headers["x-goog-api-key"]).toBe("test-key");
+  });
+
+  it("maps missing thought_signature 400s to a clear message", () => {
+    expect(
+      friendlyGeminiMessage(
+        new GeminiError(
+          "Function call is missing a thought_signature in functionCall parts.",
+          400,
+        ),
+      ),
+    ).toMatch(/thought signature/i);
   });
 
   it("falls back to the next model when the preferred id 404s", async () => {
