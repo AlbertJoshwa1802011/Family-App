@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HandCoins } from "lucide-react";
@@ -101,16 +101,13 @@ export function Funds() {
   const funds = snapQ.data?.funds ?? [];
   const selected = funds.find((f) => f.slug === fundSlug) ?? funds[0];
   const effectiveSlug = fundSlug || selected?.slug || "";
+  const suggestedDueRupees =
+    selected && (selected.suggestedDueMinor ?? 0) > 0
+      ? String((selected.suggestedDueMinor ?? 0) / 100)
+      : "";
+  const dueRupeesValue = dueTouched ? dueRupees : suggestedDueRupees;
 
-  useEffect(() => {
-    if (!selected || dueTouched) return;
-    const suggested = (selected.suggestedDueMinor ?? 0) / 100;
-    if (suggested > 0) {
-      setDueRupees(String(suggested));
-    }
-  }, [selected, dueTouched]);
-
-  const dueMinor = parseRupees(dueRupees);
+  const dueMinor = parseRupees(dueRupeesValue);
   const paidMinor = parseRupees(paidRupees);
   const carryMinor =
     dueMinor != null && paidMinor != null && paidMinor <= dueMinor
@@ -319,7 +316,7 @@ export function Funds() {
             <input
               id="dueAmount"
               inputMode="decimal"
-              value={dueRupees}
+              value={dueRupeesValue}
               onChange={(e) => {
                 setDueTouched(true);
                 setDueRupees(e.target.value);
