@@ -543,7 +543,7 @@ describe("Church snapshot + settle", () => {
     expect(res.status).toBe(401);
   });
 
-  it("POST /settle without machine token → 503", async () => {
+  it("POST /settle without URL or token → 503", async () => {
     const { env, sqlite } = createTestEnv();
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);

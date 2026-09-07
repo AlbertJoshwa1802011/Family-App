@@ -62,6 +62,24 @@ function rupees(n: number): string {
   return formatMoney(Math.round(n * 100), "INR");
 }
 
+function ChurchSnapshotError({ error }: { error: unknown }) {
+  const code = error instanceof ApiError ? error.code : undefined;
+  const unreachable =
+    code === "church_unreachable" || code === "church_upstream_error";
+  const title = unreachable
+    ? "Couldn’t load church totals"
+    : "Church data isn’t connected yet";
+  const body = unreachable
+    ? "The contributions site didn’t respond. Try again in a moment."
+    : "Live totals are public on the contributions site. This Worker needs CONTRIBUTIONS_API_URL (already in wrangler.jsonc for production). Reload after deploy.";
+  return (
+    <Card className="space-y-2 p-4">
+      <p className="text-sm font-semibold text-fg">{title}</p>
+      <p className="text-sm text-fg-muted">{body}</p>
+    </Card>
+  );
+}
+
 export function Funds() {
   const { activeFamilyId } = useAuth();
   const qc = useQueryClient();
@@ -150,15 +168,7 @@ export function Funds() {
             <Skeleton className="h-10 w-2/3" />
           </Card>
         ) : snapQ.isError ? (
-          <Card className="space-y-2 p-4">
-            <p className="text-sm font-semibold text-fg">Church data isn’t connected yet</p>
-            <p className="text-sm text-fg-muted">
-              Live totals come from the contributions site. A family admin must set
-              the Worker secret <span className="font-mono text-xs">CONTRIBUTIONS_API_TOKEN</span>{" "}
-              to the same value as that site’s <span className="font-mono text-xs">ADMIN_API_TOKEN</span>.
-              Steps are in the repo file docs/OPS.md.
-            </p>
-          </Card>
+          <ChurchSnapshotError error={snapQ.error} />
         ) : funds.length === 0 ? (
           <EmptyState
             icon={HandCoins}

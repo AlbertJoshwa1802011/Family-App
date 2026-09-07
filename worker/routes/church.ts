@@ -1,8 +1,9 @@
 /**
  * Church fund snapshot + settlements.
  *
- * Live collected / spent numbers come from the contributions Pages app.
- * This Worker only stores monthly settlement records the family adds here.
+ * Live collected / spent numbers come from the contributions Pages app
+ * (public GET /api/funds and /api/purchases). This Worker only stores monthly
+ * settlement records the family adds here.
  */
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";

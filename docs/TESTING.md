@@ -38,7 +38,7 @@ One TestEnv is created per `describe` (migrations are expensive; never per-case)
 | `tests/catalog/finance-1000.test.ts` | POST incomes 1–500 × 2 visibility, cadence cycle | 1000+ |
 | `tests/catalog/wishlist-1000.test.ts` | POST cost 1–500 × 2 visibility, priority 1–5 | 1000+ |
 | `tests/catalog/items-1000.test.ts` | POST type `note`, 500 titles × 2 visibility | 1000+ |
-| `tests/catalog/church-1000.test.ts` | Settle: 500 invalid `periodKey` → 400; 504 valid months without token → 503 | 1000+ |
+| `tests/catalog/church-1000.test.ts` | Settle: 500 invalid `periodKey` → 400; 504 valid months without URL/token → 503 | 1000+ |
 | `tests/catalog/expiry-days.test.ts` | `expiryStatus` for day offsets −250…+749 at pinned UTC midnight | 1000 |
 | `tests/catalog/money-1000.test.ts` | `formatMajorFromMinor` ↔ `parseMajorToMinor` for 200 amounts × 5 currencies | 1000 |
 | `tests/catalog/bubble-1000.test.ts` | `clampBubble` / `snapBubbleToEdge` across 200 widths × 5 heights | 1000+ |
@@ -72,7 +72,8 @@ These cases lock the bugs this branch fixed. They live in
 
 ### Church funds
 - Snapshot / settle require a session.
-- Missing `CONTRIBUTIONS_API_TOKEN` → `503 church_not_configured`.
+- Missing both `CONTRIBUTIONS_API_URL` and `CONTRIBUTIONS_API_TOKEN` → `503 church_not_configured`.
+- `CONTRIBUTIONS_API_URL` alone is enough for public fund/purchase totals (no Authorization header).
 - Unknown fund → 404; other family → 404; invalid `periodKey` → `400 validation_error`.
 - Duplicate month → 409; upstream 500 → 502.
 - Settle stores rupees as minor units (`1000` → `100000`) and snapshot lists it.

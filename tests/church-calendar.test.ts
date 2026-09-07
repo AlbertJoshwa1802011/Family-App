@@ -36,7 +36,7 @@ describe("/api/church", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /snapshot without a machine token → 503 church_not_configured", async () => {
+  it("GET /snapshot without URL or token → 503 church_not_configured", async () => {
     const { env, sqlite } = createTestEnv();
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
@@ -50,6 +50,78 @@ describe("/api/church", () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("church_not_configured");
+  });
+
+  it("GET /snapshot reads public totals with URL only (no machine token)", async () => {
+    const seen: { url: string; auth: string | null }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      seen.push({ url, auth: headers.get("Authorization") });
+      if (url.includes("/api/funds")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            funds: [
+              {
+                slug: "tech-contributions",
+                name: "Tech Fund",
+                totalCollected: 38419,
+                spentOnProducts: 28999,
+                availableBalance: 9420,
+                status: "active",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/purchases")) {
+        return new Response(
+          JSON.stringify({
+            purchases: [
+              {
+                id: "P1",
+                name: "Monitor",
+                cost: 2500,
+                date: "2026-07-07",
+                fund: "tech-contributions",
+                status: "Active",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const { env, sqlite } = createTestEnv({
+      CONTRIBUTIONS_API_URL: "https://church.example",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+
+    const res = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      configured: boolean;
+      funds: { slug: string; availableBalance: number }[];
+      purchases: { name: string; amount: number }[];
+    };
+    expect(body.configured).toBe(true);
+    expect(body.funds[0].slug).toBe("tech-contributions");
+    expect(body.funds[0].availableBalance).toBe(9420);
+    expect(body.purchases[0].name).toBe("Monitor");
+    expect(body.purchases[0].amount).toBe(2500);
+    expect(seen.some((s) => s.url === "https://church.example/api/funds")).toBe(true);
+    expect(seen.every((s) => s.auth === null)).toBe(true);
   });
 
   it("GET /snapshot returns live funds and purchases when configured", async () => {
@@ -117,6 +189,37 @@ describe("/api/church", () => {
     expect(body.purchases[0].name).toBe("Mic");
   });
 
+  it("GET /snapshot sends Bearer token when CONTRIBUTIONS_API_TOKEN is set", async () => {
+    const auths: (string | null)[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      auths.push(new Headers(init?.headers).get("Authorization"));
+      const url = String(input);
+      if (url.includes("/api/funds")) {
+        return new Response(JSON.stringify({ success: true, funds: [] }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ purchases: [] }), { status: 200 });
+    });
+
+    const { env, sqlite } = createTestEnv({
+      CONTRIBUTIONS_API_URL: "https://church.example",
+      CONTRIBUTIONS_API_TOKEN: "tok",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+    const res = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    expect(res.status).toBe(200);
+    expect(auths.length).toBeGreaterThan(0);
+    expect(auths.every((h) => h === "Bearer tok")).toBe(true);
+  });
+
   it("POST /settle snapshots live totals for the month", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(
@@ -138,7 +241,7 @@ describe("/api/church", () => {
     });
 
     const { env, sqlite } = createTestEnv({
-      CONTRIBUTIONS_API_TOKEN: "tok",
+      CONTRIBUTIONS_API_URL: "https://church.example",
     });
     const owner = seedUser(sqlite);
     const family = seedFamily(sqlite, owner.id);
