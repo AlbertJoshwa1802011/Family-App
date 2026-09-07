@@ -27,13 +27,14 @@ the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (26 tables, 7 migrations)
+## 2. Database Schema (28 tables, 12 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
-`0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements).
+`0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
+`0011` (notebooks + notes).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -59,6 +60,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
 | `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
+| `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
+| `notes` | Free-form notes (private/family, soft-delete trash) | 0011 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
 | `digest_log` | Dedupe for Monday weekly digest | 0004 |
@@ -77,6 +80,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
 - **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
+- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|other`; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
 
 ---
 
@@ -128,6 +132,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
+| GET/POST | `/notes/notebooks` · PATCH/DELETE `/notes/notebooks/:id` | note folders; DELETE unfiles notes |
+| GET/POST | `/notes` · GET/PATCH/DELETE `/notes/:id` · POST `/notes/:id/restore` | notebook notes (private visibility filtered; soft-delete trash; `?q` `?kind` `?notebookId` `?trashed=1`) |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
 | GET | `/money/summary?familyId` | settlement balances (available / settled / inHand) + destinations + movements |
@@ -144,6 +150,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 **POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `priority` enum `["low","medium","high"]` (default medium); `parentTaskId` must belong to the same family; nesting deeper than 5 returns `max_task_depth`. **PATCH:** `status` enum `["open","done","archived"]` (done sets `completedAt`, reopen clears it); `parentTaskId` null promotes to root; cycle → `task_cycle`.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
+
+**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` enum `general|bible|journal|other` (default general); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
 
 **POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
 
@@ -172,6 +180,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/tasks` | `Tasks` | Yes |
 | `/tasks/:id` | `TaskDetailPage` | Yes |
 | `/contacts` | `Contacts` | Yes |
+| `/notes` | `Notes` | Yes |
+| `/notes/:id` | `NoteDetailPage` | Yes |
 | `/chat` | `Chat` | Yes |
 | `/assistant` | `Assistant` | Yes |
 | `/expenses` | `Expenses` (Money: Settlements + Expenses) | Yes |

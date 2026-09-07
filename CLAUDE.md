@@ -295,7 +295,7 @@ worker/
   lib/                   crypto, session, audit, drive, reminders, email, notify, assistant,
                         expenses, money, scheduleNotify (who to tell), conflicts (double-booking)
   routes/               auth, families, documents, notifications, events, tasks, contacts,
-                        chat, calendar, expenses, money, assistant
+                        notes, chat, calendar, expenses, money, assistant
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
@@ -303,8 +303,8 @@ src/
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
   pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
-                         Tasks, TaskDetail, Contacts, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
-migrations/             generated SQL (0000–0006) + meta/ snapshots
+                         Tasks, TaskDetail, Contacts, Notes, NoteDetail, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
+migrations/             generated SQL (0000–0011) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
 docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
 public/_headers         CSP + security headers for static assets

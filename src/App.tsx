@@ -20,6 +20,8 @@ import { EventForm } from "./pages/EventForm";
 import { Tasks } from "./pages/Tasks";
 import { TaskDetailPage } from "./pages/TaskDetail";
 import { Contacts } from "./pages/Contacts";
+import { Notes } from "./pages/Notes";
+import { NoteDetailPage } from "./pages/NoteDetail";
 import { Chat } from "./pages/Chat";
 import { Assistant } from "./pages/Assistant";
 import { Expenses } from "./pages/Expenses";
@@ -114,6 +116,8 @@ export default function App() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/tasks/:id" element={<TaskDetailPage />} />
           <Route path="/contacts" element={<Contacts />} />
+          <Route path="/notes" element={<Notes />} />
+          <Route path="/notes/:id" element={<NoteDetailPage />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/assistant" element={<Assistant />} />
           <Route path="/expenses" element={<Expenses />} />

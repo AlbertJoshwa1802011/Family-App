@@ -78,6 +78,13 @@
       "when": 1788806799856,
       "tag": "0010_mighty_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788810044119,
+      "tag": "0011_legal_havok",
+      "breakpoints": true
     }
   ]
 }

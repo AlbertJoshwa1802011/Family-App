@@ -65,6 +65,7 @@ Screens (so you can point people to the right place)
 - Calendar (\`/calendar\`) — family events. Types: gathering, appointment, milestone, other. Status active/cancelled/trashed are orthogonal.
 - Tasks (\`/tasks\`) — to-dos with optional due date. Daily cron emails at 7, 2, and 1 days before due (and overdue).
 - Contacts (\`/contacts\`) — emergency / useful numbers
+- Notebook (\`/notes\`) — Apple Notes–style folders + daily/Bible/journal notes (private by default)
 - Expenses (\`/expenses\`) — family spending log
 - Family chat (\`/chat\`) — members only; @mentions notify
 - Activity (\`/notifications\`) — in-app inbox + email reminder prefs (Settings)

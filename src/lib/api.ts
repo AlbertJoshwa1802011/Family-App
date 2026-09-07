@@ -35,6 +35,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_document_ids: "That document isn't part of this family.",
   invalid_event_id: "That event isn't part of this family.",
   invalid_parent_id: "That parent task isn't part of this family.",
+  invalid_notebook_id: "That folder isn't part of this family.",
   max_task_depth: "That's as deep as subtasks can go — try grouping under a higher task.",
   task_cycle: "A task can't be nested under itself or one of its own subtasks.",
   drive_not_configured:
