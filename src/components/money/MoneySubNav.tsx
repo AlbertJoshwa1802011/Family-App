@@ -1,39 +1,39 @@
 import { SectionSubNav } from "../ui/SectionSubNav";
-import { MONEY_ACCENT } from "../../lib/liquidGlass";
+import { MONEY_ACCENT, moneyTabForPath } from "../../lib/liquidGlass";
 
 /**
  * Money section nav — same liquid-bubble pill as Home/Vault/Docs/Family,
  * tinted with the Money tab green from AppShell.
  *
  * Nested routes (`/money/expenses/:id`, `/money/funds/:id`, …) keep their
- * parent tab active via startsWith — Overview stays exact.
+ * parent tab active via moneyTabForPath — Overview stays exact.
  */
 const LINKS = [
   {
     to: "/money",
     label: "Overview",
     end: true,
-    isActive: (pathname: string) => pathname === "/money",
+    tab: "overview" as const,
   },
   {
     to: "/money/expenses",
     label: "Spending",
-    isActive: (pathname: string) => pathname.startsWith("/money/expenses"),
+    tab: "spending" as const,
   },
   {
     to: "/money/funds",
     label: "Funds",
-    isActive: (pathname: string) => pathname.startsWith("/money/funds"),
+    tab: "funds" as const,
   },
   {
     to: "/money/commitments",
     label: "Committed",
-    isActive: (pathname: string) => pathname.startsWith("/money/commitments"),
+    tab: "committed" as const,
   },
   {
     to: "/money/wishlist",
     label: "Wishlist",
-    isActive: (pathname: string) => pathname.startsWith("/money/wishlist"),
+    tab: "wishlist" as const,
   },
 ];
 
@@ -42,11 +42,11 @@ export function MoneySubNav() {
     <SectionSubNav
       ariaLabel="Money views"
       accentColor={MONEY_ACCENT}
-      items={LINKS.map(({ to, label, end, isActive }) => ({
+      items={LINKS.map(({ to, label, end, tab }) => ({
         to,
         label,
         end,
-        isActive: (pathname) => isActive(pathname),
+        isActive: (pathname) => moneyTabForPath(pathname) === tab,
       }))}
     />
   );

@@ -496,7 +496,7 @@ export function Expenses() {
         </Card>
 
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle" />
           <input
             type="search"
             value={search}
@@ -670,7 +670,7 @@ export function Expenses() {
                           </button>
                         </div>
                         {isOpen && kids.length > 0 && (
-                          <ul className="border-t border-line/60 bg-ink-950/40">
+                          <ul className="border-t border-white/10 bg-black/20">
                             {kids.map((child) => (
                               <li key={child.id}>
                                 <button
