@@ -11,6 +11,7 @@ import {
   HardDrive,
   ListTodo,
   LogOut,
+  MessageCircle,
   Settings as SettingsIcon,
   Users,
   Wallet,
@@ -31,6 +32,7 @@ interface MenuLink {
 
 // Destinations that aren't primary nav tabs live here, so the tab bar stays at five.
 const LINKS: MenuLink[] = [
+  { to: "/chat", label: "Family chat", icon: MessageCircle },
   { to: "/money", label: "Money", icon: Wallet },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
   { to: "/notifications", label: "Notifications", icon: Bell },

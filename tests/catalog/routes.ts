@@ -68,6 +68,10 @@ export const CATALOG_ROUTES: CatalogRoute[] = [
   { module: "contacts", method: "PATCH", path: "/api/contacts/c-1", auth: "required", mutation: true },
   { module: "contacts", method: "DELETE", path: "/api/contacts/c-1", auth: "required", mutation: true },
 
+  { module: "chat", method: "GET", path: "/api/chat", auth: "required" },
+  { module: "chat", method: "POST", path: "/api/chat", auth: "required", mutation: true },
+  { module: "chat", method: "DELETE", path: "/api/chat/msg-1", auth: "required", mutation: true },
+
   { module: "notifications", method: "GET", path: "/api/notifications", auth: "required" },
   { module: "notifications", method: "POST", path: "/api/notifications/read-all", auth: "required", mutation: true },
   { module: "notifications", method: "POST", path: "/api/notifications/n-1/read", auth: "required", mutation: true },

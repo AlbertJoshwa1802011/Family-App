@@ -113,6 +113,13 @@
       "when": 1788646136392,
       "tag": "0015_minor_sumo",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1788801805880,
+      "tag": "0016_perpetual_namorita",
+      "breakpoints": true
     }
   ]
 }

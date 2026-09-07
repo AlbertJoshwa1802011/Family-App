@@ -8,6 +8,7 @@ import {
   FileText,
   ListTodo,
   Lock,
+  MessageCircle,
   Plus,
   Quote,
   Wallet,
@@ -745,6 +746,7 @@ export function Dashboard() {
           <div className="grid grid-cols-4 gap-3">
             {(
               [
+                { to: "/chat", label: "Chat", icon: MessageCircle, tint: "bg-m3-blue-bg text-m3-blue" },
                 { to: "/tasks", label: "Tasks", icon: ListTodo, tint: "bg-m3-green-bg text-m3-green" },
                 { to: "/contacts", label: "People", icon: Contact, tint: "bg-m3-red-bg text-m3-red" },
                 { to: "/vault", label: "Vault", icon: Lock, tint: "bg-m3-cyan-bg text-m3-cyan" },

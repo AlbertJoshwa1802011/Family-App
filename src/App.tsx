@@ -34,6 +34,7 @@ import { FundDetail } from "./pages/money/FundDetail";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
+import { Chat } from "./pages/Chat";
 import { DeviceLockGate } from "./components/DeviceLockGate";
 import { NotFound } from "./pages/NotFound";
 
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="/contacts/:id/edit" element={<ContactForm />} />
           
           <Route path="/family" element={<FamilyPage />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
