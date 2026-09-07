@@ -208,6 +208,24 @@ export function Settings() {
           </div>
         </Card>
 
+        {/* Keep Sign out under the profile card — NOT at the page bottom.
+            The floating BottomNav is translucent; a bottom-placed Sign out
+            painted through the Home tab and taps navigated home without
+            logging out. */}
+        <Button
+          type="button"
+          variant="danger"
+          fullWidth
+          loading={signingOut}
+          leadingIcon={<LogOut className="size-4" />}
+          onClick={() => {
+            setSigningOut(true);
+            void signOut();
+          }}
+        >
+          Sign out
+        </Button>
+
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Reminders
@@ -248,19 +266,6 @@ export function Settings() {
             />
           </Card>
         </section>
-
-        <Button
-          variant="danger"
-          fullWidth
-          loading={signingOut}
-          leadingIcon={<LogOut className="size-4" />}
-          onClick={() => {
-            setSigningOut(true);
-            void signOut();
-          }}
-        >
-          Sign out
-        </Button>
       </Page>
     </>
   );

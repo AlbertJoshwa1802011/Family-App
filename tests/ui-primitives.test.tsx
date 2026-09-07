@@ -127,6 +127,26 @@ describe("Button", () => {
     expect(classes(screen.getByRole("button")).has("lq-primary")).toBe(true);
   });
 
+  it("defaults to type=button so it never submits a surrounding form", () => {
+    render(
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          throw new Error("form submitted");
+        }}
+      >
+        <Button>Sign out</Button>
+      </form>,
+    );
+    expect(screen.getByRole("button")).toHaveAttribute("type", "button");
+    fireEvent.click(screen.getByRole("button"));
+  });
+
+  it("still allows type=submit when the caller opts in", () => {
+    render(<Button type="submit">Save</Button>);
+    expect(screen.getByRole("button")).toHaveAttribute("type", "submit");
+  });
+
   it.each([
     ["sm", "min-h-9"],
     ["md", "min-h-11"],
@@ -397,9 +417,9 @@ describe("Page", () => {
     const cls = classes(container.firstElementChild!);
     expect(cls.has("max-w-md")).toBe(true);
     expect(cls.has("mx-auto")).toBe(true);
-    const pb = [...cls].find((c) => c.startsWith("pb-"))!;
-    // The nav capsule plus its margins is ~84px; padding must exceed that.
-    expect(Number(pb.replace("pb-", "")) * 4).toBeGreaterThan(84);
+    // pb-nav = 9rem + safe-area — must clear the ~84px nav capsule on every
+    // phone, including ones with a home-indicator inset.
+    expect(cls.has("pb-nav")).toBe(true);
   });
 
   it("renders children", () => {

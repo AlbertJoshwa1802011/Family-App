@@ -37,11 +37,13 @@ export function Button({
   className,
   children,
   disabled,
+  type = "button",
   ...props
 }: ButtonProps) {
   return (
     <button
       {...props}
+      type={type}
       disabled={disabled || loading}
       aria-busy={loading}
       className={cn(

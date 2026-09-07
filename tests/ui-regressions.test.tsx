@@ -85,6 +85,30 @@ describe("regression: settings toggle knob overflowed its track", () => {
   });
 });
 
+describe("regression: Sign out under the translucent BottomNav went Home", () => {
+  // Cause: Sign out was the last Page child. On a phone viewport it painted
+  // through the glass Home tab; taps hit "/" and never called signOut.
+  it("places Sign out directly under the profile card, above Settings sections", () => {
+    const src = readFileSync("src/pages/Settings.tsx", "utf8");
+    const profile = src.indexOf("Not signed in");
+    const signOut = src.indexOf("Sign out");
+    const reminders = src.indexOf("Reminders");
+    expect(profile).toBeGreaterThan(-1);
+    expect(signOut).toBeGreaterThan(profile);
+    expect(reminders).toBeGreaterThan(signOut);
+  });
+
+  it("declares type=button on the Sign out control", () => {
+    const src = readFileSync("src/pages/Settings.tsx", "utf8");
+    expect(src).toMatch(/type="button"\s+variant="danger"[\s\S]*?Sign out/);
+  });
+
+  it("Page padding includes the home-indicator so scrolled content clears the nav", () => {
+    const css = readFileSync("src/index.css", "utf8");
+    expect(css).toMatch(/\.pb-nav\s*\{[^}]*safe-area-inset-bottom/s);
+  });
+});
+
 describe("regression: document titles hard-clipped mid-word", () => {
   // Cause: text-overflow:ellipsis needs inline text; an inline-flex wrapper
   // inside ListItem's `truncate` container clips with no ellipsis.
