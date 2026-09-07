@@ -1416,6 +1416,11 @@ export const churchSettlements = sqliteTable(
     periodKey: text("period_key").notNull(), // yyyy-mm
     collectedMinor: integer("collected_minor").notNull(),
     spentMinor: integer("spent_minor").notNull(),
+    /** Amount that was due for this payment (e.g. ₹5320 → 532000). */
+    dueMinor: integer("due_minor").notNull(),
+    /** Amount actually paid now (e.g. ₹3000 → 300000). */
+    paidMinor: integer("paid_minor").notNull(),
+    /** Carry forward: dueMinor − paidMinor (0 when fully settled). */
     remainingMinor: integer("remaining_minor").notNull(),
     settledAt: integer("settled_at").notNull(),
     settledByUserId: text("settled_by_user_id")
@@ -1425,8 +1430,9 @@ export const churchSettlements = sqliteTable(
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [
-    unique("uq_church_settlement_period").on(t.familyId, t.fundSlug, t.periodKey),
+    // Multiple partial payments per fund/month are allowed (carry-forward).
     index("idx_church_settlements_family").on(t.familyId, t.settledAt),
+    index("idx_church_settlements_fund").on(t.familyId, t.fundSlug, t.periodKey),
   ],
 );
 

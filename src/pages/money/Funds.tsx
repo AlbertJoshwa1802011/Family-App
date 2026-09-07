@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HandCoins } from "lucide-react";
@@ -22,6 +22,8 @@ interface ChurchFund {
   spentOnProducts: number;
   availableBalance: number;
   status: string;
+  outstandingMinor: number;
+  suggestedDueMinor: number;
 }
 
 interface ChurchPurchase {
@@ -39,6 +41,8 @@ interface ChurchSettlement {
   periodKey: string;
   collectedMinor: number;
   spentMinor: number;
+  dueMinor: number;
+  paidMinor: number;
   remainingMinor: number;
   settledAt: number;
   note: string | null;
@@ -57,9 +61,16 @@ interface LocalFund {
   name: string;
 }
 
-
 function rupees(n: number): string {
   return formatMoney(Math.round(n * 100), "INR");
+}
+
+function parseRupees(raw: string): number | null {
+  const cleaned = raw.replace(/,/g, "").trim();
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100);
 }
 
 export function Funds() {
@@ -68,8 +79,11 @@ export function Funds() {
   const [today] = useState(() => new Date().toISOString().slice(0, 7));
   const [fundSlug, setFundSlug] = useState("");
   const [periodKey, setPeriodKey] = useState(today);
+  const [dueRupees, setDueRupees] = useState("");
+  const [paidRupees, setPaidRupees] = useState("");
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [dueTouched, setDueTouched] = useState(false);
 
   const snapQ = useQuery({
     queryKey: ["church", "snapshot", activeFamilyId],
@@ -84,19 +98,49 @@ export function Funds() {
     enabled: Boolean(activeFamilyId),
   });
 
+  const funds = snapQ.data?.funds ?? [];
+  const selected = funds.find((f) => f.slug === fundSlug) ?? funds[0];
+  const effectiveSlug = fundSlug || selected?.slug || "";
+
+  useEffect(() => {
+    if (!selected || dueTouched) return;
+    const suggested = (selected.suggestedDueMinor ?? 0) / 100;
+    if (suggested > 0) {
+      setDueRupees(String(suggested));
+    }
+  }, [selected, dueTouched]);
+
+  const dueMinor = parseRupees(dueRupees);
+  const paidMinor = parseRupees(paidRupees);
+  const carryMinor =
+    dueMinor != null && paidMinor != null && paidMinor <= dueMinor
+      ? dueMinor - paidMinor
+      : null;
+
   const settle = useMutation({
-    mutationFn: (slug: string) =>
-      api("/church/settle", {
+    mutationFn: (slug: string) => {
+      if (dueMinor == null || paidMinor == null) {
+        throw new Error("Enter amount due and how much you are paying now.");
+      }
+      if (paidMinor > dueMinor) {
+        throw new Error("Paid amount cannot be more than the amount due.");
+      }
+      return api("/church/settle", {
         method: "POST",
         body: JSON.stringify({
           familyId: activeFamilyId,
           fundSlug: slug,
           periodKey,
+          dueMinor,
+          paidMinor,
           note: note.trim() || null,
         }),
-      }),
+      });
+    },
     onSuccess: async () => {
       setNote("");
+      setPaidRupees("");
+      setDueTouched(false);
       setFormError(null);
       await qc.invalidateQueries({ queryKey: ["church"] });
     },
@@ -123,11 +167,8 @@ export function Funds() {
   }
 
   const snap = snapQ.data;
-  const funds = snap?.funds ?? [];
   const purchases = (snap?.purchases ?? []).filter((p) => p.status === "Active");
   const settlements = snap?.settlements ?? [];
-  const selected = funds.find((f) => f.slug === fundSlug) ?? funds[0];
-  const effectiveSlug = fundSlug || selected?.slug || "";
 
   return (
     <>
@@ -138,9 +179,8 @@ export function Funds() {
         <Card className="p-4">
           <p className="text-sm text-fg-muted">
             Live collection and purchase totals come from the church contributions
-            site. This page is for <span className="font-medium text-fg">settlements only</span>{" "}
-            — reconcile the bank, then record the month here. Do not re-enter
-            every contribution.
+            site. Settlements here track what you actually transferred — you can
+            pay part of the amount due and carry the rest to next month.
           </p>
         </Card>
 
@@ -204,6 +244,11 @@ export function Funds() {
                   </dd>
                 </div>
               </dl>
+              {(f.outstandingMinor ?? 0) > 0 && (
+                <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-center text-xs text-amber-200">
+                  Still to settle: {formatMoney(f.outstandingMinor, "INR")}
+                </p>
+              )}
             </Card>
           ))
         )}
@@ -234,18 +279,27 @@ export function Funds() {
         {funds.length > 0 && (
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold text-fg">Record a settlement</h3>
+            <p className="text-xs text-fg-muted">
+              Example: due ₹5,320, pay ₹3,000 now — ₹2,320 carries to next month.
+            </p>
             <label className="text-xs font-medium text-fg-subtle" htmlFor="fundSlug">
               Fund
             </label>
             <select
               id="fundSlug"
               value={effectiveSlug}
-              onChange={(e) => setFundSlug(e.target.value)}
+              onChange={(e) => {
+                setFundSlug(e.target.value);
+                setDueTouched(false);
+              }}
               className={inputClass}
             >
               {funds.map((f) => (
                 <option key={f.slug} value={f.slug}>
                   {f.name}
+                  {(f.outstandingMinor ?? 0) > 0
+                    ? ` · still ${formatMoney(f.outstandingMinor, "INR")}`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -259,6 +313,39 @@ export function Funds() {
               onChange={(e) => setPeriodKey(e.target.value)}
               className={inputClass}
             />
+            <label className="text-xs font-medium text-fg-subtle" htmlFor="dueAmount">
+              Amount due (₹)
+            </label>
+            <input
+              id="dueAmount"
+              inputMode="decimal"
+              value={dueRupees}
+              onChange={(e) => {
+                setDueTouched(true);
+                setDueRupees(e.target.value);
+              }}
+              placeholder="5320"
+              className={inputClass}
+            />
+            <label className="text-xs font-medium text-fg-subtle" htmlFor="paidAmount">
+              Paying now (₹)
+            </label>
+            <input
+              id="paidAmount"
+              inputMode="decimal"
+              value={paidRupees}
+              onChange={(e) => setPaidRupees(e.target.value)}
+              placeholder="3000"
+              className={inputClass}
+            />
+            {carryMinor != null && carryMinor > 0 && (
+              <p className="text-xs text-amber-200">
+                Carry forward to next time: {formatMoney(carryMinor, "INR")}
+              </p>
+            )}
+            {carryMinor === 0 && paidMinor != null && (
+              <p className="text-xs text-emerald-300">Fully settled for this entry.</p>
+            )}
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -282,7 +369,9 @@ export function Funds() {
                 settle.mutate(effectiveSlug);
               }}
             >
-              Settle this month
+              {carryMinor != null && carryMinor > 0
+                ? "Record partial settlement"
+                : "Record settlement"}
             </Button>
           </Card>
         )}
@@ -299,7 +388,11 @@ export function Funds() {
                     {s.fundSlug} · {s.periodKey}
                   </p>
                   <p className="text-xs text-fg-subtle">
-                    Remaining {formatMoney(s.remainingMinor, "INR")}
+                    Paid {formatMoney(s.paidMinor ?? 0, "INR")} of{" "}
+                    {formatMoney(s.dueMinor ?? s.remainingMinor, "INR")}
+                    {(s.remainingMinor ?? 0) > 0
+                      ? ` · carry ${formatMoney(s.remainingMinor, "INR")}`
+                      : " · cleared"}
                     {s.note ? ` · ${s.note}` : ""}
                   </p>
                 </div>

@@ -217,22 +217,143 @@ describe("/api/church", () => {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "2026-08",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
       note: "Bank transfer done",
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
-      settlement: { collectedMinor: number; remainingMinor: number; periodKey: string };
+      settlement: {
+        collectedMinor: number;
+        dueMinor: number;
+        paidMinor: number;
+        remainingMinor: number;
+        periodKey: string;
+      };
     };
     expect(body.settlement.periodKey).toBe("2026-08");
     expect(body.settlement.collectedMinor).toBe(100_000);
-    expect(body.settlement.remainingMinor).toBe(75_000);
+    expect(body.settlement.dueMinor).toBe(75_000);
+    expect(body.settlement.paidMinor).toBe(75_000);
+    expect(body.settlement.remainingMinor).toBe(0);
+  });
 
-    const again = await authed(env, "POST", "/api/church/settle", alice.cookie, {
+  it("POST /settle allows partial payment and carries the rest", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          funds: [
+            {
+              slug: "tech-fund",
+              name: "Tech fund",
+              totalCollected: 5320,
+              spentOnProducts: 0,
+              availableBalance: 5320,
+              status: "active",
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+
+    const { env, sqlite } = createTestEnv({
+      CONTRIBUTIONS_API_TOKEN: "tok",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+
+    const partial = await authed(env, "POST", "/api/church/settle", alice.cookie, {
+      familyId: family.id,
+      fundSlug: "tech-fund",
+      periodKey: "2026-09",
+      dueMinor: 532_000,
+      paidMinor: 300_000,
+      note: "Partial — rest next month",
+    });
+    expect(partial.status).toBe(201);
+    const first = (await partial.json()) as {
+      settlement: { dueMinor: number; paidMinor: number; remainingMinor: number };
+    };
+    expect(first.settlement.dueMinor).toBe(532_000);
+    expect(first.settlement.paidMinor).toBe(300_000);
+    expect(first.settlement.remainingMinor).toBe(232_000);
+
+    const snap = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    expect(snap.status).toBe(200);
+    const snapBody = (await snap.json()) as {
+      funds: { slug: string; outstandingMinor: number; suggestedDueMinor: number }[];
+    };
+    expect(snapBody.funds[0]?.outstandingMinor).toBe(232_000);
+    expect(snapBody.funds[0]?.suggestedDueMinor).toBe(232_000);
+
+    const payoff = await authed(env, "POST", "/api/church/settle", alice.cookie, {
+      familyId: family.id,
+      fundSlug: "tech-fund",
+      periodKey: "2026-10",
+      dueMinor: 232_000,
+      paidMinor: 232_000,
+    });
+    expect(payoff.status).toBe(201);
+    const second = (await payoff.json()) as {
+      settlement: { remainingMinor: number };
+    };
+    expect(second.settlement.remainingMinor).toBe(0);
+
+    const snap2 = await authed(
+      env,
+      "GET",
+      `/api/church/snapshot?familyId=${family.id}`,
+      alice.cookie,
+    );
+    const snapBody2 = (await snap2.json()) as {
+      funds: { outstandingMinor: number }[];
+      settlements: { remainingMinor: number }[];
+    };
+    expect(snapBody2.funds[0]?.outstandingMinor).toBe(0);
+    // Prior carry row is cleared so outstanding does not stack.
+    expect(snapBody2.settlements.every((s) => s.remainingMinor === 0)).toBe(true);
+  });
+
+  it("POST /settle rejects paidMinor greater than dueMinor", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          funds: [
+            {
+              slug: "tech-fund",
+              name: "Tech fund",
+              totalCollected: 1000,
+              spentOnProducts: 0,
+              availableBalance: 1000,
+              status: "active",
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const { env, sqlite } = createTestEnv({ CONTRIBUTIONS_API_TOKEN: "tok" });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner");
+    const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "2026-08",
+      dueMinor: 100_000,
+      paidMinor: 150_000,
     });
-    expect(again.status).toBe(409);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("validation_error");
   });
 
   it("GET /snapshot without familyId → 400", async () => {
@@ -253,6 +374,8 @@ describe("/api/church", () => {
       familyId: family.id,
       fundSlug: "tech-fund",
       periodKey: "August",
+      dueMinor: 75_000,
+      paidMinor: 75_000,
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
