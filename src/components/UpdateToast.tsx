@@ -20,7 +20,7 @@ export function UpdateToast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-0 bottom-24 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-sm items-center gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 shadow-pop"
+      className="fixed inset-x-0 bottom-24 z-40 mx-auto flex w-[calc(100%-2rem)] max-w-sm items-center gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 shadow-pop md:bottom-6"
     >
       <RefreshCw className="size-5 shrink-0 text-vault-300" aria-hidden="true" />
       <span className="flex-1 text-sm text-fg">A new version is available.</span>

@@ -323,7 +323,7 @@ function ExpenseFormFields({
   return (
     <>
       <AppBar title={isEdit ? "Edit expense" : parentId ? "Sub-expense" : "New expense"} back />
-      <Page className="pb-24">
+      <Page className="pb-24 md:pb-10">
         <form onSubmit={submit} className="space-y-4">
           {parentId && (
             <Card className="border-vault-500/30 bg-vault-500/10 p-3">

@@ -132,7 +132,7 @@ export function Funds() {
   return (
     <>
       <AppBar title="Funds" />
-      <Page width="list" className="space-y-4 pb-24">
+      <Page width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
 
         <Card className="p-4">

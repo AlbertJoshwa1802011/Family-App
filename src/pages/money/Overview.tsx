@@ -405,7 +405,7 @@ export function MoneyOverview() {
           </Link>
         }
       />
-      <Page width="list" className="space-y-4 pb-24">
+      <Page width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
 
         {isLoading || !plan ? (
@@ -424,7 +424,7 @@ export function MoneyOverview() {
             </div>
           </>
         ) : plan.incomeMinor === 0 ? (
-          <>
+          <div className="space-y-4 lg:mx-auto lg:max-w-2xl">
             <PrimaryCtas thisWeekMinor={thisWeekMinor} currency={currency} />
             <EmptyState
               icon={Wallet}
@@ -437,152 +437,156 @@ export function MoneyOverview() {
               }
             />
             <LikelyThisWeek familyId={activeFamilyId} currency={currency} />
-          </>
+          </div>
         ) : (
-          <>
-            <Card className="relative overflow-hidden p-5">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full bg-vault-500/25 blur-3xl"
-              />
-              <div className="relative flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                    Left to spend
-                  </p>
-                  <p
-                    className={cn(
-                      "mt-1 text-3xl font-bold tabular-nums",
-                      plan.remainingMinor < 0 ? "text-danger" : "text-fg",
-                    )}
-                  >
-                    {formatMoney(plan.remainingMinor, currency)}
-                  </p>
-                  <p className="mt-1 text-xs text-fg-muted">
-                    of {formatMoney(plan.spendableMinor, currency)} spendable ·{" "}
-                    {plan.daysLeft} day{plan.daysLeft === 1 ? "" : "s"} left
-                  </p>
+          <div className="space-y-4 lg:grid lg:grid-cols-12 lg:items-start lg:gap-6 lg:space-y-0">
+            <div className="space-y-4 lg:col-span-5">
+              <Card className="relative overflow-hidden p-5">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full bg-vault-500/25 blur-3xl"
+                />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                      Left to spend
+                    </p>
+                    <p
+                      className={cn(
+                        "mt-1 text-3xl font-bold tabular-nums lg:text-4xl",
+                        plan.remainingMinor < 0 ? "text-danger" : "text-fg",
+                      )}
+                    >
+                      {formatMoney(plan.remainingMinor, currency)}
+                    </p>
+                    <p className="mt-1 text-xs text-fg-muted">
+                      of {formatMoney(plan.spendableMinor, currency)} spendable ·{" "}
+                      {plan.daysLeft} day{plan.daysLeft === 1 ? "" : "s"} left
+                    </p>
+                  </div>
+                  {status && <Badge tone={status.tone}>{status.label}</Badge>}
                 </div>
-                {status && <Badge tone={status.tone}>{status.label}</Badge>}
+
+                {plan.dailyAllowanceMinor !== null && plan.daysLeft > 0 && (
+                  <div className="liquid-field mt-4 rounded-2xl px-3 py-2.5">
+                    <p className="text-xs text-fg-muted">
+                      You can spend{" "}
+                      <span className="font-semibold text-vault-300">
+                        {formatMoney(plan.dailyAllowanceMinor, currency)}
+                      </span>{" "}
+                      a day and still save{" "}
+                      <span className="font-semibold text-fg">
+                        {formatMoney(plan.savingsTargetMinor, currency)}
+                      </span>
+                      .
+                    </p>
+                  </div>
+                )}
+              </Card>
+
+              <PrimaryCtas thisWeekMinor={thisWeekMinor} currency={currency} />
+
+              <LikelyThisWeek familyId={activeFamilyId} currency={currency} />
+
+              <div className="grid grid-cols-2 gap-3">
+                <Figure label="Income" amountMinor={plan.incomeMinor} currency={currency} icon={ArrowUpRight} tone="positive" />
+                <Figure label="Committed" amountMinor={plan.committedMinor} currency={currency} icon={Repeat} />
+                <Figure label="Spent" amountMinor={plan.spentMinor} currency={currency} icon={ArrowDownRight} />
+                <Figure
+                  label="On track to save"
+                  amountMinor={plan.projectedSavingsMinor}
+                  currency={currency}
+                  icon={PiggyBank}
+                  tone={plan.projectedSavingsMinor >= 0 ? "positive" : "negative"}
+                  sub={
+                    data?.insights.savingsRateBp !== null && data?.insights.savingsRateBp !== undefined
+                      ? `${(data.insights.savingsRateBp / 100).toFixed(0)}% of income`
+                      : undefined
+                  }
+                />
               </div>
 
-              {plan.dailyAllowanceMinor !== null && plan.daysLeft > 0 && (
-                <div className="liquid-field mt-4 rounded-2xl px-3 py-2.5">
-                  <p className="text-xs text-fg-muted">
-                    You can spend{" "}
-                    <span className="font-semibold text-vault-300">
-                      {formatMoney(plan.dailyAllowanceMinor, currency)}
-                    </span>{" "}
-                    a day and still save{" "}
-                    <span className="font-semibold text-fg">
-                      {formatMoney(plan.savingsTargetMinor, currency)}
-                    </span>
-                    .
+              {plan.givingMinor > 0 && (
+                <Card className="flex items-center gap-3 p-4">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-m3-purple-bg text-m3-purple">
+                    <HandCoins className="size-5" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-fg">Giving this month</p>
+                    <p className="text-xs text-fg-muted">Tithe and sponsorships, set aside first</p>
+                  </div>
+                  <p className="shrink-0 text-sm font-semibold tabular-nums text-fg">
+                    {formatMoney(plan.givingMinor, currency)}
                   </p>
-                </div>
+                </Card>
               )}
-            </Card>
-
-            <PrimaryCtas thisWeekMinor={thisWeekMinor} currency={currency} />
-
-            <LikelyThisWeek familyId={activeFamilyId} currency={currency} />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Figure label="Income" amountMinor={plan.incomeMinor} currency={currency} icon={ArrowUpRight} tone="positive" />
-              <Figure label="Committed" amountMinor={plan.committedMinor} currency={currency} icon={Repeat} />
-              <Figure label="Spent" amountMinor={plan.spentMinor} currency={currency} icon={ArrowDownRight} />
-              <Figure
-                label="On track to save"
-                amountMinor={plan.projectedSavingsMinor}
-                currency={currency}
-                icon={PiggyBank}
-                tone={plan.projectedSavingsMinor >= 0 ? "positive" : "negative"}
-                sub={
-                  data?.insights.savingsRateBp !== null && data?.insights.savingsRateBp !== undefined
-                    ? `${(data.insights.savingsRateBp / 100).toFixed(0)}% of income`
-                    : undefined
-                }
-              />
             </div>
 
-            {plan.givingMinor > 0 && (
-              <Card className="flex items-center gap-3 p-4">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-m3-purple-bg text-m3-purple">
-                  <HandCoins className="size-5" aria-hidden="true" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-fg">Giving this month</p>
-                  <p className="text-xs text-fg-muted">Tithe and sponsorships, set aside first</p>
-                </div>
-                <p className="shrink-0 text-sm font-semibold tabular-nums text-fg">
-                  {formatMoney(plan.givingMinor, currency)}
-                </p>
-              </Card>
-            )}
+            <div className="space-y-4 lg:col-span-7">
+              {data && <AllocationBar data={data} currency={currency} />}
 
-            {data && <AllocationBar data={data} currency={currency} />}
+              <WeeklyBars weeks={plan.weeks} currency={currency} paceMinor={paceMinor} />
 
-            <WeeklyBars weeks={plan.weeks} currency={currency} paceMinor={paceMinor} />
+              {data && data.insights.vsAverageMinor !== null && (
+                <Card className="flex items-start gap-3 p-4">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-m3-blue-bg text-m3-blue">
+                    <TrendingUp className="size-5" aria-hidden="true" />
+                  </span>
+                  <p className="text-sm text-fg-muted">
+                    {data.insights.vsAverageMinor > 0 ? (
+                      <>
+                        You've spent{" "}
+                        <span className="font-semibold text-warning">
+                          {formatMoney(data.insights.vsAverageMinor, currency)} more
+                        </span>{" "}
+                        than your recent monthly average.
+                      </>
+                    ) : (
+                      <>
+                        You're{" "}
+                        <span className="font-semibold text-success">
+                          {formatMoney(Math.abs(data.insights.vsAverageMinor), currency)} under
+                        </span>{" "}
+                        your recent monthly average. Good month.
+                      </>
+                    )}
+                  </p>
+                </Card>
+              )}
 
-            {data && data.insights.vsAverageMinor !== null && (
-              <Card className="flex items-start gap-3 p-4">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-m3-blue-bg text-m3-blue">
-                  <TrendingUp className="size-5" aria-hidden="true" />
-                </span>
-                <p className="text-sm text-fg-muted">
-                  {data.insights.vsAverageMinor > 0 ? (
-                    <>
-                      You've spent{" "}
-                      <span className="font-semibold text-warning">
-                        {formatMoney(data.insights.vsAverageMinor, currency)} more
-                      </span>{" "}
-                      than your recent monthly average.
-                    </>
-                  ) : (
-                    <>
-                      You're{" "}
-                      <span className="font-semibold text-success">
-                        {formatMoney(Math.abs(data.insights.vsAverageMinor), currency)} under
-                      </span>{" "}
-                      your recent monthly average. Good month.
-                    </>
-                  )}
-                </p>
-              </Card>
-            )}
+              {data && <TrendChart trend={data.trend} currency={currency} />}
 
-            {data && <TrendChart trend={data.trend} currency={currency} />}
-
-            {plan.dueCommitments.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="flex items-center justify-between px-4 pt-4 pb-2">
-                  <h2 className="text-sm font-semibold text-fg">Due this cycle</h2>
-                  <Link to="/money/commitments" className="text-xs font-medium text-vault-300">
-                    Manage
-                  </Link>
-                </div>
-                <ul className="divide-y divide-line">
-                  {plan.dueCommitments.map((c) => (
-                    <li key={c.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-fg">{c.name}</p>
-                        <p className="text-xs text-fg-muted">
-                          {KIND_LABEL[c.kind]}
-                          {c.dueDates[0] ? ` · due ${formatDayMonth(c.dueDates[0])}` : ""}
-                          {c.remaining !== null && c.totalInstallments
-                            ? ` · ${c.totalInstallments - c.remaining}/${c.totalInstallments}`
-                            : ""}
+              {plan.dueCommitments.length > 0 && (
+                <Card className="overflow-hidden">
+                  <div className="flex items-center justify-between px-4 pt-4 pb-2">
+                    <h2 className="text-sm font-semibold text-fg">Due this cycle</h2>
+                    <Link to="/money/commitments" className="text-xs font-medium text-vault-300">
+                      Manage
+                    </Link>
+                  </div>
+                  <ul className="divide-y divide-line">
+                    {plan.dueCommitments.map((c) => (
+                      <li key={c.id} className="flex items-center gap-3 px-4 py-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-fg">{c.name}</p>
+                          <p className="text-xs text-fg-muted">
+                            {KIND_LABEL[c.kind]}
+                            {c.dueDates[0] ? ` · due ${formatDayMonth(c.dueDates[0])}` : ""}
+                            {c.remaining !== null && c.totalInstallments
+                              ? ` · ${c.totalInstallments - c.remaining}/${c.totalInstallments}`
+                              : ""}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-sm font-semibold tabular-nums text-fg">
+                          {formatMoney(c.amountMinor, currency)}
                         </p>
-                      </div>
-                      <p className="shrink-0 text-sm font-semibold tabular-nums text-fg">
-                        {formatMoney(c.amountMinor, currency)}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-          </>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+            </div>
+          </div>
         )}
       </Page>
     </>

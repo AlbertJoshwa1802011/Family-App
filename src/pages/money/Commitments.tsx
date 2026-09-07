@@ -131,7 +131,7 @@ export function Commitments() {
   return (
     <>
       <AppBar title="Committed" />
-      <Page width="list" className="space-y-4 pb-24">
+      <Page width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
 
         {isLoading ? (
