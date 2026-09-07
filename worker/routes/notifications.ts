@@ -226,8 +226,12 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
     const error = result.error ?? "email_send_failed";
     const message =
       error === "gmail_api_disabled"
-        ? "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key."
-        : "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from your Gmail, or add a Resend API key.";
+        ? "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key with a verified domain."
+        : error === "resend_testing_recipients"
+          ? "Resend is in testing mode and can only email the Resend account owner. Reconnect Admin → Storage with Gmail send so every family member can receive mail, or verify a domain in Resend."
+          : error === "gmail_auth_failed"
+            ? "Gmail rejected the send. Reconnect Admin → Storage (must include gmail.send), or tap Connect Gmail in Settings."
+            : "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from the family Gmail, or verify a Resend domain.";
     return c.json(
       { error, message },
       error === "email_not_configured" ? 503 : 502,

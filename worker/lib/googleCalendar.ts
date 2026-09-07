@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import {
   GOOGLE_SCOPES,
   classifyGoogleApiError,
+  clearUserGoogleAccessCache,
   getUserGoogleAccessToken,
   scopesKey,
   userHasScope,
@@ -51,8 +52,9 @@ function rfc3339(secs: number): string {
 }
 
 function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
+  const allDay = Boolean(ev.allDay);
   const endSecs = ev.endAt && ev.endAt > ev.startAt ? ev.endAt : ev.startAt + 3600;
-  if (ev.allDay) {
+  if (allDay) {
     const start = utcDate(ev.startAt);
     const endDay = new Date(Date.UTC(
       Number(start.slice(0, 4)),
@@ -76,18 +78,51 @@ function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
   };
 }
 
+/** Google Calendar "add event" deep link — works without Calendar API OAuth. */
+export function googleCalendarTemplateUrl(ev: {
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  startAt: number;
+  endAt?: number | null;
+  allDay: boolean;
+}): string {
+  const endSecs =
+    ev.endAt && ev.endAt > ev.startAt
+      ? ev.endAt
+      : ev.allDay
+        ? ev.startAt + 86400
+        : ev.startAt + 3600;
+  const dates = ev.allDay
+    ? `${utcDate(ev.startAt).replace(/-/g, "")}/${utcDate(endSecs).replace(/-/g, "")}`
+    : `${rfc3339(ev.startAt).replace(/[-:]/g, "").replace(/\.\d{3}/, "")}/${rfc3339(endSecs).replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`;
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: ev.title,
+    dates,
+  });
+  if (ev.description) params.set("details", ev.description);
+  if (ev.location) params.set("location", ev.location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+/** Convert an https ICS feed URL into a webcal:// URL for Apple Calendar. */
+export function toWebcalUrl(httpsUrl: string): string {
+  return httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
+}
+
 export function calendarStatusMessage(status: CalendarSyncStatus): string {
   switch (status) {
     case "synced":
       return "Saved to Google Calendar — it should show on your phone now.";
     case "skipped_no_token":
-      return "Connect Google Calendar once (Settings or the button below), then Sync.";
+      return "Not on your phone yet. Tap Connect Google Calendar, or use Add to Google / Apple below.";
     case "needs_reconnect":
-      return "Google Calendar permission is missing. Tap Connect Google Calendar, accept calendar access, then Sync.";
+      return "Google Calendar permission is missing. Tap Connect Google Calendar, accept calendar access, then Sync — or use Add to Google / Apple below.";
     case "needs_api_enabled":
-      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then tap Sync again.";
+      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then tap Sync — or use Add to Google / Apple below.";
     case "failed":
-      return "Google Calendar could not save this event. Try Sync again or download an .ics file.";
+      return "Automatic Google Calendar sync failed. Use Add to Google Calendar or Add to Apple Calendar below.";
   }
 }
 
@@ -114,13 +149,27 @@ export interface CalendarSyncResult {
   status: CalendarSyncStatus;
   googleCalendarEventId: string | null;
   message: string;
+  /** Deep link that adds the event without Calendar API OAuth. */
+  googleTemplateUrl?: string;
+  /** Session-authenticated .ics download for Apple Calendar / Outlook. */
+  icsUrl?: string;
 }
 
 function result(
   status: CalendarSyncStatus,
   googleCalendarEventId: string | null,
+  ev?: CalendarEventInput,
 ): CalendarSyncResult {
-  return { status, googleCalendarEventId, message: calendarStatusMessage(status) };
+  const base: CalendarSyncResult = {
+    status,
+    googleCalendarEventId,
+    message: calendarStatusMessage(status),
+  };
+  if (ev) {
+    base.googleTemplateUrl = googleCalendarTemplateUrl(ev);
+    base.icsUrl = `/api/calendar/events/${ev.id}/ics`;
+  }
+  return base;
 }
 
 export async function upsertGoogleCalendarEvent(
@@ -130,8 +179,9 @@ export async function upsertGoogleCalendarEvent(
   ev: CalendarEventInput,
 ): Promise<CalendarSyncResult> {
   try {
-    const token = await getUserGoogleAccessToken(env, userId);
-    if (!token) return result("skipped_no_token", ev.googleCalendarEventId);
+    const input: CalendarEventInput = { ...ev, allDay: Boolean(ev.allDay) };
+    let token = await getUserGoogleAccessToken(env, userId);
+    if (!token) return result("skipped_no_token", input.googleCalendarEventId, input);
 
     // If we already know this login never granted calendar.events, fail fast
     // with a reconnect prompt instead of a opaque Google 403.
@@ -140,46 +190,60 @@ export async function upsertGoogleCalendarEvent(
       scopesKnown &&
       !(await userHasScope(env, userId, GOOGLE_SCOPES.calendarEvents))
     ) {
-      return result("needs_reconnect", ev.googleCalendarEventId);
+      return result("needs_reconnect", input.googleCalendarEventId, input);
     }
 
-    const body = JSON.stringify(toGcalBody(ev));
-    let res: Response;
-    if (ev.googleCalendarEventId) {
-      res = await gcalFetch(token, `${CAL_API}/${encodeURIComponent(ev.googleCalendarEventId)}`, {
-        method: "PATCH",
-        body,
-      });
-      if (res.status === 404) {
-        res = await gcalFetch(token, CAL_API, { method: "POST", body });
+    const body = JSON.stringify(toGcalBody(input));
+
+    async function write(accessToken: string): Promise<Response> {
+      if (input.googleCalendarEventId) {
+        let res = await gcalFetch(
+          accessToken,
+          `${CAL_API}/${encodeURIComponent(input.googleCalendarEventId)}`,
+          { method: "PATCH", body },
+        );
+        if (res.status === 404) {
+          res = await gcalFetch(accessToken, CAL_API, { method: "POST", body });
+        }
+        return res;
       }
-    } else {
-      res = await gcalFetch(token, CAL_API, { method: "POST", body });
+      return gcalFetch(accessToken, CAL_API, { method: "POST", body });
+    }
+
+    let res = await write(token);
+    // Stale access token without calendar.events — clear cache and retry once.
+    if (res.status === 401) {
+      await clearUserGoogleAccessCache(env, userId);
+      token = await getUserGoogleAccessToken(env, userId);
+      if (!token) return result("skipped_no_token", input.googleCalendarEventId, input);
+      res = await write(token);
     }
 
     if (res.status === 401 || res.status === 403) {
       const errBody = await res.text();
       const kind = classifyGoogleApiError(res.status, errBody);
       console.error(`[gcal] upsert ${res.status}: ${errBody.slice(0, 200)}`);
-      if (kind === "api_disabled") return result("needs_api_enabled", ev.googleCalendarEventId);
-      return result("needs_reconnect", ev.googleCalendarEventId);
+      if (kind === "api_disabled") {
+        return result("needs_api_enabled", input.googleCalendarEventId, input);
+      }
+      return result("needs_reconnect", input.googleCalendarEventId, input);
     }
     if (!res.ok) {
       console.error(`[gcal] upsert ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return result("failed", ev.googleCalendarEventId);
+      return result("failed", input.googleCalendarEventId, input);
     }
     const created = (await res.json()) as { id?: string };
-    const remoteId = created.id ?? ev.googleCalendarEventId;
-    if (remoteId && remoteId !== ev.googleCalendarEventId) {
+    const remoteId = created.id ?? input.googleCalendarEventId;
+    if (remoteId && remoteId !== input.googleCalendarEventId) {
       await db
         .update(schema.events)
         .set({ googleCalendarEventId: remoteId })
-        .where(eq(schema.events.id, ev.id));
+        .where(eq(schema.events.id, input.id));
     }
-    return result("synced", remoteId ?? null);
+    return result("synced", remoteId ?? null, input);
   } catch (err) {
     console.error("[gcal] upsert failed:", err);
-    return result("failed", ev.googleCalendarEventId);
+    return result("failed", ev.googleCalendarEventId, { ...ev, allDay: Boolean(ev.allDay) });
   }
 }
 

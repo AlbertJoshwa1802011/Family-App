@@ -47,6 +47,12 @@ Optional later: enable R2 — see **§7**. Uploads try R2 first, then fall back 
 
 ## 3. Test email: “Reconnect Google Drive storage or set RESEND_API_KEY”
 
+**If only the owner’s address receives test mail**, Resend is almost certainly
+still in testing mode (it can only deliver to the Resend account owner until
+you verify a domain). Other family members need Path A below (shared Storage
+Gmail send) — that path emails every recipient.
+
+
 Pick **one** path (Gmail is enough for the family Gmail):
 
 **Path A — Gmail send (same as storage connect)**
