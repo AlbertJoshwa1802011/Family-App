@@ -28,6 +28,7 @@ interface IntegrationsStatus {
   r2: boolean;
   drive: { connected: boolean; email: string | null };
   email: { resend: boolean; gmailStorage: boolean };
+  church: { configured: boolean; url: string | null; tokenSet: boolean };
 }
 
 const ERROR_LABELS: Record<string, string> = {
@@ -148,6 +149,16 @@ export function AdminStorage() {
               <span className="text-fg">Resend API key</span>
               <span className={integrations.email.resend ? "text-success" : "text-fg-muted"}>
                 {integrations.email.resend ? "Set" : "Optional backup"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 text-sm">
+              <span className="text-fg">Church contributions</span>
+              <span className={integrations.church.configured ? "text-success" : "text-warning"}>
+                {integrations.church.configured
+                  ? integrations.church.tokenSet
+                    ? "URL + token"
+                    : "URL ready"
+                  : "Not configured"}
               </span>
             </div>
           </Card>

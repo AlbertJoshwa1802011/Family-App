@@ -10,8 +10,13 @@ import type { Env } from "../types";
 export const DEFAULT_CONTRIBUTIONS_URL =
   "https://light-of-jesus-ministry-contributions.pages.dev";
 
+/**
+ * Production sets CONTRIBUTIONS_API_URL in wrangler.jsonc vars, so Funds works
+ * without a laptop secret. CONTRIBUTIONS_API_TOKEN is optional — attach it only
+ * if the contributions site starts requiring ADMIN_API_TOKEN on /api/funds.
+ */
 export function contributionsConfigured(env: Env): boolean {
-  return Boolean(env.CONTRIBUTIONS_API_TOKEN);
+  return Boolean(env.CONTRIBUTIONS_API_URL?.trim() || env.CONTRIBUTIONS_API_TOKEN?.trim());
 }
 
 function origin(env: Env): string {
@@ -43,17 +48,24 @@ async function churchGet(
   env: Env,
   path: string,
 ): Promise<{ ok: true; json: unknown } | { ok: false; status: number; error: string }> {
-  const token = env.CONTRIBUTIONS_API_TOKEN;
-  if (!token) return { ok: false, status: 503, error: "church_not_configured" };
+  if (!contributionsConfigured(env)) {
+    return { ok: false, status: 503, error: "church_not_configured" };
+  }
   try {
-    const res = await fetch(`${origin(env)}${path}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+    const headers: Record<string, string> = { Accept: "application/json" };
+    const token = env.CONTRIBUTIONS_API_TOKEN?.trim();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${origin(env)}${path}`, { headers });
     const text = await res.text();
     if (!res.ok) {
+      console.error(`[church] upstream ${res.status} for ${path}: ${text.slice(0, 200)}`);
+      if (res.status === 401 || res.status === 403) {
+        return {
+          ok: false,
+          status: 502,
+          error: "church_auth_failed",
+        };
+      }
       return { ok: false, status: res.status, error: "church_upstream_error" };
     }
     return { ok: true, json: JSON.parse(text) as unknown };

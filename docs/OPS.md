@@ -68,16 +68,34 @@ npx wrangler secret put EMAIL_FROM
 
 ## 4. Church `church_not_configured`
 
-The contributions site
-(https://light-of-jesus-ministry-contributions.pages.dev) already holds live
-totals. This app only **reads** them.
+Live totals come from
+https://light-of-jesus-ministry-contributions.pages.dev — that site’s
+`/api/funds` and `/api/purchases` are public today.
+
+**After a normal production deploy**, Worker `fam` already has
+`vars.CONTRIBUTIONS_API_URL` set in `wrangler.jsonc`. Reload **Money → Funds**
+— no secret is required for the public read path.
+
+**If Funds still says not connected**, force the URL/token onto Worker **`fam`**
+(name must be `fam`, not `family-vault`):
 
 ```bash
-npx wrangler secret put CONTRIBUTIONS_API_TOKEN
+cd /path/to/Family-App
+npx wrangler whoami
+# must show the Cloudflare account that owns fam.connect-cloud.workers.dev
+
+# Optional token (same value as the contributions site ADMIN_API_TOKEN):
+npx wrangler secret put CONTRIBUTIONS_API_TOKEN --name fam
 ```
 
-Paste the **same** value as that site’s `ADMIN_API_TOKEN`. Then reload Money →
-Funds.
+Then hard-refresh the PWA (or close the tab and reopen
+`https://fam.connect-cloud.workers.dev`) and open Money → Funds.
+
+Check Admin → Storage: **Church contributions** should show **URL ready**
+(or **URL + token** if you set the secret).
+
+**Do not** put the token on the contributions Pages project — that is the
+source app. Family Vault reads it from Worker `fam`.
 
 ## 5. Google Contacts `google_sync_failed` / “unsecured app”
 
