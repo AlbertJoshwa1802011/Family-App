@@ -40,7 +40,7 @@ contactRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "contacts");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -58,7 +58,7 @@ contactRoutes.post("/", requireSession, zv(createContactSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "contacts");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -99,7 +99,7 @@ contactRoutes.get("/:id", requireSession, async (c) => {
 
   if (!contact) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, contact.familyId);
+  const membership = await requireFamilyMember(c, contact.familyId, "member", "contacts");
   if (membership instanceof Response) return membership;
 
   return c.json({ contact });
@@ -119,7 +119,7 @@ contactRoutes.patch("/:id", requireSession, zv(updateContactSchema), async (c) =
 
   if (!contact) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, contact.familyId);
+  const membership = await requireFamilyMember(c, contact.familyId, "member", "contacts");
   if (membership instanceof Response) return membership;
 
   const set: Partial<typeof schema.contacts.$inferInsert> = {
@@ -156,7 +156,7 @@ contactRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!contact) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, contact.familyId);
+  const membership = await requireFamilyMember(c, contact.familyId, "member", "contacts");
   if (membership instanceof Response) return membership;
 
   if (contact.createdBy !== userId && membership.role === "member") {

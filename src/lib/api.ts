@@ -26,6 +26,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invite_already_used: "This invite has already been used.",
   invite_email_mismatch:
     "This invite was sent to a different email. Sign in with the invited Google account.",
+  module_disabled:
+    "That area isn't available for your account in this family.",
   access_denied:
     "This app is invite-only. Request a demo and wait for approval before signing in.",
   access_revoked: "Your access was revoked. Contact your team admin for help.",

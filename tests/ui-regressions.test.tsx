@@ -27,6 +27,15 @@ vi.mock("../src/context/AuthContext", () => ({
     isAuthenticated: true,
     signOut: vi.fn(),
   }),
+  useOptionalAuth: () => ({
+    user: { id: "u1", email: "a@b.c", name: "Ravi Sharma" },
+    families: [],
+    activeFamily: { id: "f1", name: "The Sharmas", role: "owner" },
+    setActiveFamilyId: vi.fn(),
+    isLoading: false,
+    isAuthenticated: true,
+    signOut: vi.fn(),
+  }),
 }));
 
 describe("regression: nav pill rendered as a giant misplaced blob", () => {

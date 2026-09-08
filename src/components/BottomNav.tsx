@@ -10,14 +10,23 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "../lib/cn";
 import { api } from "../lib/api";
+import { useOptionalAuth } from "../context/AuthContext";
+import { hasModuleAccess, type FamilyModule } from "../lib/modules";
 
-// Instagram-style 5 tabs: Home · Docs · Chat · Activity · Family.
-// Calendar/Tasks/Contacts live in the Dashboard quick-access grid;
-// Settings is behind the gear on the Family tab.
-const items: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  module?: FamilyModule;
+};
+
+// Instagram-style tabs. Module-gated items drop out when the member
+// doesn't have that area — Family / Activity / Home stay.
+const ALL_ITEMS: NavItem[] = [
   { to: "/", label: "Home", icon: LayoutDashboard, end: true },
-  { to: "/documents", label: "Docs", icon: FileText },
-  { to: "/chat", label: "Chat", icon: MessageCircle },
+  { to: "/documents", label: "Docs", icon: FileText, module: "documents" },
+  { to: "/chat", label: "Chat", icon: MessageCircle, module: "chat" },
   { to: "/notifications", label: "Activity", icon: Heart },
   { to: "/family", label: "Family", icon: Users },
 ];
@@ -33,8 +42,7 @@ function useUnreadCount(): number {
   return data?.unreadCount ?? 0;
 }
 
-/** Index of the tab owning the current path, or -1 when none matches. */
-function activeIndex(pathname: string): number {
+function activeIndex(pathname: string, items: NavItem[]): number {
   return items.findIndex((item) =>
     item.end ? pathname === item.to : pathname.startsWith(item.to),
   );
@@ -43,7 +51,15 @@ function activeIndex(pathname: string): number {
 export function BottomNav() {
   const unread = useUnreadCount();
   const { pathname } = useLocation();
-  const active = activeIndex(pathname);
+  const auth = useOptionalAuth();
+  const activeFamily = auth?.activeFamily ?? null;
+
+  const items = ALL_ITEMS.filter(
+    (item) =>
+      !item.module ||
+      hasModuleAccess(activeFamily?.modules, item.module, activeFamily?.role),
+  );
+  const active = activeIndex(pathname, items);
 
   return (
     <nav
@@ -52,8 +68,6 @@ export function BottomNav() {
     >
       <div className="mx-auto max-w-md px-4 pt-2 pb-3">
         <ul className="lq lq-chrome lq-raised pointer-events-auto relative flex items-stretch rounded-full p-1.5">
-          {/* One liquid blob slides between tabs instead of five separate
-              highlights — the continuity is the whole effect. */}
           {active >= 0 && (
             <span
               aria-hidden="true"

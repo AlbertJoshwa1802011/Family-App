@@ -85,6 +85,13 @@
       "when": 1788810044119,
       "tag": "0011_legal_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788893706239,
+      "tag": "0012_wandering_stardust",
+      "breakpoints": true
     }
   ]
 }

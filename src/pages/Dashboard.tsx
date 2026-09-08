@@ -28,6 +28,7 @@ import { api } from "../lib/api";
 import type { EventSummary } from "./Calendar";
 import { eventTypeColor, formatEventTime } from "../lib/eventTime";
 import { expiryStatus } from "../lib/expiry";
+import { hasModuleAccess, type FamilyModule } from "../lib/modules";
 
 interface DocumentSummary {
   id: string;
@@ -348,12 +349,28 @@ export function Dashboard() {
           {/* Bubbles in a scrollable row — edge-bleeding so it's obviously
               swipeable on a phone. */}
           <div className="-mx-4 flex justify-between gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <QuickBubble icon={CalendarDays} label="Calendar" to="/calendar" tone="vault" />
-            <QuickBubble icon={ListTodo} label="Tasks" to="/tasks" tone="info" />
-            <QuickBubble icon={NotebookPen} label="Notes" to="/notes" tone="success" />
-            <QuickBubble icon={Contact} label="Contacts" to="/contacts" tone="danger" />
-            <QuickBubble icon={Wallet} label="Money" to="/expenses" tone="warning" />
-            <QuickBubble icon={Sparkles} label="Assistant" to="/assistant" tone="success" />
+            {(
+              [
+                { icon: CalendarDays, label: "Calendar", to: "/calendar", tone: "vault" as const, module: "calendar" as FamilyModule },
+                { icon: ListTodo, label: "Tasks", to: "/tasks", tone: "info" as const, module: "tasks" as FamilyModule },
+                { icon: NotebookPen, label: "Notes", to: "/notes", tone: "success" as const, module: "notes" as FamilyModule },
+                { icon: Contact, label: "Contacts", to: "/contacts", tone: "danger" as const, module: "contacts" as FamilyModule },
+                { icon: Wallet, label: "Money", to: "/expenses", tone: "warning" as const, module: "expenses" as FamilyModule },
+                { icon: Sparkles, label: "Assistant", to: "/assistant", tone: "success" as const, module: "assistant" as FamilyModule },
+              ] as const
+            )
+              .filter((b) =>
+                hasModuleAccess(activeFamily?.modules, b.module, activeFamily?.role),
+              )
+              .map((b) => (
+                <QuickBubble
+                  key={b.to}
+                  icon={b.icon}
+                  label={b.label}
+                  to={b.to}
+                  tone={b.tone}
+                />
+              ))}
           </div>
         </section>
 

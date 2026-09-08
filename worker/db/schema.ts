@@ -61,6 +61,11 @@ export const familyMembers = sqliteTable(
     status: text("status", { enum: ["active", "invited", "removed"] })
       .notNull()
       .default("active"),
+    /**
+     * JSON array of enabled FamilyModule ids. NULL = all modules (default).
+     * Owners always have full access regardless of this column.
+     */
+    modulesJson: text("modules_json"),
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [
@@ -84,6 +89,8 @@ export const invites = sqliteTable(
     role: text("role", { enum: ["admin", "member"] })
       .notNull()
       .default("member"),
+    /** Preset module access applied when the invite is accepted. NULL = all. */
+    modulesJson: text("modules_json"),
     invitedBy: text("invited_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

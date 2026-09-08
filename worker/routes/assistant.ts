@@ -32,7 +32,7 @@ assistantRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "assistant");
   if (membership instanceof Response) return membership;
 
   const userId = c.get("userId")!;
@@ -50,7 +50,7 @@ assistantRoutes.post("/", requireSession, zv(chatSchema), async (c) => {
   const userId = c.get("userId")!;
   const { familyId, message } = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "assistant");
   if (membership instanceof Response) return membership;
 
   if (!isAssistantConfigured(c.env)) {

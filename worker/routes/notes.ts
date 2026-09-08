@@ -150,7 +150,7 @@ noteRoutes.get("/notebooks", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "notes");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -168,7 +168,7 @@ noteRoutes.post("/notebooks", requireSession, zv(createNotebookSchema), async (c
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -211,7 +211,7 @@ noteRoutes.patch(
       .get();
     if (!notebook) return c.json({ error: "not_found" }, 404);
 
-    const membership = await requireFamilyMember(c, notebook.familyId);
+    const membership = await requireFamilyMember(c, notebook.familyId, "member", "notes");
     if (membership instanceof Response) return membership;
 
     const set: Partial<typeof schema.notebooks.$inferInsert> = {
@@ -245,7 +245,7 @@ noteRoutes.delete("/notebooks/:id", requireSession, async (c) => {
     .get();
   if (!notebook) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, notebook.familyId);
+  const membership = await requireFamilyMember(c, notebook.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
 
   if (notebook.createdBy !== userId && membership.role === "member") {
@@ -269,7 +269,7 @@ noteRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "notes");
   if (membership instanceof Response) return membership;
 
   const userId = c.get("userId")!;
@@ -330,7 +330,7 @@ noteRoutes.post("/", requireSession, zv(createNoteSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -371,7 +371,7 @@ noteRoutes.get("/:id", requireSession, async (c) => {
   const note = await loadNote(db, id);
   if (!note) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, note.familyId);
+  const membership = await requireFamilyMember(c, note.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
   if (isNoteHiddenFrom(note, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
@@ -390,7 +390,7 @@ noteRoutes.patch("/:id", requireSession, zv(updateNoteSchema), async (c) => {
   const note = await loadNote(db, id);
   if (!note || note.deletedAt) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, note.familyId);
+  const membership = await requireFamilyMember(c, note.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
   if (isNoteHiddenFrom(note, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
@@ -433,7 +433,7 @@ noteRoutes.delete("/:id", requireSession, async (c) => {
   const note = await loadNote(db, id);
   if (!note) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, note.familyId);
+  const membership = await requireFamilyMember(c, note.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
   if (isNoteHiddenFrom(note, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);
@@ -466,7 +466,7 @@ noteRoutes.post("/:id/restore", requireSession, async (c) => {
   const note = await loadNote(db, id);
   if (!note || !note.deletedAt) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, note.familyId);
+  const membership = await requireFamilyMember(c, note.familyId, "member", "notes");
   if (membership instanceof Response) return membership;
   if (isNoteHiddenFrom(note, userId, membership.role)) {
     return c.json({ error: "not_found" }, 404);

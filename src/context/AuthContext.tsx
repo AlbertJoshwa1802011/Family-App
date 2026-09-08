@@ -21,6 +21,8 @@ export interface Family {
   id: string;
   name: string;
   role: "owner" | "admin" | "member";
+  /** Enabled product modules for this membership. Owners always have all. */
+  modules?: import("../lib/modules").FamilyModule[];
 }
 
 interface MeResponse {
@@ -48,6 +50,19 @@ interface AuthValue {
 const ACTIVE_FAMILY_KEY = "fv.activeFamilyId";
 
 const AuthContext = createContext<AuthValue | undefined>(undefined);
+
+/** Safe for chrome that may render in tests without AuthProvider. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalAuth(): AuthValue | undefined {
+  return useContext(AuthContext);
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth(): AuthValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  return ctx;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
@@ -103,11 +118,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext value={value}>{children}</AuthContext>;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function useAuth(): AuthValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
-  return ctx;
 }
