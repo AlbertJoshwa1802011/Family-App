@@ -24,6 +24,7 @@ import type { Env } from "../types";
 import { createNotification } from "./notify";
 import { sendEmail } from "./email";
 import { reminderEmail } from "./emailTemplates";
+import { buildCalendar } from "./ics";
 
 export interface NotifyTarget {
   userId: string;
@@ -116,6 +117,37 @@ interface DispatchOpts {
   link: string;
   ctaLabel: string;
   urgency?: "info" | "warning" | "danger";
+  /** When set, attach a .ics so Apple Mail / Gmail can Add to Calendar. */
+  icsEvent?: EventSummary;
+}
+
+function eventToIcsAttachment(ev: EventSummary): {
+  filename: string;
+  content: string;
+  contentType: string;
+} {
+  const ics = buildCalendar({
+    name: "Family Vault",
+    events: [
+      {
+        uid: `event-${ev.id}@family-vault`,
+        title: ev.title,
+        description: ev.description ?? null,
+        location: ev.location ?? null,
+        startAt: ev.startAt,
+        endAt: ev.endAt ?? null,
+        allDay: ev.allDay,
+        cancelled: ev.status === "cancelled",
+        sequence: Math.max(0, (ev.version ?? 1) - 1),
+        updatedAt: ev.updatedAt,
+      },
+    ],
+  });
+  return {
+    filename: `${ev.title.replace(/[^\w-]+/g, "_").slice(0, 40) || "event"}.ics`,
+    content: btoa(ics),
+    contentType: "text/calendar; charset=utf-8",
+  };
 }
 
 /**
@@ -125,6 +157,7 @@ interface DispatchOpts {
 async function dispatch(o: DispatchOpts): Promise<number> {
   let sent = 0;
   const appUrl = o.env.APP_URL ?? "";
+  const attachment = o.icsEvent ? eventToIcsAttachment(o.icsEvent) : null;
   for (const t of o.targets) {
     try {
       await createNotification(o.db, {
@@ -147,6 +180,7 @@ async function dispatch(o: DispatchOpts): Promise<number> {
             ctaUrl: `${appUrl}${o.link}`,
             urgency: o.urgency ?? "info",
           }),
+          ...(attachment ? { attachments: [attachment] } : {}),
         });
       }
     } catch (err) {
@@ -161,8 +195,56 @@ export interface EventSummary {
   familyId: string;
   title: string;
   startAt: number;
+  endAt?: number | null;
   allDay: boolean;
   location?: string | null;
+  description?: string | null;
+  status?: "active" | "cancelled" | "trashed";
+  version?: number;
+  updatedAt?: number;
+}
+
+/**
+ * Email the actor an .ics for the event they just created/changed so Apple
+ * Calendar (via Mail) and other clients can add it immediately — creators are
+ * excluded from invite notifications, so without this they only had the slow
+ * subscribe feed.
+ */
+export async function emailEventIcsToActor(
+  db: Db,
+  env: Env,
+  ev: EventSummary,
+  actorUserId: string,
+  subject: string,
+): Promise<void> {
+  try {
+    const user = await db
+      .select({
+        email: schema.users.email,
+        emailEnabled: schema.reminderPrefs.emailEnabled,
+      })
+      .from(schema.users)
+      .leftJoin(schema.reminderPrefs, eq(schema.reminderPrefs.userId, schema.users.id))
+      .where(eq(schema.users.id, actorUserId))
+      .get();
+    if (!user?.email || user.emailEnabled === false) return;
+
+    const appUrl = env.APP_URL ?? "";
+    await sendEmail(env, {
+      to: user.email,
+      subject,
+      html: reminderEmail({
+        heading: subject,
+        body: `${fmtWhen(ev.startAt, ev.allDay)}${ev.location ? ` · ${ev.location}` : ""}. Open the attached .ics to add it to Apple Calendar or another calendar app.`,
+        ctaLabel: "View event",
+        ctaUrl: `${appUrl}/calendar/events/${ev.id}`,
+        urgency: "info",
+      }),
+      attachments: [eventToIcsAttachment(ev)],
+    });
+  } catch (err) {
+    console.error(`[scheduleNotify] actor ics email failed:`, err);
+  }
 }
 
 /** "Dad added you to Dentist — Tue 9 Sep at 10:00 UTC". */
@@ -185,6 +267,7 @@ export async function notifyEventInvited(
     body: `${fmtWhen(ev.startAt, ev.allDay)}${ev.location ? ` · ${ev.location}` : ""}`,
     link: `/calendar/events/${ev.id}`,
     ctaLabel: "View event",
+    icsEvent: ev,
   });
 }
 
@@ -212,6 +295,7 @@ export async function notifyEventRescheduled(
     link: `/calendar/events/${ev.id}`,
     ctaLabel: "View event",
     urgency: "warning",
+    icsEvent: ev,
   });
 }
 
@@ -235,6 +319,7 @@ export async function notifyEventCancelled(
     link: `/calendar/events/${ev.id}`,
     ctaLabel: "View event",
     urgency: "danger",
+    icsEvent: { ...ev, status: "cancelled" },
   });
 }
 

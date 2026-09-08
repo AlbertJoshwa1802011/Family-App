@@ -24,6 +24,17 @@ function icsDate(isoDate: string): string {
   return isoDate.replace(/-/g, "");
 }
 
+/** UTC yyyy-mm-dd from unix seconds. */
+function unixToUtcDate(secs: number): string {
+  return new Date(secs * 1000).toISOString().slice(0, 10);
+}
+
+/** Exclusive next-day date for all-day DTEND. */
+function nextUtcDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
 /** Fold long lines at 75 octets per RFC 5545 §3.1 (simple char-based fold). */
 function fold(line: string): string {
   if (line.length <= 75) return line;
@@ -47,6 +58,10 @@ export interface IcsEvent {
   endAt?: number | null;
   allDay: boolean;
   cancelled?: boolean;
+  /** Monotonic edit counter — Apple/Google use this to replace stale copies. */
+  sequence?: number;
+  /** Unix seconds; written as LAST-MODIFIED. */
+  updatedAt?: number;
 }
 
 export interface IcsAllDayItem {
@@ -65,8 +80,10 @@ function vevent(ev: IcsEvent, nowSecs: number): string[] {
   ];
 
   if (ev.allDay) {
-    const day = new Date(ev.startAt * 1000).toISOString().slice(0, 10);
+    const day = unixToUtcDate(ev.startAt);
+    const endDay = ev.endAt ? nextUtcDate(unixToUtcDate(ev.endAt)) : nextUtcDate(day);
     lines.push(`DTSTART;VALUE=DATE:${icsDate(day)}`);
+    lines.push(`DTEND;VALUE=DATE:${icsDate(endDay)}`);
   } else {
     lines.push(`DTSTART:${icsDateTime(ev.startAt)}`);
     lines.push(`DTEND:${icsDateTime(ev.endAt ?? ev.startAt + 3600)}`);
@@ -75,6 +92,8 @@ function vevent(ev: IcsEvent, nowSecs: number): string[] {
   if (ev.location) lines.push(`LOCATION:${icsEscape(ev.location)}`);
   if (ev.description) lines.push(`DESCRIPTION:${icsEscape(ev.description)}`);
   if (ev.cancelled) lines.push("STATUS:CANCELLED");
+  lines.push(`SEQUENCE:${Math.max(0, ev.sequence ?? 0)}`);
+  lines.push(`LAST-MODIFIED:${icsDateTime(ev.updatedAt ?? nowSecs)}`);
 
   lines.push("END:VEVENT");
   return lines;
@@ -87,7 +106,10 @@ function veventAllDay(item: IcsAllDayItem, nowSecs: number): string[] {
     `DTSTAMP:${icsDateTime(nowSecs)}`,
     `SUMMARY:${icsEscape(item.title)}`,
     `DTSTART;VALUE=DATE:${icsDate(item.date)}`,
+    `DTEND;VALUE=DATE:${icsDate(nextUtcDate(item.date))}`,
     ...(item.description ? [`DESCRIPTION:${icsEscape(item.description)}`] : []),
+    "SEQUENCE:0",
+    `LAST-MODIFIED:${icsDateTime(nowSecs)}`,
     "END:VEVENT",
   ];
 }
@@ -97,8 +119,11 @@ export function buildCalendar(opts: {
   events: IcsEvent[];
   allDayItems?: IcsAllDayItem[];
   nowSecs?: number;
+  /** Hint clients to re-fetch often (Apple Calendar / Google subscribed feeds). */
+  refreshMinutes?: number;
 }): string {
   const now = opts.nowSecs ?? Math.floor(Date.now() / 1000);
+  const refresh = Math.max(5, opts.refreshMinutes ?? 15);
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -106,6 +131,9 @@ export function buildCalendar(opts: {
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsEscape(opts.name)}`,
+    // RFC 7986 + Google's X-PUBLISHED-TTL — ask clients to poll often.
+    `REFRESH-INTERVAL;VALUE=DURATION:PT${refresh}M`,
+    `X-PUBLISHED-TTL:PT${refresh}M`,
   ];
 
   for (const ev of opts.events) lines.push(...vevent(ev, now));

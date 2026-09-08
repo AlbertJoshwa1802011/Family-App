@@ -171,7 +171,11 @@ describe("POST /events → Google Calendar push", () => {
       type: "appointment",
     });
     expect(res.status).toBe(201);
-    const { event } = (await res.json()) as { event: { id: string } };
+    const { event, calendarSynced } = (await res.json()) as {
+      event: { id: string };
+      calendarSynced: boolean;
+    };
+    expect(calendarSynced).toBe(true);
 
     const insert = calls.find(
       (c) => c.method === "POST" && c.url.includes("/calendar/v3/"),
@@ -186,6 +190,11 @@ describe("POST /events → Google Calendar push", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.userId).toBe(owner.userId);
     expect(rows[0]!.googleEventId).toBe("gcal-1");
+
+    const detail = await req("GET", `/api/events/${event.id}`, owner.cookie);
+    expect(
+      ((await detail.json()) as { calendarSynced: boolean }).calendarSynced,
+    ).toBe(true);
   });
 
   it("pushes to creator and invited attendees with tokens", async () => {
@@ -253,6 +262,9 @@ describe("POST /events → Google Calendar push", () => {
       startAt,
     });
     expect(res.status).toBe(201);
+    expect(((await res.json()) as { calendarSynced: boolean }).calendarSynced).toBe(
+      false,
+    );
 
     expect(calls.filter((c) => c.url.includes("/calendar/v3/"))).toHaveLength(0);
   });

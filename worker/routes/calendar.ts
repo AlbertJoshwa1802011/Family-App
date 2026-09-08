@@ -40,7 +40,9 @@ calendarRoutes.post("/feed-token", requireSession, async (c) => {
   await c.env.KV.put(`${FEED_USER_PREFIX}${userId}`, token);
 
   const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json({ url: `${appUrl}/api/calendar/feed/${token}.ics` });
+  const httpsUrl = `${appUrl}/api/calendar/feed/${token}.ics`;
+  const webcalUrl = httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
+  return c.json({ url: httpsUrl, webcalUrl });
 });
 
 // GET /calendar/feed/:token.ics — subscribable calendar (capability URL).
@@ -98,6 +100,8 @@ calendarRoutes.get("/feed/:file", async (c) => {
         endAt: ev.endAt,
         allDay: Boolean(ev.allDay),
         cancelled: ev.status === "cancelled",
+        sequence: Math.max(0, (ev.version ?? 1) - 1),
+        updatedAt: ev.updatedAt ?? ev.createdAt,
       });
     }
 
@@ -136,13 +140,16 @@ calendarRoutes.get("/feed/:file", async (c) => {
     events,
     allDayItems: expiries,
     nowSecs,
+    refreshMinutes: 15,
   });
 
   return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="family-vault.ics"',
-      "Cache-Control": "private, max-age=300",
+      "Content-Disposition": 'inline; filename="family-vault.ics"',
+      // Subscribed calendars must re-fetch often — new events should appear
+      // without waiting hours. Apple respects this better than Google.
+      "Cache-Control": "no-cache, max-age=0, must-revalidate",
       "X-Content-Type-Options": "nosniff",
     },
   });

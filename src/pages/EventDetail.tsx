@@ -61,6 +61,7 @@ interface EventDetailResponse {
   attendees: Attendee[];
   rsvpSummary: Record<Rsvp, number>;
   canEdit: boolean;
+  calendarSynced: boolean;
 }
 
 const RSVP_LABEL: Record<Rsvp, string> = {
@@ -150,6 +151,7 @@ export function EventDetailPage() {
   const attendees = data?.attendees ?? [];
   const summary = data?.rsvpSummary;
   const canEdit = data?.canEdit ?? false;
+  const calendarSynced = data?.calendarSynced ?? false;
   // Which row is mine? Only a real user account can answer for itself.
   const me = attendees.find((a) => a.userId === user?.id);
 
@@ -276,17 +278,23 @@ export function EventDetailPage() {
         {/* Google Calendar is pushed automatically on create/update.
             Keep .ics as a fallback for Apple/Outlook offline import. */}
         <div className="space-y-2">
-          <p className="text-center text-xs text-fg-muted">
-            Synced to Google Calendar automatically when you create or change
-            this event. Re-authenticate with Google once if it doesn&apos;t
-            appear.
-          </p>
+          {calendarSynced ? (
+            <p className="text-center text-xs text-success">
+              On your Google Calendar
+            </p>
+          ) : (
+            <p className="text-center text-xs text-warning">
+              Not on Google Calendar yet — from Settings, sign out once, then
+              sign in with Google again so Family Vault can create events for
+              you.
+            </p>
+          )}
           <a
             href={`/api/events/${ev.id}/ics`}
             className="lq lq-press flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
           >
             <CalendarPlus className="size-4" />
-            Download .ics
+            Add to Apple Calendar
           </a>
         </div>
 

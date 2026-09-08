@@ -30,8 +30,12 @@ npx wrangler d1 migrations apply family-vault-db --remote
 In Google Cloud Console → Credentials → OAuth client (Web application):
 
 - Authorized redirect URI: `https://<your-domain>/api/auth/google/callback`
-- Scopes used: `openid email profile` + `https://www.googleapis.com/auth/drive.file`
-  (non-sensitive; app-created files only)
+- Scopes used: `openid email profile` +
+  `https://www.googleapis.com/auth/drive.file` (app-created Drive files) +
+  `https://www.googleapis.com/auth/calendar.events` (push Family Vault events
+  into each user's primary Google Calendar). Enable **Google Drive API** and
+  **Google Calendar API** on the GCP project. After adding Calendar scope,
+  existing users must sign out and sign back in once so Google re-consents.
 
 ### 2.5 Secrets (never in wrangler.jsonc, never committed)
 

@@ -23,6 +23,12 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text?: string;
+  /** Optional file attachments (e.g. .ics for Apple/Google Calendar). */
+  attachments?: Array<{
+    filename: string;
+    content: string; // base64
+    contentType?: string;
+  }>;
 }
 
 /**
@@ -47,6 +53,15 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
         subject: msg.subject,
         html: msg.html,
         ...(msg.text ? { text: msg.text } : {}),
+        ...(msg.attachments && msg.attachments.length > 0
+          ? {
+              attachments: msg.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                content_type: a.contentType ?? "application/octet-stream",
+              })),
+            }
+          : {}),
       }),
     });
     if (!res.ok) {

@@ -114,13 +114,20 @@ function ReminderPrefsCard() {
 
 function CalendarFeedCard() {
   const [feedUrl, setFeedUrl] = useState("");
+  const [webcalUrl, setWebcalUrl] = useState("");
   const [copied, setCopied] = useState(false);
 
   const mint = useMutation({
     mutationFn: () =>
-      api<{ url: string }>("/calendar/feed-token", { method: "POST" }),
+      api<{ url: string; webcalUrl?: string }>("/calendar/feed-token", {
+        method: "POST",
+      }),
     onSuccess: (res) => {
       setFeedUrl(res.url);
+      setWebcalUrl(
+        res.webcalUrl ??
+          res.url.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:"),
+      );
       setCopied(false);
     },
   });
@@ -130,26 +137,35 @@ function CalendarFeedCard() {
       <div className="flex items-start gap-3">
         <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
         <div>
-          <div className="text-sm font-medium text-fg">Google Calendar</div>
+          <div className="text-sm font-medium text-fg">Your calendars</div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Family Vault pushes events into your Google Calendar as soon as you
-            create or change them — no manual sync button. Re-authenticate with
-            Google once to grant calendar access if events are missing.
+            Saving an event pushes it to Google Calendar automatically (after
+            you grant calendar access on Google sign-in). For Apple Calendar on
+            iPhone, subscribe once below — new events appear on the next refresh
+            (about 15 minutes), and invite emails include an .ics you can tap to
+            add immediately.
           </p>
         </div>
       </div>
 
       <div className="border-t border-white/10 pt-3">
-        <div className="text-xs font-medium text-fg">Optional: subscribe URL</div>
+        <div className="text-xs font-medium text-fg">Apple Calendar subscribe</div>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          For Apple Calendar / Outlook, or as a read-only backup feed (Google
-          polls subscribed URLs slowly — the auto-push above is the primary
-          path).
+          One-time setup. On iPhone, prefer the webcal link so Calendar opens
+          the subscribe sheet.
         </p>
       </div>
 
       {feedUrl ? (
         <>
+          {webcalUrl && (
+            <a
+              href={webcalUrl}
+              className="lq lq-press lq-primary flex min-h-11 w-full items-center justify-center rounded-full px-5 text-sm font-semibold text-white"
+            >
+              Open in Apple Calendar
+            </a>
+          )}
           <div className="flex items-center gap-2">
             <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
               {feedUrl}
@@ -169,9 +185,8 @@ function CalendarFeedCard() {
             </Button>
           </div>
           <p className="text-xs text-fg-subtle">
-            Paste this link under Subscribe / Add calendar from URL. Anyone with
-            the link can read your calendar — regenerate it to revoke the old
-            one.
+            Anyone with the link can read your calendar — regenerate it to
+            revoke the old one.
           </p>
         </>
       ) : (
@@ -181,7 +196,7 @@ function CalendarFeedCard() {
           loading={mint.isPending}
           onClick={() => mint.mutate()}
         >
-          Get subscribe link
+          Set up Apple Calendar
         </Button>
       )}
       {mint.isError && (

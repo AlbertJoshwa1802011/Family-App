@@ -59,7 +59,7 @@ do NOT set `assets.directory` in the source config; the plugin injects it at bui
 
 **Download:** No S3-style presigned URLs in Drive. **Proxy through the Worker** — `GET .../files/{id}?alt=media` with owner bearer token, stream the body back. Enforce family/role authz before every download. Set `Content-Disposition` + strict `Content-Type`. Never expose tokens to the client.
 
-**Google Cloud Console setup:** enable Drive API; OAuth consent screen (External) with scopes `openid email profile drive.file`; Web OAuth client with exact redirect URIs; **publish to production** (Testing mode expires refresh tokens after 7 days). Non-sensitive scopes → no restricted verification needed.
+**Google Cloud Console setup:** enable Drive API **and Calendar API**; OAuth consent screen (External) with scopes `openid email profile drive.file calendar.events`; Web OAuth client with exact redirect URIs; **publish to production** (Testing mode expires refresh tokens after 7 days). Non-sensitive scopes → no restricted verification needed.
 
 **Limits/gotchas:** 20k req/100s per project; **sustained writes ≤ 3 req/s per account** (queue/throttle bulk); 750 GB/day upload cap; 5TB max file; backoff w/ jitter on 403/429/5xx. Single owner account is the throughput bottleneck at scale (mitigate later with a Shared Drive).
 

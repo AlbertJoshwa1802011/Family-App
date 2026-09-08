@@ -107,13 +107,18 @@ async function removeOne(
 /**
  * Reconcile Google Calendar copies with the current D1 event + guest list.
  * Safe to call after create / update / cancel / RSVP / attendee changes.
+ * Returns how many users were synced successfully (for API feedback).
  */
 export async function syncEventToGoogleCalendars(
   db: Db,
   env: Env,
   eventId: string,
-): Promise<void> {
-  if (!isGoogleOAuthConfigured(env)) return;
+): Promise<{ syncedUserIds: string[]; skipped: boolean }> {
+  if (!isGoogleOAuthConfigured(env)) {
+    return { syncedUserIds: [], skipped: true };
+  }
+
+  const syncedUserIds: string[] = [];
 
   try {
     const event = await db
@@ -121,7 +126,7 @@ export async function syncEventToGoogleCalendars(
       .from(schema.events)
       .where(eq(schema.events.id, eventId))
       .get();
-    if (!event) return;
+    if (!event) return { syncedUserIds, skipped: false };
 
     const existing = await db
       .select()
@@ -134,7 +139,7 @@ export async function syncEventToGoogleCalendars(
           console.warn("gcal remove on trash failed:", e),
         );
       }
-      return;
+      return { syncedUserIds, skipped: false };
     }
 
     const targets = await resolveSyncUserIds(db, eventId, event.createdBy);
@@ -145,6 +150,7 @@ export async function syncEventToGoogleCalendars(
     for (const userId of targets) {
       try {
         await upsertOne(db, env, event, userId, body, byUser.get(userId));
+        syncedUserIds.push(userId);
       } catch (e) {
         // Missing token / scope / transient Google error — skip this user.
         console.warn(`gcal sync skipped for user ${userId}:`, e);
@@ -163,6 +169,27 @@ export async function syncEventToGoogleCalendars(
   } catch (e) {
     console.warn(`gcal syncEvent failed for ${eventId}:`, e);
   }
+
+  return { syncedUserIds, skipped: false };
+}
+
+/** Whether this user currently has a Google Calendar copy of the event. */
+export async function userHasGoogleCalendarCopy(
+  db: Db,
+  eventId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await db
+    .select({ id: schema.eventGoogleSync.id })
+    .from(schema.eventGoogleSync)
+    .where(
+      and(
+        eq(schema.eventGoogleSync.eventId, eventId),
+        eq(schema.eventGoogleSync.userId, userId),
+      ),
+    )
+    .get();
+  return Boolean(row);
 }
 
 /** Drop every Google Calendar copy of an event (delete / trash). */

@@ -12,6 +12,7 @@ import { buildCalendar } from "../lib/ics";
 import { findConflicts, busyBlocks } from "../lib/conflicts";
 import {
   attendeeMemberIds,
+  emailEventIcsToActor,
   notifyEventCancelled,
   notifyEventInvited,
   notifyEventRescheduled,
@@ -19,7 +20,10 @@ import {
   notifyRsvpAnswered,
   type EventSummary,
 } from "../lib/scheduleNotify";
-import { syncEventToGoogleCalendars } from "../lib/eventCalendarSync";
+import {
+  syncEventToGoogleCalendars,
+  userHasGoogleCalendarCopy,
+} from "../lib/eventCalendarSync";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -142,16 +146,26 @@ function summarize(e: {
   familyId: string;
   title: string;
   startAt: number;
+  endAt?: number | null;
   allDay: boolean | null;
   location: string | null;
+  description?: string | null;
+  status?: "active" | "cancelled" | "trashed";
+  version?: number;
+  updatedAt?: number;
 }): EventSummary {
   return {
     id: e.id,
     familyId: e.familyId,
     title: e.title,
     startAt: e.startAt,
+    endAt: e.endAt ?? null,
     allDay: Boolean(e.allDay),
     location: e.location,
+    description: e.description ?? null,
+    status: e.status ?? "active",
+    version: e.version,
+    updatedAt: e.updatedAt,
   };
 }
 
@@ -297,8 +311,19 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     );
   }
 
+  // Creator is excluded from invite mail — send them an .ics so Apple Calendar
+  // (via Mail) can add the event immediately without waiting on a subscribe poll.
+  await emailEventIcsToActor(
+    db,
+    c.env,
+    summarize(event!),
+    userId,
+    `Saved “${event!.title}” to Family Vault`,
+  );
+
   // Push into Google Calendar for creator + attendees (best-effort; app is source of truth).
-  await syncEventToGoogleCalendars(db, c.env, eventId);
+  const gcal = await syncEventToGoogleCalendars(db, c.env, eventId);
+  const calendarSynced = gcal.syncedUserIds.includes(userId);
 
   // Advisory double-booking check — reported, never blocking.
   const conflicts = await findConflicts(
@@ -309,7 +334,7 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     eventId,
   );
 
-  return c.json({ event, conflicts }, 201);
+  return c.json({ event, conflicts, calendarSynced }, 201);
 });
 
 // GET /events/availability?familyId=&from=&to= — free/busy per member.
@@ -342,6 +367,7 @@ eventRoutes.get("/availability", requireSession, async (c) => {
 // GET /events/:id — get event with attendees.
 eventRoutes.get("/:id", requireSession, async (c) => {
   const { id: eventId } = c.req.param();
+  const userId = c.get("userId")!;
   const db = getDb(c.env);
 
   const event = await db
@@ -384,8 +410,9 @@ eventRoutes.get("/:id", requireSession, async (c) => {
   // Can the caller act on this event, or only view and RSVP? Lets the client
   // hide controls that the server would reject anyway.
   const canEdit = canMutateEvent(membership, event);
+  const calendarSynced = await userHasGoogleCalendarCopy(db, eventId, userId);
 
-  return c.json({ event, attendees, rsvpSummary, canEdit });
+  return c.json({ event, attendees, rsvpSummary, canEdit, calendarSynced });
 });
 
 // GET /events/:id/ics — download a single event as an .ics file
@@ -417,6 +444,8 @@ eventRoutes.get("/:id/ics", requireSession, async (c) => {
         endAt: event.endAt,
         allDay: Boolean(event.allDay),
         cancelled: event.status === "cancelled",
+        sequence: Math.max(0, (event.version ?? 1) - 1),
+        updatedAt: event.updatedAt ?? event.createdAt,
       },
     ],
   });
@@ -424,7 +453,9 @@ eventRoutes.get("/:id/ics", requireSession, async (c) => {
   return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": `attachment; filename="event-${event.id}.ics"`,
+      // inline: iOS Safari / Calendar often open the Add Event sheet instead of
+      // just downloading a file (attachment).
+      "Content-Disposition": `inline; filename="event-${event.id}.ics"`,
       "X-Content-Type-Options": "nosniff",
     },
   });
@@ -595,7 +626,8 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     eventId,
   );
 
-  return c.json({ event: updatedEvent, conflicts });
+  const calendarSynced = await userHasGoogleCalendarCopy(db, eventId, userId);
+  return c.json({ event: updatedEvent, conflicts, calendarSynced });
 });
 
 // DELETE /events/:id — soft delete (status=trashed).
