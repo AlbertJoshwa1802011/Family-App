@@ -44,3 +44,8 @@ python3 scripts/validate_migrations.py
 
 Commit with a conventional subject (`feat:`, `fix:`, `test:`, `docs:`, `security:`).
 See `docs/SHIPPING.md`.
+
+If you added or changed an auth-gated `/api/*` route, also confirm the focused
+Vitest file covers **401 + happy path + isolation**
+(`.claude/skills/verify-authenticated/SKILL.md`). Do not “verify” by curling
+production without a session — `401` there is expected middleware behavior.

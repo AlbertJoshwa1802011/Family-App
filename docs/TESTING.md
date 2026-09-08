@@ -9,6 +9,27 @@ npm run gate
 
 That is the same as `npm run test:gate`. It runs **typecheck → lint → vitest → production build**. GitHub Actions (`.github/workflows/ci.yml` and `deploy.yml`) call `npm run gate` so local and CI cannot drift.
 
+## Authenticated verification (read this before curling anything)
+
+**Do not curl production and treat `401 unauthorized` as a feature failure.**
+Auth-gated routes *must* return 401 without a session cookie — that only proves
+middleware is live. Agents cannot mint a production Google session.
+
+| Path | When | How |
+|---|---|---|
+| **Vitest + `seedActor`** (preferred) | Every new `/api/*` feature | See `.claude/skills/verify-authenticated/SKILL.md` and `tests/settlements.test.ts` |
+| **`npm run dev:seed` + curl localhost** | Need real HTTP against `npm run dev` without OAuth | Seeds local D1 with fixed `sid=` cookies and prints curl examples |
+| Production curl without cookie | Post-deploy smoke only | `401` is **expected**; use a signed-in browser for human smoke |
+
+Minimum Vitest coverage for a new resource: no-cookie `401`, happy path `200/201`,
+Zod `validation_error`, cross-family `404`.
+
+```bash
+npx vitest run tests/<name>.test.ts   # prove the feature
+npm run db:migrate:local && npm run dev:seed   # optional local HTTP
+npm run gate                          # before commit
+```
+
 | Script | When to use it |
 |---|---|
 | `npm run gate` / `test:gate` | Before commit, before merge, what CI runs |
@@ -17,6 +38,7 @@ That is the same as `npm run test:gate`. It runs **typecheck → lint → vitest
 | `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:catalog` | Per-module 1000-case grids in `tests/catalog/` |
+| `npm run dev:seed` | Local D1 users + session cookies for curl/browser without OAuth |
 
 Integration tests use a real in-memory SQLite that applies every file in
 `migrations/` (`tests/helpers/testEnv.ts`). Do not mock the database.
