@@ -183,11 +183,30 @@ describe("POST /api/access/demo-requests", () => {
     expect(body.issues.length).toBeGreaterThan(0);
   });
 
+  it("requires company (name/email alone are not enough)", async () => {
+    const res = await app.request(
+      "/api/access/demo-requests",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
+      },
+      t.env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("validation_error");
+  });
+
   it("dedupes a second pending request for the same email", async () => {
     const payload = {
       method: "POST" as const,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
+      body: JSON.stringify({
+        name: "Priya",
+        email: "priya@acme.com",
+        company: "Acme",
+      }),
     };
     await app.request("/api/access/demo-requests", payload, t.env);
     const res = await app.request("/api/access/demo-requests", payload, t.env);

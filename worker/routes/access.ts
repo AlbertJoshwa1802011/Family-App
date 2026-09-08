@@ -34,7 +34,9 @@ function zv<T extends z.ZodType>(s: T) {
 const demoRequestSchema = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(254),
-  company: z.string().trim().max(200).optional().or(z.literal("")),
+  // Company is the one field we always want from a requester (email/name
+  // can come from Google after an access_denied bounce).
+  company: z.string().trim().min(1).max(200),
   message: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 
@@ -171,7 +173,7 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
   const token = generateRandom(24);
   const tokenHash = await sha256Hex(token);
   const id = crypto.randomUUID();
-  const company = data.company?.trim() ? data.company.trim() : null;
+  const company = data.company.trim();
   const message = data.message?.trim() ? data.message.trim() : null;
 
   await db.insert(schema.demoRequests).values({

@@ -46,11 +46,20 @@ const LOGIN_ERRORS: Record<string, string> = {
 
 type Mode = "request" | "signin";
 
+function safeNextPath(raw: string | null): string {
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  return "/";
+}
+
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get("error");
+  const nextPath = safeNextPath(params.get("next"));
+  const prefillEmail = (params.get("email") ?? "").trim();
+  const prefillName = (params.get("name") ?? "").trim();
+  const emailLocked = Boolean(prefillEmail);
 
   const initialMode: Mode =
     oauthError === "access_denied" || oauthError === "access_revoked"
@@ -67,20 +76,23 @@ export function Login() {
   );
   const [success, setSuccess] = useState("");
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(prefillName);
+  const [email, setEmail] = useState(prefillEmail);
   const [company, setCompany] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (isAuthenticated) navigate("/", { replace: true });
-  }, [isAuthenticated, navigate]);
+    if (isAuthenticated) navigate(nextPath, { replace: true });
+  }, [isAuthenticated, navigate, nextPath]);
 
   async function startGoogle() {
     setStarting(true);
     setError("");
     setSuccess("");
-    window.location.assign("/api/auth/google/start");
+    const startUrl = new URL("/api/auth/google/start", window.location.origin);
+    // Preserve deep links (invite accept) through OAuth returnTo.
+    if (nextPath !== "/") startUrl.searchParams.set("returnTo", nextPath);
+    window.location.assign(startUrl.pathname + startUrl.search);
   }
 
   async function submitRequest(e: FormEvent) {
@@ -96,7 +108,7 @@ export function Login() {
           body: JSON.stringify({
             name,
             email,
-            company: company || undefined,
+            company,
             message: message || undefined,
           }),
         },
@@ -191,17 +203,31 @@ export function Login() {
               type="email"
               autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              readOnly={emailLocked}
+              onChange={(e) => {
+                if (!emailLocked) setEmail(e.target.value);
+              }}
               placeholder="you@example.com"
-              className={cn(inputCls, "mt-1")}
+              className={cn(
+                inputCls,
+                "mt-1",
+                emailLocked && "cursor-default opacity-90",
+              )}
             />
+            {emailLocked && (
+              <span className="mt-1 block text-[11px] text-fg-subtle">
+                Filled from your Google sign-in
+              </span>
+            )}
           </label>
           <label className="block text-xs font-medium text-fg-muted">
             Company / team
             <input
+              required
+              autoComplete="organization"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              placeholder="Optional"
+              placeholder="Your company or family team"
               className={cn(inputCls, "mt-1")}
             />
           </label>

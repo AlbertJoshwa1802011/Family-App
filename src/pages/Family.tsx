@@ -129,16 +129,22 @@ export function FamilyPage() {
 
   const inviteMutation = useMutation({
     mutationFn: (payload: { email: string; role: "admin" | "member" }) =>
-      api(`/families/${familyId}/invites`, {
+      api<{
+        invite: { token: string; inviteUrl?: string; emailSent?: boolean };
+      }>(`/families/${familyId}/invites`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["family-members"] });
       setInviteEmail("");
-      setInviteSuccess("Invitation sent!");
+      setInviteSuccess(
+        res.invite.emailSent
+          ? "Invitation emailed — they can join from the link in that mail."
+          : "Invite created. Email couldn't be sent — share the invite link from your email client.",
+      );
       setInviteError("");
-      setTimeout(() => setInviteSuccess(""), 4000);
+      setTimeout(() => setInviteSuccess(""), 6000);
       setShowInviteForm(false);
     },
     onError: (err) => {
