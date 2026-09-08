@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
-  Download,
   MapPin,
   Pencil,
   Trash2,
@@ -19,7 +18,6 @@ import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { api } from "../lib/api";
 import { formatEventTime, eventTypeColor } from "../lib/eventTime";
-import { googleCalendarTemplateUrl } from "../lib/calendarLinks";
 
 interface Attendee {
   memberId: string;
@@ -51,8 +49,6 @@ interface CalendarSyncState {
   status?: string;
   message?: string;
   googleCalendarEventId?: string | null;
-  googleTemplateUrl?: string;
-  icsUrl?: string;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -227,7 +223,7 @@ export function EventDetailPage() {
         </Card>
 
         <Card className="space-y-3 p-4">
-          <p className="text-xs font-semibold text-fg-muted">Phone calendar</p>
+          <p className="text-xs font-semibold text-fg-muted">Google Calendar</p>
           <p
             className={
               (syncCalendar.data?.calendar?.status ?? calendarFromSave?.status) === "synced" ||
@@ -240,20 +236,23 @@ export function EventDetailPage() {
               ?? calendarFromSave?.message
               ?? (ev.googleCalendarEventId
                 ? "This event is on your Google Calendar."
-                : "Saved in Family Vault — not on Google/Apple Calendar yet. Use a button below.")}
+                : "Not on Google Calendar yet. Connect Calendar once in Settings — saves then write automatically.")}
           </p>
           {(syncCalendar.data?.calendar?.status === "needs_reconnect"
             || syncCalendar.data?.calendar?.status === "needs_api_enabled"
             || syncCalendar.data?.calendar?.status === "skipped_no_token"
+            || syncCalendar.data?.calendar?.status === "failed"
             || calendarFromSave?.status === "needs_reconnect"
             || calendarFromSave?.status === "needs_api_enabled"
             || calendarFromSave?.status === "skipped_no_token"
+            || calendarFromSave?.status === "failed"
             || !ev.googleCalendarEventId) && (
             <a
               href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(`/calendar/events/${ev.id}?sync=1`)}`}
-              className="block text-center text-xs font-medium text-vault-400"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-vault-600/90 px-4 text-sm font-semibold text-white"
             >
-              Connect Google Calendar (auto-sync on save)
+              <CalendarDays className="size-4" />
+              Connect Google Calendar
             </a>
           )}
           <Button
@@ -264,30 +263,6 @@ export function EventDetailPage() {
           >
             Sync to Google Calendar now
           </Button>
-          <a
-            href={
-              syncCalendar.data?.calendar?.googleTemplateUrl
-              ?? calendarFromSave?.googleTemplateUrl
-              ?? googleCalendarTemplateUrl(ev)
-            }
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-vault-600/90 px-4 text-sm font-semibold text-white"
-          >
-            <CalendarDays className="size-4" />
-            Add to Google Calendar
-          </a>
-          <a
-            href={
-              syncCalendar.data?.calendar?.icsUrl
-              ?? calendarFromSave?.icsUrl
-              ?? `/api/calendar/events/${ev.id}/ics`
-            }
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"
-          >
-            <Download className="size-4" />
-            Add to Apple Calendar (.ics)
-          </a>
         </Card>
 
         {/* Attendees */}

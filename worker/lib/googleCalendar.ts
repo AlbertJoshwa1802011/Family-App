@@ -1,9 +1,10 @@
 /**
  * Google Calendar write-sync for family events.
  *
- * Uses the signed-in user's OAuth refresh token (KV `user:refresh_token:{id}`).
- * Missing token / missing calendar.events scope is not fatal — event CRUD
- * still succeeds and the UI can offer a reconnect.
+ * Uses the signed-in user's OAuth tokens (KV refresh + cached access).
+ * Create/update always attempt a Calendar API write in-app — never via
+ * external Google TEMPLATE redirects. Delete/cancel remove the remote event
+ * from the creator's primary calendar.
  */
 import type { Env } from "../types";
 import type { Db } from "../db/client";
@@ -13,6 +14,7 @@ import {
   GOOGLE_SCOPES,
   classifyGoogleApiError,
   clearUserGoogleAccessCache,
+  dropGrantedScope,
   getUserGoogleAccessToken,
   scopesKey,
   userHasScope,
@@ -78,34 +80,6 @@ function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
   };
 }
 
-/** Google Calendar "add event" deep link — works without Calendar API OAuth. */
-export function googleCalendarTemplateUrl(ev: {
-  title: string;
-  description?: string | null;
-  location?: string | null;
-  startAt: number;
-  endAt?: number | null;
-  allDay: boolean;
-}): string {
-  const endSecs =
-    ev.endAt && ev.endAt > ev.startAt
-      ? ev.endAt
-      : ev.allDay
-        ? ev.startAt + 86400
-        : ev.startAt + 3600;
-  const dates = ev.allDay
-    ? `${utcDate(ev.startAt).replace(/-/g, "")}/${utcDate(endSecs).replace(/-/g, "")}`
-    : `${rfc3339(ev.startAt).replace(/[-:]/g, "").replace(/\.\d{3}/, "")}/${rfc3339(endSecs).replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`;
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: ev.title,
-    dates,
-  });
-  if (ev.description) params.set("details", ev.description);
-  if (ev.location) params.set("location", ev.location);
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
 /** Convert an https ICS feed URL into a webcal:// URL for Apple Calendar. */
 export function toWebcalUrl(httpsUrl: string): string {
   return httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
@@ -114,15 +88,15 @@ export function toWebcalUrl(httpsUrl: string): string {
 export function calendarStatusMessage(status: CalendarSyncStatus): string {
   switch (status) {
     case "synced":
-      return "Saved to Google Calendar — it should show on your phone now.";
+      return "Saved to your Google Calendar automatically.";
     case "skipped_no_token":
-      return "Not on your phone yet. Tap Connect Google Calendar, or use Add to Google / Apple below.";
+      return "Connect Google Calendar in Settings once — new events then save to Google automatically.";
     case "needs_reconnect":
-      return "Google Calendar permission is missing. Tap Connect Google Calendar, accept calendar access, then Sync — or use Add to Google / Apple below.";
+      return "Google Calendar permission expired. Tap Connect Google Calendar in the app, accept access, then save again.";
     case "needs_api_enabled":
-      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then tap Sync — or use Add to Google / Apple below.";
+      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then reconnect Calendar in Settings.";
     case "failed":
-      return "Automatic Google Calendar sync failed. Use Add to Google Calendar or Add to Apple Calendar below.";
+      return "Could not write to Google Calendar. Tap Sync to retry, or reconnect Calendar in Settings.";
   }
 }
 
@@ -141,35 +115,45 @@ async function gcalFetch(
   });
 }
 
-/**
- * Create or patch the Google Calendar event. Returns the remote id when
- * synced, plus a status the API can echo to the SPA.
- */
 export interface CalendarSyncResult {
   status: CalendarSyncStatus;
   googleCalendarEventId: string | null;
   message: string;
-  /** Deep link that adds the event without Calendar API OAuth. */
-  googleTemplateUrl?: string;
-  /** Session-authenticated .ics download for Apple Calendar / Outlook. */
-  icsUrl?: string;
 }
 
 function result(
   status: CalendarSyncStatus,
   googleCalendarEventId: string | null,
-  ev?: CalendarEventInput,
 ): CalendarSyncResult {
-  const base: CalendarSyncResult = {
+  return {
     status,
     googleCalendarEventId,
     message: calendarStatusMessage(status),
   };
-  if (ev) {
-    base.googleTemplateUrl = googleCalendarTemplateUrl(ev);
-    base.icsUrl = `/api/calendar/events/${ev.id}/ics`;
+}
+
+async function withFreshToken(
+  env: Env,
+  userId: string,
+  write: (token: string) => Promise<Response>,
+): Promise<{ res: Response; token: string } | { error: CalendarSyncStatus }> {
+  let token = await getUserGoogleAccessToken(env, userId);
+  if (!token) return { error: "skipped_no_token" };
+
+  let res = await write(token);
+  // Stale cached access token (often minted for Drive before calendar.events)
+  // returns 401 or insufficient-scope 403 — clear and retry once from refresh.
+  if (res.status === 401 || res.status === 403) {
+    const peek = await res.clone().text();
+    const kind = classifyGoogleApiError(res.status, peek);
+    if (kind === "auth") {
+      await clearUserGoogleAccessCache(env, userId);
+      token = await getUserGoogleAccessToken(env, userId);
+      if (!token) return { error: "skipped_no_token" };
+      res = await write(token);
+    }
   }
-  return base;
+  return { res, token };
 }
 
 export async function upsertGoogleCalendarEvent(
@@ -180,22 +164,18 @@ export async function upsertGoogleCalendarEvent(
 ): Promise<CalendarSyncResult> {
   try {
     const input: CalendarEventInput = { ...ev, allDay: Boolean(ev.allDay) };
-    let token = await getUserGoogleAccessToken(env, userId);
-    if (!token) return result("skipped_no_token", input.googleCalendarEventId, input);
 
-    // If we already know this login never granted calendar.events, fail fast
-    // with a reconnect prompt instead of a opaque Google 403.
     const scopesKnown = Boolean(await env.KV.get(scopesKey(userId)));
     if (
       scopesKnown &&
       !(await userHasScope(env, userId, GOOGLE_SCOPES.calendarEvents))
     ) {
-      return result("needs_reconnect", input.googleCalendarEventId, input);
+      return result("needs_reconnect", input.googleCalendarEventId);
     }
 
     const body = JSON.stringify(toGcalBody(input));
 
-    async function write(accessToken: string): Promise<Response> {
+    const outcome = await withFreshToken(env, userId, async (accessToken) => {
       if (input.googleCalendarEventId) {
         let res = await gcalFetch(
           accessToken,
@@ -208,29 +188,27 @@ export async function upsertGoogleCalendarEvent(
         return res;
       }
       return gcalFetch(accessToken, CAL_API, { method: "POST", body });
+    });
+
+    if ("error" in outcome) {
+      return result(outcome.error, input.googleCalendarEventId);
     }
 
-    let res = await write(token);
-    // Stale access token without calendar.events — clear cache and retry once.
-    if (res.status === 401) {
-      await clearUserGoogleAccessCache(env, userId);
-      token = await getUserGoogleAccessToken(env, userId);
-      if (!token) return result("skipped_no_token", input.googleCalendarEventId, input);
-      res = await write(token);
-    }
-
+    const { res } = outcome;
     if (res.status === 401 || res.status === 403) {
       const errBody = await res.text();
       const kind = classifyGoogleApiError(res.status, errBody);
       console.error(`[gcal] upsert ${res.status}: ${errBody.slice(0, 200)}`);
       if (kind === "api_disabled") {
-        return result("needs_api_enabled", input.googleCalendarEventId, input);
+        return result("needs_api_enabled", input.googleCalendarEventId);
       }
-      return result("needs_reconnect", input.googleCalendarEventId, input);
+      // Live token lacks calendar — drop the stale KV flag so Settings matches.
+      await dropGrantedScope(env, userId, GOOGLE_SCOPES.calendarEvents);
+      return result("needs_reconnect", input.googleCalendarEventId);
     }
     if (!res.ok) {
       console.error(`[gcal] upsert ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return result("failed", input.googleCalendarEventId, input);
+      return result("failed", input.googleCalendarEventId);
     }
     const created = (await res.json()) as { id?: string };
     const remoteId = created.id ?? input.googleCalendarEventId;
@@ -240,32 +218,43 @@ export async function upsertGoogleCalendarEvent(
         .set({ googleCalendarEventId: remoteId })
         .where(eq(schema.events.id, input.id));
     }
-    return result("synced", remoteId ?? null, input);
+    return result("synced", remoteId ?? null);
   } catch (err) {
     console.error("[gcal] upsert failed:", err);
-    return result("failed", ev.googleCalendarEventId, { ...ev, allDay: Boolean(ev.allDay) });
+    return result("failed", ev.googleCalendarEventId);
   }
 }
 
+/**
+ * Delete the Google Calendar copy. Prefer the event *creator's* userId — the
+ * event lives on their primary calendar. Returns true when remote is gone
+ * (or never existed / already 404).
+ */
 export async function deleteGoogleCalendarEvent(
   env: Env,
   userId: string,
   googleCalendarEventId: string | null,
-): Promise<void> {
-  if (!googleCalendarEventId) return;
+): Promise<boolean> {
+  if (!googleCalendarEventId) return true;
   try {
-    const token = await getUserGoogleAccessToken(env, userId);
-    if (!token) return;
-    const res = await gcalFetch(
-      token,
-      `${CAL_API}/${encodeURIComponent(googleCalendarEventId)}`,
-      { method: "DELETE" },
+    const outcome = await withFreshToken(env, userId, (accessToken) =>
+      gcalFetch(
+        accessToken,
+        `${CAL_API}/${encodeURIComponent(googleCalendarEventId)}`,
+        { method: "DELETE" },
+      ),
     );
-    if (!res.ok && res.status !== 404) {
-      console.error(`[gcal] delete ${res.status}`);
+    if ("error" in outcome) {
+      console.error(`[gcal] delete skipped: ${outcome.error}`);
+      return false;
     }
+    const { res } = outcome;
+    if (res.ok || res.status === 404) return true;
+    console.error(`[gcal] delete ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return false;
   } catch (err) {
     console.error("[gcal] delete failed:", err);
+    return false;
   }
 }
 

@@ -258,9 +258,10 @@ function EventFormFields({
       <Page className="space-y-4">
         <Card className="space-y-2 p-4">
           <p className="text-sm text-fg-muted">
-            Saving stores the event in Family Vault. It appears on your phone when{" "}
-            <span className="font-medium text-fg">Google Calendar is connected</span>
-            {" "}— or use Add to Google / Apple on the next screen.
+            After you{" "}
+            <span className="font-medium text-fg">Connect Google Calendar</span>{" "}
+            once, every save writes the event to your Google Calendar inside the
+            app — no leaving Family Vault.
           </p>
           <a
             href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(isEdit && id ? `/calendar/events/${id}/edit` : "/calendar/events/new")}`}

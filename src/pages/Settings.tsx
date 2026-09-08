@@ -89,7 +89,12 @@ function GoogleConnectionsCard() {
   const { data } = useQuery({
     queryKey: ["google-status"],
     queryFn: () =>
-      api<{ contacts: boolean; gmail: boolean; calendar: boolean }>("/auth/google/status"),
+      api<{
+        contacts: boolean;
+        gmail: boolean;
+        calendar: boolean;
+        hasRefreshToken?: boolean;
+      }>("/auth/google/status"),
   });
 
   return (
@@ -122,8 +127,8 @@ function GoogleConnectionsCard() {
         title="Google Calendar"
         subtitle={
           data?.calendar
-            ? "Granted — new events write to your primary calendar"
-            : "Grant calendar.events so saves appear on your phone"
+            ? "Connected — creating an event writes it to Google automatically"
+            : "Connect once so event create/update/delete sync inside the app"
         }
         trailing={
           data?.calendar ? (
@@ -345,8 +350,8 @@ function CalendarFeedCard() {
       <Card className="space-y-3 p-4">
         <p className="text-sm text-fg-muted">
           Instant Google Calendar needs Connections → Google Calendar above.
-          For Apple Calendar, create a feed and open the webcal link — or open
-          any event and tap Add to Apple Calendar.
+          Creating an event then writes to Google inside the app. The ICS feed
+          below is only a backup for Apple Calendar subscribe.
         </p>
         {shown && (
           <div className="space-y-2">

@@ -2,8 +2,9 @@
  * Shared Google OAuth scope names and per-user access-token refresh.
  *
  * Drive, Gmail, People, and Calendar APIs all mint access tokens from the same
- * refresh token in KV (`user:refresh_token:{userId}`). After incremental consent
- * we store the granted scope list at `user:google_scopes:{userId}`.
+ * refresh token in KV (`user:refresh_token:{userId}`). After consent we store
+ * Google's reported scope list at `user:google_scopes:{userId}` (replaced, not
+ * merge-forever — stale "calendar On" lied when the live token lacked it).
  */
 import type { Env } from "../types";
 
@@ -58,6 +59,22 @@ export async function clearUserGoogleAccessCache(env: Env, userId: string): Prom
   await env.KV.delete(gcalAccessKey(userId));
 }
 
+/** Cache a freshly issued access token (post-login / Connect). */
+export async function cacheUserGoogleAccessToken(
+  env: Env,
+  userId: string,
+  accessToken: string,
+  expiresInSecs?: number,
+): Promise<void> {
+  await env.KV.put(accessKey(userId), accessToken, {
+    expirationTtl: Math.max((expiresInSecs ?? 3600) - 300, 60),
+  });
+}
+
+export async function userHasRefreshToken(env: Env, userId: string): Promise<boolean> {
+  return Boolean(await env.KV.get(refreshKey(userId)));
+}
+
 /**
  * Distinguish "API not enabled on the Cloud project" from a missing OAuth
  * scope. Google returns 403 for both; the body is the only signal.
@@ -82,18 +99,60 @@ export function classifyGoogleApiError(
   return "auth";
 }
 
+function parseScopeString(scopeString: string | undefined): string[] {
+  if (!scopeString) return [];
+  return scopeString.split(/\s+/).filter(Boolean);
+}
+
+export function scopeListIncludes(scopes: string[], scope: string): boolean {
+  const short = scope.replace("https://www.googleapis.com/auth/", "");
+  return scopes.includes(scope) || scopes.includes(short);
+}
+
+/**
+ * Replace the stored scope list with Google's reported scopes.
+ * Prefer this after code exchange / token refresh so Settings cannot stay
+ * "Calendar On" after Google stopped granting calendar.events.
+ */
+export async function replaceGrantedScopes(
+  env: Env,
+  userId: string,
+  scopeString: string | undefined,
+): Promise<void> {
+  const scopes = parseScopeString(scopeString);
+  if (scopes.length === 0) return;
+  await env.KV.put(scopesKey(userId), JSON.stringify(scopes));
+}
+
+/** Merge scopes (login path when Google omits a full scope string). */
 export async function storeGrantedScopes(
   env: Env,
   userId: string,
   scopeString: string | undefined,
 ): Promise<void> {
-  if (!scopeString) return;
-  const scopes = scopeString.split(/\s+/).filter(Boolean);
-  if (scopes.length === 0) return;
+  const incoming = parseScopeString(scopeString);
+  if (incoming.length === 0) return;
   const existingRaw = await env.KV.get(scopesKey(userId));
   const existing: string[] = existingRaw ? (JSON.parse(existingRaw) as string[]) : [];
-  const merged = [...new Set([...existing, ...scopes])];
+  const merged = [...new Set([...existing, ...incoming])];
   await env.KV.put(scopesKey(userId), JSON.stringify(merged));
+}
+
+export async function dropGrantedScope(
+  env: Env,
+  userId: string,
+  scope: string,
+): Promise<void> {
+  const raw = await env.KV.get(scopesKey(userId));
+  if (!raw) return;
+  try {
+    const scopes = JSON.parse(raw) as string[];
+    const short = scope.replace("https://www.googleapis.com/auth/", "");
+    const next = scopes.filter((s) => s !== scope && s !== short);
+    await env.KV.put(scopesKey(userId), JSON.stringify(next));
+  } catch {
+    // ignore corrupt KV
+  }
 }
 
 export async function userHasScope(
@@ -105,10 +164,22 @@ export async function userHasScope(
   if (!raw) return false;
   try {
     const scopes = JSON.parse(raw) as string[];
-    return scopes.includes(scope) || scopes.includes(scope.replace("https://www.googleapis.com/auth/", ""));
+    return scopeListIncludes(scopes, scope);
   } catch {
     return false;
   }
+}
+
+/**
+ * Calendar is "ready" only when Google reported calendar.events AND we still
+ * have a refresh token to mint access tokens for writes.
+ */
+export async function userCalendarReady(env: Env, userId: string): Promise<boolean> {
+  const [hasScope, hasRefresh] = await Promise.all([
+    userHasScope(env, userId, GOOGLE_SCOPES.calendarEvents),
+    userHasRefreshToken(env, userId),
+  ]);
+  return hasScope && hasRefresh;
 }
 
 export async function getUserGoogleAccessToken(
@@ -143,10 +214,9 @@ export async function getUserGoogleAccessToken(
     scope?: string;
   };
   if (!body.access_token) return null;
-  if (body.scope) await storeGrantedScopes(env, userId, body.scope);
-  await env.KV.put(accessKey(userId), body.access_token, {
-    expirationTtl: Math.max((body.expires_in ?? 3600) - 300, 60),
-  });
+  // Google's refresh response scope is the live grant — replace, don't merge.
+  if (body.scope) await replaceGrantedScopes(env, userId, body.scope);
+  await cacheUserGoogleAccessToken(env, userId, body.access_token, body.expires_in);
   return body.access_token;
 }
 

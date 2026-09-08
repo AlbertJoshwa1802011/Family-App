@@ -11,7 +11,6 @@ import { notifyEventChange } from "../lib/eventNotify";
 import {
   calendarStatusMessage,
   deleteGoogleCalendarEvent,
-  googleCalendarTemplateUrl,
   upsertGoogleCalendarEvent,
   type CalendarSyncResult,
 } from "../lib/googleCalendar";
@@ -220,11 +219,6 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     message: calendarStatusMessage("failed"),
   };
   if (event) {
-    calendar = {
-      ...calendar,
-      googleTemplateUrl: googleCalendarTemplateUrl(event),
-      icsUrl: `/api/calendar/events/${event.id}/ics`,
-    };
     try {
       calendar = await syncCalendar(c.env, db, userId, event);
     } catch (err) {
@@ -353,11 +347,6 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     message: calendarStatusMessage("failed"),
   };
   if (updatedEvent) {
-    calendar = {
-      ...calendar,
-      googleTemplateUrl: googleCalendarTemplateUrl(updatedEvent),
-      icsUrl: `/api/calendar/events/${updatedEvent.id}/ics`,
-    };
     try {
       calendar = await syncCalendar(c.env, db, userId, updatedEvent);
     } catch (err) {
@@ -421,9 +410,20 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
     targetId: eventId,
   });
 
-  await deleteGoogleCalendarEvent(c.env, userId, event.googleCalendarEventId);
+  // Remove from the *creator's* Google Calendar (where create wrote it).
+  const removed = await deleteGoogleCalendarEvent(
+    c.env,
+    event.createdBy,
+    event.googleCalendarEventId,
+  );
+  if (removed && event.googleCalendarEventId) {
+    await db
+      .update(schema.events)
+      .set({ googleCalendarEventId: null })
+      .where(eq(schema.events.id, eventId));
+  }
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, googleCalendarRemoved: removed });
 });
 
 // POST /events/:id/cancel — cancel without deleting (stays visible with strikethrough).
@@ -457,8 +457,19 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
     targetId: eventId,
   });
 
+  let googleCalendarRemoved = false;
   try {
-    await deleteGoogleCalendarEvent(c.env, userId, event.googleCalendarEventId);
+    googleCalendarRemoved = await deleteGoogleCalendarEvent(
+      c.env,
+      event.createdBy,
+      event.googleCalendarEventId,
+    );
+    if (googleCalendarRemoved && event.googleCalendarEventId) {
+      await db
+        .update(schema.events)
+        .set({ googleCalendarEventId: null })
+        .where(eq(schema.events.id, eventId));
+    }
   } catch (err) {
     console.error("[events] calendar delete on cancel failed:", err);
   }
@@ -477,7 +488,7 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
     console.error("[events] notify failed:", err);
   }
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, googleCalendarRemoved });
 });
 
 // POST /events/:id/sync-calendar — retry Google Calendar write without editing.
