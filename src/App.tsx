@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
@@ -7,6 +7,7 @@ import { useAuth } from "./context/AuthContext";
 import { VaultProvider } from "./context/VaultContext";
 import { Login } from "./pages/Login";
 import { AccessReview } from "./pages/AccessReview";
+import { JoinInvite } from "./pages/JoinInvite";
 import { Dashboard } from "./pages/Dashboard";
 import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
@@ -42,8 +43,14 @@ import { Chat } from "./pages/Chat";
 import { DeviceLockGate } from "./components/DeviceLockGate";
 import { NotFound } from "./pages/NotFound";
 
+function loginRedirect(nextPath: string) {
+  const next = encodeURIComponent(nextPath);
+  return <Navigate to={`/login?next=${next}`} replace />;
+}
+
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-slate-400">
@@ -51,7 +58,26 @@ function Protected({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    return loginRedirect(`${location.pathname}${location.search}`);
+  }
+  return <>{children}</>;
+}
+
+/** Auth required but NO family/layout gate — invitees may have no family yet. */
+function AuthOnly({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return loginRedirect(`${location.pathname}${location.search}`);
+  }
   return <>{children}</>;
 }
 
@@ -61,6 +87,22 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/access/review" element={<AccessReview />} />
+        <Route
+          path="/invite/:token"
+          element={
+            <AuthOnly>
+              <JoinInvite />
+            </AuthOnly>
+          }
+        />
+        <Route
+          path="/join/:token"
+          element={
+            <AuthOnly>
+              <JoinInvite />
+            </AuthOnly>
+          }
+        />
         <Route
           element={
             <Protected>
@@ -122,9 +164,12 @@ export default function App() {
           <Route path="/contacts/new" element={<ContactForm />} />
           <Route path="/contacts/:id/edit" element={<ContactForm />} />
 
+<<<<<<< HEAD
           <Route path="/notes" element={<Notes />} />
           <Route path="/notes/:id" element={<NoteDetailPage />} />
 
+=======
+>>>>>>> 174a2eb (feat: autofill access request email and send family invite mail)
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/notifications" element={<Notifications />} />

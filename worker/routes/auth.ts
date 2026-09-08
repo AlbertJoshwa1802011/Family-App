@@ -164,7 +164,8 @@ authRoutes.get("/google/start", async (c) => {
 
   const connect = c.req.query("connect") ?? "";
   const extra = extraScopesFromConnect(connect);
-  const returnTo = c.req.query("returnTo") || "/";
+  // Prefer returnTo; accept ?next= as an alias so invite deep-links work.
+  const returnTo = c.req.query("returnTo") || c.req.query("next") || "/";
   // Force the consent screen only when requesting extra scopes (Calendar,
   // Contacts, Gmail) or when the client asks for a fresh refresh token.
   // prompt=consent on every login re-shows Google's "unverified app" warning.
@@ -285,7 +286,12 @@ authRoutes.get("/google/callback", async (c) => {
   // Closed signup: only approved emails / bootstrap admins / returning users.
   const access = await canSignIn(db, c.env, { email, googleSub: sub });
   if (!access.ok) {
-    return redirect(`/login?error=${encodeURIComponent(access.reason)}`);
+    const q = new URLSearchParams({
+      error: access.reason,
+      email,
+    });
+    if (name?.trim()) q.set("name", name.trim());
+    return redirect(`/login?${q.toString()}`);
   }
 
   // Upsert user: update profile fields on conflict (user might have changed their name/picture)

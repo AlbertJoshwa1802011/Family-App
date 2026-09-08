@@ -151,3 +151,28 @@ export function accessRejectedEmail(opts: { name: string | null }): string {
     footer: "If you weren't expecting this, you can ignore this email.",
   });
 }
+
+/** Family member invite — link lands on /invite/:token after Google sign-in. */
+export function inviteEmail(opts: {
+  inviterName: string | null;
+  familyName: string;
+  inviteUrl: string;
+}): string {
+  const inviter = opts.inviterName ?? "A family member";
+  const content = `
+    <tr><td style="height:6px;background:${COLORS.brand};font-size:0">&nbsp;</td></tr>
+    <tr><td style="padding:24px 24px 4px;font-size:20px;font-weight:700;color:${COLORS.ink}">You're invited to ${escapeHtml(opts.familyName)}</td></tr>
+    <tr><td style="padding:8px 24px 20px;font-size:14px;line-height:1.6;color:${COLORS.muted}">
+      ${escapeHtml(inviter)} invited you to join their family vault — a private place for
+      your family's important documents, reminders, events, and chat.
+      Sign in with this email address to accept.
+    </td></tr>
+    <tr><td style="padding:0 24px 12px">${button("Join the family", opts.inviteUrl)}</td></tr>
+    <tr><td style="padding:0 24px 28px;font-size:12px;color:${COLORS.subtle}">This invite only works for this email address and expires in 7 days.</td></tr>`;
+
+  return shell({
+    preheader: `${inviter} invited you to ${opts.familyName} on Family Vault`,
+    content,
+    footer: "If you weren't expecting this invitation you can safely ignore this email.",
+  });
+}

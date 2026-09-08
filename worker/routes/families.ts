@@ -8,6 +8,10 @@ import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, ACTIONS } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
+import { checkRateLimit } from "../lib/rateLimit";
+import { sendEmail } from "../lib/email";
+import { inviteEmail } from "../lib/accessEmails";
+import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
 import {
   relabelFamilyCurrency,
   totalRelabeled,
@@ -22,7 +26,7 @@ const createFamilySchema = z.object({
 });
 
 const inviteSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   role: z.enum(["admin", "member"]).optional().default("member"),
 });
 
@@ -323,6 +327,20 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
   if (invite.expiresAt < now) return c.json({ error: "invite_expired" }, 410);
   if (invite.acceptedAt !== null) return c.json({ error: "invite_already_used" }, 409);
 
+  // Invites are email-bound. A leaked/forwarded link must not admit another account.
+  const acceptingUser = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  if (
+    !acceptingUser ||
+    normalizeEmail(acceptingUser.email) !== normalizeEmail(invite.email)
+  ) {
+    return c.json({ error: "invite_email_mismatch" }, 403);
+  }
+
   // Check user is not already a member
   const existing = await db
     .select({ id: schema.familyMembers.id })
@@ -621,18 +639,26 @@ familyRoutes.patch(
 );
 
 // POST /families/:id/invites — create an invite (admin+ only).
-// Email delivery is deferred to Phase 3 (Resend integration).
+// Also grants app-level access for the email (closed signup) and emails the
+// join link when a mail transport is configured.
 familyRoutes.post(
   "/:id/invites",
   requireSession,
   zv(inviteSchema),
   async (c) => {
     const { id: familyId } = c.req.param();
-    const { email, role } = c.req.valid("json");
+    const { email: rawEmail, role } = c.req.valid("json");
+    const email = normalizeEmail(rawEmail);
     const userId = c.get("userId")!;
 
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
     if (callerOrError instanceof Response) return callerOrError;
+
+    const limited = await checkRateLimit(c, `invite:${userId}`, {
+      limit: 20,
+      windowSecs: 3600,
+    });
+    if (limited) return limited;
 
     const db = getDb(c.env);
     const now = Math.floor(Date.now() / 1000);
@@ -640,6 +666,7 @@ familyRoutes.post(
     // Generate invite token and hash it for storage
     const token = crypto.randomUUID();
     const tokenHash = await sha256Hex(token);
+    const expiresAt = now + 7 * 24 * 3600;
 
     await db.insert(schema.invites).values({
       id: crypto.randomUUID(),
@@ -648,7 +675,14 @@ familyRoutes.post(
       tokenHash,
       role,
       invitedBy: userId,
-      expiresAt: now + 7 * 24 * 3600, // 7 days
+      expiresAt,
+    });
+
+    // Family invite ⇒ app access so closed signup does not block Google login.
+    await upsertAccessGrant(db, {
+      email,
+      grantedByUserId: userId,
+      note: `family invite:${familyId}`,
     });
 
     await insertAuditEvent(db, {
@@ -659,15 +693,39 @@ familyRoutes.post(
       meta: { email, role },
     });
 
-    // Return the plain token so the caller can include it in an email link.
-    // In Phase 3 this route will also trigger a Resend email.
+    const [inviter, family] = await Promise.all([
+      db
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .get(),
+      db
+        .select({ name: schema.families.name })
+        .from(schema.families)
+        .where(eq(schema.families.id, familyId))
+        .get(),
+    ]);
+    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+    const inviteUrl = `${appUrl}/invite/${token}`;
+    const emailSent = await sendEmail(c.env, {
+      to: email,
+      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
+      html: inviteEmail({
+        inviterName: inviter?.name ?? null,
+        familyName: family?.name ?? "Family Vault",
+        inviteUrl,
+      }),
+    });
+
     return c.json(
       {
         invite: {
           email,
           role,
-          expiresAt: now + 7 * 24 * 3600,
-          token, // include in invite link: /invites/<token>/accept
+          expiresAt,
+          token,
+          inviteUrl,
+          emailSent,
         },
       },
       201,
