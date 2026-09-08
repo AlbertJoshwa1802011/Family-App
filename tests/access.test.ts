@@ -202,7 +202,11 @@ describe("POST /api/access/demo-requests", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
+        body: JSON.stringify({
+          name: "Priya",
+          email: "priya@acme.com",
+          company: "Acme",
+        }),
       },
       t.env,
     );
