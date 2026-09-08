@@ -261,6 +261,14 @@ export function Assistant() {
           fail(streamError);
           return;
         }
+        // If the stream ended without tokens (malformed/partial), still settle the bubble.
+        setTurns((t) => {
+          const last = t[t.length - 1];
+          if (last?.role === "model" && !last.text.trim()) {
+            return [...t.slice(0, -1), { role: "model", text: "Done." }];
+          }
+          return t;
+        });
         setBusy(false);
       } else {
         // JSON fallback (non-stream clients / older workers).

@@ -212,6 +212,136 @@ describe("runAssistant Gemini loop", () => {
     expect(result.text).toBe("Hello there.");
   });
 
+  it("does not forward thought tokens while streaming", async () => {
+    const tokens: string[] = [];
+    const sse = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"secret","thought":true}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"Visible"}]}}]}\n\n',
+    ].join("");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(sse, { status: 200 })),
+    );
+
+    const result = await runAssistant({
+      apiKey: "k",
+      systemInstruction: "s",
+      history: [{ role: "user", parts: [{ text: "hi" }] }],
+      tools: [],
+      execute: async () => ({}),
+      onToken: (t) => tokens.push(t),
+    });
+    expect(tokens).toEqual(["Visible"]);
+    expect(result.text).toBe("Visible");
+  });
+
+  it("streams a tool round then skips the follow-up when summary is clear", async () => {
+    const tokens: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(String(url)).toContain(":streamGenerateContent");
+      const sse =
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"add_expense","args":{"amountMajor":70}}}]}}]}\n\n';
+      return new Response(sse, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runAssistant({
+      apiKey: "k",
+      systemInstruction: "s",
+      history: [{ role: "user", parts: [{ text: "spent 70" }] }],
+      tools: [
+        {
+          name: "add_expense",
+          description: "d",
+          parameters: { type: "object", properties: { amountMajor: { type: "number" } } },
+        },
+      ],
+      execute: async () => ({ summary: "Logged $70 for expense." }),
+      onToken: (t) => tokens.push(t),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(tokens).toEqual(["Logged $70 for expense."]);
+    expect(result.text).toBe("Logged $70 for expense.");
+  });
+
+  it("does not skip when any tool result lacks a clear summary", async () => {
+    let round = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        round += 1;
+        if (round === 1) {
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      { functionCall: { name: "add_expense", args: { amountMajor: 10 } } },
+                      { functionCall: { name: "list_recent_expenses", args: {} } },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: "Added $10. You spent little else." }] } }],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await runAssistant({
+      apiKey: "k",
+      systemInstruction: "s",
+      history: [{ role: "user", parts: [{ text: "add 10 and show recent" }] }],
+      tools: [
+        {
+          name: "add_expense",
+          description: "d",
+          parameters: { type: "object", properties: {} },
+        },
+        {
+          name: "list_recent_expenses",
+          description: "d",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      execute: async (name) =>
+        name === "add_expense"
+          ? { summary: "Logged $10." }
+          : { currency: "USD", expenses: [] },
+    });
+
+    expect(round).toBe(2);
+    expect(result.text).toContain("Added $10");
+  });
+
+  it("surfaces Gemini stream payload errors as GeminiError", async () => {
+    const sse = 'data: {"error":{"message":"API key not valid","status":"INVALID_ARGUMENT"}}\n\n';
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(sse, { status: 200 })),
+    );
+
+    await expect(
+      runAssistant({
+        apiKey: "k",
+        systemInstruction: "s",
+        history: [{ role: "user", parts: [{ text: "hi" }] }],
+        tools: [],
+        execute: async () => ({}),
+        onToken: () => undefined,
+      }),
+    ).rejects.toMatchObject({ name: "GeminiError", message: /API key/i });
+  });
+
   it("maps missing thought_signature 400s to a clear message", () => {
     expect(
       friendlyGeminiMessage(

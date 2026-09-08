@@ -168,13 +168,23 @@ function mergeStreamParts(
       continue;
     }
     if (typeof p.text === "string") {
+      // Never concatenate visible prose onto a thought part — thoughts are
+      // filtered later, and merging would erase the real reply.
+      if (p.thought) {
+        out.push({ ...p });
+        continue;
+      }
       const last = out[out.length - 1];
-      if (last && typeof last.text === "string" && !last.functionCall) {
+      if (
+        last &&
+        typeof last.text === "string" &&
+        !last.functionCall &&
+        !last.thought
+      ) {
         last.text += p.text;
         if (typeof p.thoughtSignature === "string" && p.thoughtSignature) {
           last.thoughtSignature = p.thoughtSignature;
         }
-        if (p.thought) last.thought = true;
       } else {
         out.push({ ...p });
       }
