@@ -19,6 +19,8 @@ import { Tasks } from "./pages/Tasks";
 import { TaskForm } from "./pages/TaskForm";
 import { Contacts } from "./pages/Contacts";
 import { ContactForm } from "./pages/ContactForm";
+import { Notes } from "./pages/Notes";
+import { NoteDetailPage } from "./pages/NoteDetail";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { AdminStorage } from "./pages/admin/Storage";
@@ -119,7 +121,10 @@ export default function App() {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/contacts/new" element={<ContactForm />} />
           <Route path="/contacts/:id/edit" element={<ContactForm />} />
-          
+
+          <Route path="/notes" element={<Notes />} />
+          <Route path="/notes/:id" element={<NoteDetailPage />} />
+
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/notifications" element={<Notifications />} />

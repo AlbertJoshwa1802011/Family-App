@@ -490,6 +490,70 @@ export const contacts = sqliteTable(
   ],
 );
 
+// Folders (`notebooks`) + free-form notes for daily journaling, Bible study,
+// etc. Visibility mirrors documents: private notes are owner/admin-only;
+// family notes are shared with every active member. Soft-delete via deletedAt
+// (Recently Deleted). D1 cascades are advisory — deleting a notebook must
+// explicitly null out notes.notebook_id in app code.
+
+export const NOTE_KINDS = ["general", "bible", "journal", "other"] as const;
+export type NoteKind = (typeof NOTE_KINDS)[number];
+
+export const notebooks = sqliteTable(
+  "notebooks",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_notebook_family_sort").on(t.familyId, t.sortOrder),
+  ],
+);
+
+export const notes = sqliteTable(
+  "notes",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // NULL = unfiled (All Notes / no folder).
+    notebookId: text("notebook_id").references(() => notebooks.id, {
+      onDelete: "set null",
+    }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default(""),
+    body: text("body").notNull().default(""),
+    kind: text("kind", { enum: NOTE_KINDS }).notNull().default("general"),
+    // Calendar date the note is about (daily / Bible study day), not an instant.
+    noteDate: text("note_date"), // ISO yyyy-mm-dd
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    pinned: integer("pinned").notNull().default(0), // 0|1
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+    deletedAt: integer("deleted_at"),
+  },
+  (t) => [
+    index("idx_note_family_updated").on(t.familyId, t.updatedAt),
+    index("idx_note_notebook").on(t.notebookId),
+    index("idx_note_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_note_family_kind").on(t.familyId, t.kind),
+  ],
+);
+
 // Platform authenticator (Face ID / fingerprint / Windows Hello) per user.
 export const deviceCredentials = sqliteTable(
   "device_credentials",

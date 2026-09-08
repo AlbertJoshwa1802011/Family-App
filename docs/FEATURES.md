@@ -50,6 +50,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
 | `tasks` | Family to-dos, assignable, linked to doc/event | 0002 |
 | `contacts` | Emergency contacts per family | 0002 |
+| `notebooks` | Note folders (Bible Study, Journal, …) | 0020 |
+| `notes` | Free-form notes (private/family, soft-delete trash) | 0020 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
 
@@ -60,6 +62,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
+- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|other`; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
 
 ---
 
@@ -119,6 +122,8 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 | GET | `/contacts/:id` | Stub-501 | 2.5 |
 | PATCH | `/contacts/:id` | Val-501 | 2.5 |
 | DELETE | `/contacts/:id` | Stub-501 | 2.5 |
+| GET/POST | `/notes/notebooks` · PATCH/DELETE `/notes/notebooks/:id` | Real | — |
+| GET/POST | `/notes` · GET/PATCH/DELETE `/notes/:id` · POST `/notes/:id/restore` | Real | — |
 
 ### Zod Validation Rules (Critical Constraints)
 
@@ -129,6 +134,8 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
 **POST /documents:** `familyId` required; `title` min 1/max 300; `visibility` enum `["family","private"]`; `expiryDate`/`issuedDate` regex `^\d{4}-\d{2}-\d{2}$`.
+
+**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` enum `general|bible|journal|other` (default general); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
 
 ---
 
@@ -148,13 +155,15 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 | `/calendar/events/:id/edit` | `EventForm` | Yes |
 | `/tasks` | `Tasks` | Yes |
 | `/contacts` | `Contacts` | Yes |
+| `/notes` | `Notes` | Yes |
+| `/notes/:id` | `NoteDetailPage` | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
 
 ### Bottom Navigation
 
-5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`. Tasks (`/tasks`) and Contacts (`/contacts`) are reached from the Dashboard "Quick access" row (keeps the nav at 5 items).
+5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`. Tasks (`/tasks`), Notes (`/notes`), and Contacts (`/contacts`) are reached from the Dashboard Apps grid (keeps the nav at 5 items).
 
 ### Key Libraries
 
