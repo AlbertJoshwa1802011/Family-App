@@ -22,9 +22,9 @@ import {
 } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema, type Db } from "../db/client";
-import { NOTE_KINDS } from "../db/schema";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { labelSlugSchema } from "../lib/labels";
 
 export const noteRoutes = new Hono<HonoEnv>();
 
@@ -35,7 +35,8 @@ const noteFieldsSchema = z.object({
   notebookId: z.string().min(1).nullable(),
   title: z.string().max(200),
   body: z.string().max(100_000),
-  kind: z.enum(NOTE_KINDS),
+  // Free slug: built-ins (general|bible|…) plus family customs from /labels.
+  kind: labelSlugSchema,
   noteDate: isoDate.nullable(),
   visibility: z.enum(["family", "private"]),
   pinned: z.boolean(),
@@ -49,7 +50,7 @@ const createNoteSchema = z
     noteFieldsSchema.partial().extend({
       title: z.string().max(200).optional().default(""),
       body: z.string().max(100_000).optional().default(""),
-      kind: z.enum(NOTE_KINDS).optional().default("general"),
+      kind: labelSlugSchema.optional().default("general"),
       visibility: z.enum(["family", "private"]).optional().default("private"),
       pinned: z.boolean().optional().default(false),
     }),
@@ -294,8 +295,8 @@ noteRoutes.get("/", requireSession, async (c) => {
     conditions.push(eq(schema.notes.notebookId, notebookId));
   }
 
-  if (kind && (NOTE_KINDS as readonly string[]).includes(kind)) {
-    conditions.push(eq(schema.notes.kind, kind as (typeof NOTE_KINDS)[number]));
+  if (kind && labelSlugSchema.safeParse(kind).success) {
+    conditions.push(eq(schema.notes.kind, kind));
   }
 
   if (q) {

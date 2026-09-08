@@ -19,6 +19,7 @@ import { expenseRoutes } from "./routes/expenses";
 import { moneyRoutes } from "./routes/money";
 import { assistantRoutes } from "./routes/assistant";
 import { accessRoutes } from "./routes/access";
+import { labelRoutes } from "./routes/labels";
 import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
 import { runWeeklyDigest } from "./lib/digest";
@@ -70,6 +71,7 @@ api.route("/expenses", expenseRoutes);
 api.route("/money", moneyRoutes);
 api.route("/assistant", assistantRoutes);
 api.route("/access", accessRoutes);
+api.route("/labels", labelRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

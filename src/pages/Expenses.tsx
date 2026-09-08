@@ -21,9 +21,11 @@ import { Fab } from "../components/ui/Fab";
 import { Chip } from "../components/ui/Chip";
 import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { Sheet } from "../components/ui/Sheet";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useLabels } from "../lib/useLabels";
 
 type MoneyTab = "expenses" | "settlements";
 
@@ -80,18 +82,6 @@ function formatMoney(amount: number, currency: string): string {
   return `${formatted} ${currency}`;
 }
 
-const CATEGORIES = [
-  "food",
-  "groceries",
-  "transport",
-  "household",
-  "medical",
-  "education",
-  "entertainment",
-  "travel",
-  "other",
-] as const;
-
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -125,6 +115,10 @@ export function Expenses() {
 
 function ExpensesPanel({ familyId }: { familyId: string | undefined }) {
   const [composerOpen, setComposerOpen] = useState(false);
+  const { format: formatCategory, find: findCategory } = useLabels(
+    familyId,
+    "expense_category",
+  );
 
   const { data, isLoading } = useQuery({
     queryKey: ["expenses", familyId],
@@ -171,27 +165,34 @@ function ExpensesPanel({ familyId }: { familyId: string | undefined }) {
             </div>
           </Card>
           <Card className="divide-y divide-white/8 overflow-hidden">
-            {expenses.map((e) => (
+            {expenses.map((e) => {
+              const cat = findCategory(e.category);
+              return (
               <div key={e.id} className="flex min-h-14 items-center gap-3 px-4 py-3">
                 <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
-                  <Receipt className="size-5" aria-hidden="true" />
+                  {cat ? (
+                    <span className="text-lg" aria-hidden="true">{cat.emoji}</span>
+                  ) : (
+                    <Receipt className="size-5" aria-hidden="true" />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-fg">
-                    {e.note?.trim() || e.category}
+                    {e.note?.trim() || formatCategory(e.category)}
                   </div>
                   <div className="mt-0.5 text-xs text-fg-muted">
-                    {e.spentOn} · {e.category}
+                    {e.spentOn} · {formatCategory(e.category)}
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-semibold tabular-nums text-fg">
                     {formatMoney(e.amount, e.currency)}
                   </div>
-                  <Badge tone="neutral">{e.category}</Badge>
+                  <Badge tone="neutral">{formatCategory(e.category)}</Badge>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </Card>
         </>
       )}
@@ -713,7 +714,7 @@ function ExpenseComposer({
   const qc = useQueryClient();
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("food");
+  const [category, setCategory] = useState("food");
   const [error, setError] = useState("");
 
   const create = useMutation({
@@ -776,24 +777,13 @@ function ExpenseComposer({
             className={inputCls}
           />
         </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-            Category
-          </label>
-          <select
-            value={category}
-            onChange={(e) =>
-              setCategory(e.target.value as (typeof CATEGORIES)[number])
-            }
-            className={inputCls}
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </div>
+        <TypePicker
+          domain="expense_category"
+          familyId={familyId}
+          value={category}
+          onChange={setCategory}
+          title="Category"
+        />
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">

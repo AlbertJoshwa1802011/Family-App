@@ -24,6 +24,7 @@ import { api } from "../lib/api";
 import { expiryStatus } from "../lib/expiry";
 import { uploadDocumentFile } from "../lib/uploadDocumentFile";
 import { useAuth } from "../context/AuthContext";
+import { useLabels } from "../lib/useLabels";
 
 interface DocumentDetailPayload {
   id: string;
@@ -58,6 +59,11 @@ export function DocumentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { activeFamily } = useAuth();
+  const { format: formatCategory, find: findCategory } = useLabels(
+    activeFamily?.id,
+    "document_category",
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -121,6 +127,7 @@ export function DocumentDetail() {
   }
 
   const status = expiryStatus(doc.expiryDate);
+  const cat = findCategory(doc.category);
 
   return (
     <>
@@ -129,12 +136,16 @@ export function DocumentDetail() {
         <Card className="p-5">
           <div className="flex items-start gap-4">
             <span className="lq lq-tint flex size-12 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
-              <FileText className="size-6" aria-hidden="true" />
+              {cat ? (
+                <span className="text-2xl" aria-hidden="true">{cat.emoji}</span>
+              ) : (
+                <FileText className="size-6" aria-hidden="true" />
+              )}
             </span>
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-white">{doc.title}</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Badge>{doc.category}</Badge>
+                <Badge>{formatCategory(doc.category)}</Badge>
                 {status && <Badge tone={status.tone}>{status.label}</Badge>}
                 <span className="flex items-center gap-1 text-xs text-fg-subtle">
                   {doc.visibility === "private" ? (

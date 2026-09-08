@@ -6,20 +6,11 @@ import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-
-const CATEGORIES = [
-  { value: "identity", label: "Identity" },
-  { value: "insurance", label: "Insurance" },
-  { value: "medical", label: "Medical" },
-  { value: "vehicle", label: "Vehicle" },
-  { value: "finance", label: "Finance" },
-  { value: "warranty", label: "Warranty" },
-  { value: "education", label: "Education" },
-  { value: "other", label: "Other" },
-];
+import { useLabels } from "../lib/useLabels";
 
 interface DocumentPayload {
   id: string;
@@ -55,6 +46,10 @@ export function DocumentForm() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { activeFamily } = useAuth();
+  const { format: formatCategory } = useLabels(
+    activeFamily?.id,
+    "document_category",
+  );
 
   const [form, setForm] = useState<FormState>({
     title: "",
@@ -191,27 +186,17 @@ export function DocumentForm() {
           </Card>
 
           <Card className="p-4">
-            <p className="mb-2 text-xs font-semibold text-fg-muted">Category</p>
-            <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    categoryTouched.current = true;
-                    setSuggestion(null);
-                    set("category", value);
-                  }}
-                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
-                    form.category === value
-                      ? "lq-primary text-white"
-                      : "text-fg-muted hover:text-fg"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <TypePicker
+              domain="document_category"
+              familyId={activeFamily?.id}
+              value={form.category}
+              onChange={(category) => {
+                categoryTouched.current = true;
+                setSuggestion(null);
+                set("category", category);
+              }}
+              title="Category"
+            />
             {suggestion && form.category !== suggestion && (
               <button
                 type="button"
@@ -222,7 +207,7 @@ export function DocumentForm() {
                 className="lq lq-flat lq-tint lq-press mt-3 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold text-vault-300 [--lq-tint:var(--color-vault-400)]"
               >
                 <Sparkles className="size-3.5" />
-                Suggested: {CATEGORIES.find((c) => c.value === suggestion)?.label ?? suggestion} — tap to apply
+                Suggested: {formatCategory(suggestion)} — tap to apply
               </button>
             )}
           </Card>

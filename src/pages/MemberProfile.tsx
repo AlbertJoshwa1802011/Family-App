@@ -12,6 +12,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { expiryStatus } from "../lib/expiry";
+import { useLabels } from "../lib/useLabels";
 
 interface FamilyMember {
   id: string;
@@ -38,6 +39,7 @@ export function MemberProfile() {
   const { id: memberId } = useParams<{ id: string }>();
   const { activeFamily } = useAuth();
   const familyId = activeFamily?.id;
+  const { format: formatCategory } = useLabels(familyId, "document_category");
 
   const { data: membersData, isLoading } = useQuery({
     queryKey: ["family-members", familyId],
@@ -166,7 +168,7 @@ export function MemberProfile() {
                       </span>
                     }
                     title={doc.title}
-                    subtitle={doc.category}
+                    subtitle={formatCategory(doc.category)}
                     trailing={
                       status ? <Badge tone={status.tone}>{status.label}</Badge> : null
                     }

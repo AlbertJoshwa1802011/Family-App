@@ -19,12 +19,14 @@ import {
   notifyRsvpAnswered,
   type EventSummary,
 } from "../lib/scheduleNotify";
+import { labelSlugSchema } from "../lib/labels";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
-const EventType = z.enum(["gathering", "appointment", "milestone", "other"]);
+// Free slug: built-ins (gathering|…) plus family customs from /labels.
+const EventType = labelSlugSchema;
 
 /**
  * Field definitions WITHOUT defaults.

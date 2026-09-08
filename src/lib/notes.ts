@@ -20,7 +20,7 @@ export interface Note {
   ownerUserId: string;
   title: string;
   body: string;
-  kind: NoteKind;
+  kind: string;
   noteDate: string | null;
   visibility: "family" | "private";
   pinned: boolean;
@@ -29,7 +29,7 @@ export interface Note {
   deletedAt: number | null;
 }
 
-export const KIND_LABELS: Record<NoteKind, string> = {
+export const KIND_LABELS: Record<string, string> = {
   general: "General",
   bible: "Bible",
   journal: "Journal",

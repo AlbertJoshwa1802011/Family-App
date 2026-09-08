@@ -6,18 +6,10 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-
-type EventType = "gathering" | "appointment" | "milestone" | "other";
-
-const EVENT_TYPES: { value: EventType; label: string }[] = [
-  { value: "gathering", label: "Gathering" },
-  { value: "appointment", label: "Appointment" },
-  { value: "milestone", label: "Milestone" },
-  { value: "other", label: "Other" },
-];
 
 interface Member {
   id: string;
@@ -29,7 +21,7 @@ interface Member {
 
 interface FormState {
   title: string;
-  type: EventType;
+  type: string;
   date: string; // yyyy-mm-dd
   allDay: boolean;
   startTime: string; // HH:mm
@@ -71,7 +63,7 @@ export function EventForm() {
       const res = await api<{
         event: {
           title: string;
-          type: EventType;
+          type: string;
           startAt: number;
           endAt: number | null;
           allDay: boolean;
@@ -204,23 +196,13 @@ export function EventForm() {
 
           {/* Type */}
           <Card className="p-4">
-            <p className="text-xs font-semibold text-fg-muted mb-2">Type</p>
-            <div className="flex flex-wrap gap-2">
-              {EVENT_TYPES.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => set("type", value)}
-                  className={`lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold ${
-                    form.type === value
-                      ? "lq-primary text-white"
-                      : "text-fg-muted hover:text-fg"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <TypePicker
+              domain="event_type"
+              familyId={activeFamily?.id}
+              value={form.type}
+              onChange={(type) => set("type", type)}
+              title="Type"
+            />
           </Card>
 
           {/* Date & Time */}

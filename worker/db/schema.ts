@@ -287,12 +287,9 @@ export const events = sqliteTable(
     endAt: integer("end_at"), // null = single-instant / all-day
     allDay: integer("all_day", { mode: "boolean" }).notNull().default(false),
     location: text("location"),
-    // type = what kind of event (gathering, appointment, milestone, other)
-    type: text("type", {
-      enum: ["gathering", "appointment", "milestone", "other"],
-    })
-      .notNull()
-      .default("other"),
+    // type = what kind of event. Built-ins: gathering|appointment|milestone|other.
+    // Families may add custom slugs via `family_labels` (domain=event_type).
+    type: text("type").notNull().default("other"),
     // status = lifecycle (soft-delete and cancel are separate from type)
     status: text("status", { enum: ["active", "cancelled", "trashed"] })
       .notNull()
@@ -458,8 +455,50 @@ export const contacts = sqliteTable(
 // (Recently Deleted). D1 cascades are advisory — deleting a notebook must
 // explicitly null out notes.notebook_id in app code.
 
+// Built-in note kinds (defaults). Families may add custom slugs via
+// `family_labels` (domain=note_kind); the column itself is free text.
 export const NOTE_KINDS = ["general", "bible", "journal", "other"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
+
+/** Domains that support family-defined labels (type/category chips + emoji). */
+export const LABEL_DOMAINS = [
+  "event_type",
+  "document_category",
+  "expense_category",
+  "note_kind",
+  "contact_relationship",
+] as const;
+export type LabelDomain = (typeof LABEL_DOMAINS)[number];
+
+/**
+ * Family-scoped custom labels for type/category pickers.
+ * Built-in defaults live in code (`worker/lib/labels.ts`); rows here are
+ * user-created (or emoji/label overrides of a built-in slug).
+ */
+export const familyLabels = sqliteTable(
+  "family_labels",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    domain: text("domain", { enum: LABEL_DOMAINS }).notNull(),
+    // Value stored on the entity (events.type, documents.category, …).
+    slug: text("slug").notNull(),
+    label: text("label").notNull(),
+    // Optional emoji adornment shown on chips and badges.
+    emoji: text("emoji"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_family_label_domain_slug").on(t.familyId, t.domain, t.slug),
+    index("idx_family_label_domain").on(t.familyId, t.domain, t.sortOrder),
+  ],
+);
 
 export const notebooks = sqliteTable(
   "notebooks",
@@ -497,7 +536,7 @@ export const notes = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     title: text("title").notNull().default(""),
     body: text("body").notNull().default(""),
-    kind: text("kind", { enum: NOTE_KINDS }).notNull().default("general"),
+    kind: text("kind").notNull().default("general"),
     // Calendar date the note is about (daily / Bible study day), not an instant.
     noteDate: text("note_date"), // ISO yyyy-mm-dd
     visibility: text("visibility", { enum: ["family", "private"] })

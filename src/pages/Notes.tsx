@@ -29,18 +29,16 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
 import {
-  KIND_LABELS,
-  NOTE_KINDS,
   formatNoteStamp,
   noteDisplayTitle,
   notePreview,
   type Note,
-  type NoteKind,
   type Notebook,
 } from "../lib/notes";
+import { useLabels } from "../lib/useLabels";
 
 type FolderFilter = "all" | "none" | "trash" | string; // string = notebook id
-type KindFilter = "all" | NoteKind;
+type KindFilter = "all" | string;
 
 function NoteSkeleton() {
   return (
@@ -65,6 +63,10 @@ export function Notes() {
   const [folderSheet, setFolderSheet] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [nowMs] = useState(() => Date.now());
+  const { labels: kindLabels, format: formatKind, find: findKind } = useLabels(
+    activeFamily?.id,
+    "note_kind",
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q.trim()), 250);
@@ -225,9 +227,16 @@ export function Notes() {
           <Chip selected={kind === "all"} onClick={() => setKind("all")}>
             Any kind
           </Chip>
-          {NOTE_KINDS.map((k) => (
-            <Chip key={k} selected={kind === k} onClick={() => setKind(k)}>
-              {KIND_LABELS[k]}
+          {kindLabels.map((k) => (
+            <Chip
+              key={k.slug}
+              selected={kind === k.slug}
+              onClick={() => setKind(k.slug)}
+            >
+              <span aria-hidden="true" className="mr-1">
+                {k.emoji}
+              </span>
+              {k.label}
             </Chip>
           ))}
         </div>
@@ -260,9 +269,10 @@ export function Notes() {
             {notes.map((note) => {
               const title = noteDisplayTitle(note);
               const preview = notePreview(note.body);
+              const kindMeta = findKind(note.kind);
               const subtitleParts = [
                 formatNoteStamp(note.updatedAt, nowMs),
-                KIND_LABELS[note.kind],
+                formatKind(note.kind),
                 note.noteDate,
                 preview && preview !== title ? preview : null,
               ].filter(Boolean);
@@ -279,7 +289,11 @@ export function Notes() {
                           : "[--lq-tint:var(--color-vault-400)]",
                       )}
                     >
-                      {note.kind === "bible" ? (
+                      {kindMeta ? (
+                        <span className="text-lg" aria-hidden="true">
+                          {kindMeta.emoji}
+                        </span>
+                      ) : note.kind === "bible" ? (
                         <BookMarked className="size-5 text-warning" />
                       ) : (
                         <NotebookPen className="size-5 text-vault-300" />
