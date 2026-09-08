@@ -2,6 +2,8 @@
  * Closed signup: access requests, grants, and platform-admin approvals.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { app } from "../worker/index";
 import { sha256Hex } from "../worker/lib/crypto";
 import {
@@ -14,6 +16,10 @@ import {
   demoRequestNotifyEmail,
   demoRequestReceivedEmail,
 } from "../worker/lib/accessEmails";
+import {
+  PRODUCTION_APP_ORIGIN,
+  absoluteAppUrl,
+} from "../worker/lib/publicUrl";
 import { getDb } from "../worker/db/client";
 import {
   createTestEnv,
@@ -110,7 +116,7 @@ describe("app access helpers", () => {
 
 describe("POST /api/access/demo-requests", () => {
   let t: TestEnv;
-  const sent: { to: string; subject: string }[] = [];
+  const sent: { to: string; subject: string; html?: string; text?: string }[] = [];
 
   beforeEach(() => {
     sent.length = 0;
@@ -121,11 +127,18 @@ describe("POST /api/access/demo-requests", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body ?? "{}")) as {
-          to: string;
-          subject: string;
-        };
-        sent.push({ to: body.to, subject: body.subject });
+        const raw = String(init?.body ?? "{}");
+        try {
+          const body = JSON.parse(raw) as {
+            to: string;
+            subject: string;
+            html?: string;
+            text?: string;
+          };
+          if (body.to && body.subject) sent.push(body);
+        } catch {
+          // Gmail RFC822 bodies are not JSON
+        }
         return new Response("{}", { status: 200 });
       }),
     );
@@ -165,6 +178,40 @@ describe("POST /api/access/demo-requests", () => {
       "admin@familyvault.app",
       "priya@acme.com",
     ]);
+
+    const adminMail = sent.find((s) => s.to === "admin@familyvault.app");
+    expect(adminMail?.html).toContain("Approve access");
+    expect(adminMail?.html).toContain(
+      `${t.env.APP_URL}/api/access/review/approve/`,
+    );
+    expect(adminMail?.html).toContain(
+      `${t.env.APP_URL}/api/access/review/reject/`,
+    );
+    expect(adminMail?.html).not.toMatch(/href="\/access/);
+    expect(adminMail?.text).toContain("/api/access/review/approve/");
+  });
+
+  it("falls back to the production origin when APP_URL is empty", async () => {
+    t = createTestEnv({
+      APP_URL: "",
+      ACCESS_NOTIFY_EMAIL: "admin@familyvault.app",
+      RESEND_API_KEY: "test-key",
+    });
+    const res = await app.request(
+      "/api/access/demo-requests",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
+      },
+      t.env,
+    );
+    expect(res.status).toBe(201);
+    const adminMail = sent.find((s) => s.to === "admin@familyvault.app");
+    expect(adminMail?.html).toContain(
+      `${PRODUCTION_APP_ORIGIN}/api/access/review/approve/`,
+    );
+    expect(adminMail?.html).toMatch(/^[\s\S]*href="https:\/\//);
   });
 
   it("rejects invalid payloads with validation_error", async () => {
@@ -272,6 +319,61 @@ describe("access review + admin approve", () => {
     expect(demo.status).toBe("approved");
   });
 
+  it("approves via GET email link without Origin (Gmail click)", async () => {
+    const res = await app.request(
+      `/api/access/review/approve/${reviewToken}`,
+      { method: "GET" },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const html = await res.text();
+    expect(html).toContain("Access approved");
+    expect(html).not.toContain("<script");
+
+    const grant = t.sqlite
+      .prepare("SELECT status FROM access_grants WHERE email = ?")
+      .get("sam@acme.com") as { status: string };
+    expect(grant.status).toBe("approved");
+  });
+
+  it("approves the legacy SPA query-string email URL on GET /access/review", async () => {
+    const res = await app.request(
+      `/access/review?token=${encodeURIComponent(reviewToken)}&action=approve`,
+      { method: "GET" },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Access approved");
+    const grant = t.sqlite
+      .prepare("SELECT status FROM access_grants WHERE email = ?")
+      .get("sam@acme.com") as { status: string };
+    expect(grant.status).toBe("approved");
+  });
+
+  it("treats a second GET on the same token as already handled, not an error page", async () => {
+    await app.request(`/api/access/review/approve/${reviewToken}`, {}, t.env);
+    const res = await app.request(
+      `/api/access/review/approve/${reviewToken}`,
+      {},
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Already handled");
+  });
+
+  it("returns HTML 404 for an unknown GET token, not JSON", async () => {
+    const res = await app.request(
+      "/api/access/review/approve/totally-wrong-token-xx",
+      {},
+      t.env,
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await res.text()).toContain("invalid or has expired");
+  });
+
   it("rejects unknown tokens with 404", async () => {
     const res = await app.request(
       "/api/access/review",
@@ -331,14 +433,15 @@ describe("access email templates", () => {
       email: "priya@acme.com",
       company: "Acme",
       message: "Hello",
-      approveUrl: "https://app/access/review?token=a&action=approve",
-      rejectUrl: "https://app/access/review?token=a&action=reject",
+      approveUrl: "https://fam.connect-cloud.workers.dev/api/access/review/approve/a",
+      rejectUrl: "https://fam.connect-cloud.workers.dev/api/access/review/reject/a",
       adminUrl: "https://app/admin/access",
     });
     expect(html).toContain("Approve access");
-    expect(html).toContain("action=approve");
-    expect(html).toContain("action=reject");
+    expect(html).toContain("/api/access/review/approve/");
+    expect(html).toContain("/api/access/review/reject/");
     expect(html).toContain("priya@acme.com");
+    expect(html).toContain("https://fam.connect-cloud.workers.dev/api/access/review/approve/a");
   });
 
   it("renders requester confirmation and approval copy", () => {
@@ -358,5 +461,33 @@ describe("unknown access path", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("not_found");
+  });
+});
+
+describe("access email URL wiring", () => {
+  it("never emits a relative origin for email buttons", () => {
+    expect(absoluteAppUrl({ APP_URL: "" })).toBe(PRODUCTION_APP_ORIGIN);
+    expect(absoluteAppUrl({ APP_URL: "https://fam.connect-cloud.workers.dev/" })).toBe(
+      PRODUCTION_APP_ORIGIN,
+    );
+    expect(absoluteAppUrl({ APP_URL: "http://localhost:5173" })).toBe(
+      "http://localhost:5173",
+    );
+    expect(
+      absoluteAppUrl(
+        { APP_URL: "http://localhost:5173" },
+        "https://fam.connect-cloud.workers.dev/api/access/demo-requests",
+      ),
+    ).toBe(PRODUCTION_APP_ORIGIN);
+    expect(
+      absoluteAppUrl({ APP_URL: "" }, "http://localhost/api/access/demo-requests"),
+    ).toBe(PRODUCTION_APP_ORIGIN);
+  });
+
+  it("keeps Worker-first routing for the email landing path", () => {
+    const wrangler = readFileSync(join(__dirname, "..", "wrangler.jsonc"), "utf8");
+    expect(wrangler).toMatch(/"run_worker_first":\s*\[\s*"\/api\/\*"\s*,\s*"\/access\/review"\s*\]/);
+    const vite = readFileSync(join(__dirname, "..", "vite.config.ts"), "utf8");
+    expect(vite).toContain("/^\\/access\\/review/");
   });
 });
