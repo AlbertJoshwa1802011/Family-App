@@ -3,7 +3,6 @@ import type { Env } from "./types";
 import { getDb, type Db } from "./db/client";
 import { schema } from "./db/client";
 import {
-  DEFAULT_WINDOWS,
   REMINDER_SCAN_DAYS,
   TASK_WINDOWS,
   daysUntilIso,
