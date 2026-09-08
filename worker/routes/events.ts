@@ -17,8 +17,10 @@ import {
   notifyEventRescheduled,
   notifyEventUninvited,
   notifyRsvpAnswered,
+  targetsForMembers,
   type EventSummary,
 } from "../lib/scheduleNotify";
+import { createNotification } from "../lib/notify";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -44,6 +46,8 @@ const eventFieldsSchema = z.object({
   endAt: z.number().int().positive().optional(),
   allDay: z.boolean().optional(),
   location: z.string().max(500).optional(),
+  /** Minutes before start to leave — advisory; null clears on PATCH. */
+  travelBufferMins: z.number().int().min(0).max(24 * 60).nullable().optional(),
   type: EventType.optional(),
   attendeeMemberIds: z.array(z.string()).optional(),
   documentIds: z.array(z.string()).optional(),
@@ -79,6 +83,21 @@ const updateEventSchema = eventFieldsSchema.partial().merge(concurrencySchema).r
 
 const addAttendeesSchema = z.object({
   memberIds: z.array(z.string()).min(1),
+});
+
+const actionItemsSchema = z.object({
+  titles: z
+    .array(z.string().min(1).max(300))
+    .min(1)
+    .max(20),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+const followUpSchema = z.object({
+  message: z.string().min(1).max(500).optional(),
 });
 
 const RsvpStatus = z.enum(["invited", "accepted", "declined", "tentative"]);
@@ -230,6 +249,10 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     endAt: data.endAt,
     allDay: data.allDay,
     location: data.location,
+    travelBufferMins:
+      data.travelBufferMins === null || data.travelBufferMins === undefined
+        ? null
+        : data.travelBufferMins,
     type: data.type,
     status: "active",
     createdBy: userId,
@@ -381,7 +404,36 @@ eventRoutes.get("/:id", requireSession, async (c) => {
   // hide controls that the server would reject anyway.
   const canEdit = canMutateEvent(membership, event);
 
-  return c.json({ event, attendees, rsvpSummary, canEdit });
+  const userId = c.get("userId")!;
+  const linked = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      category: schema.documents.category,
+      visibility: schema.documents.visibility,
+      ownerUserId: schema.documents.ownerUserId,
+    })
+    .from(schema.eventDocuments)
+    .innerJoin(
+      schema.documents,
+      eq(schema.eventDocuments.documentId, schema.documents.id),
+    )
+    .where(
+      and(
+        eq(schema.eventDocuments.eventId, eventId),
+        ne(schema.documents.status, "trashed"),
+      ),
+    );
+
+  const documents = linked
+    .filter((d) => {
+      if (d.visibility !== "private") return true;
+      if (d.ownerUserId === userId) return true;
+      return membership.role === "owner" || membership.role === "admin";
+    })
+    .map(({ id, title, category }) => ({ id, title, category }));
+
+  return c.json({ event, attendees, rsvpSummary, canEdit, documents });
 });
 
 // GET /events/:id/ics — download a single event as an .ics file
@@ -479,6 +531,21 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     );
   }
 
+  // Validate document replace BEFORE writing the event row so a bad ID list
+  // cannot leave a half-applied patch.
+  if (updates.documentIds !== undefined) {
+    if (!(await allDocumentsInFamily(db, event.familyId, updates.documentIds))) {
+      return c.json({ error: "invalid_document_ids" }, 400);
+    }
+  }
+
+  // Attendee IDs also validated before write (same reason).
+  if (updates.attendeeMemberIds !== undefined) {
+    if (!(await allMembersInFamily(db, event.familyId, updates.attendeeMemberIds))) {
+      return c.json({ error: "invalid_member_ids" }, 400);
+    }
+  }
+
   const set: Partial<typeof schema.events.$inferInsert> = {
     updatedAt: Math.floor(Date.now() / 1000),
     version: event.version + 1,
@@ -489,9 +556,25 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
   if (updates.endAt !== undefined) set.endAt = updates.endAt;
   if (updates.allDay !== undefined) set.allDay = updates.allDay;
   if (updates.location !== undefined) set.location = updates.location;
+  if (updates.travelBufferMins !== undefined) {
+    set.travelBufferMins = updates.travelBufferMins;
+  }
   if (updates.type !== undefined) set.type = updates.type;
 
   await db.update(schema.events).set(set).where(eq(schema.events.id, eventId));
+
+  // Linked documents are a REPLACE when the key is present (same as attendees).
+  if (updates.documentIds !== undefined) {
+    const nextDocs = [...new Set(updates.documentIds)];
+    await db
+      .delete(schema.eventDocuments)
+      .where(eq(schema.eventDocuments.eventId, eventId));
+    if (nextDocs.length > 0) {
+      await db.insert(schema.eventDocuments).values(
+        nextDocs.map((documentId) => ({ eventId, documentId })),
+      );
+    }
+  }
 
   // Attendee list is a REPLACE, so work out who joined and who was dropped
   // before touching the rows — each group gets a different message, and people
@@ -501,9 +584,6 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
   let removed: string[] = [];
 
   if (updates.attendeeMemberIds !== undefined) {
-    if (!(await allMembersInFamily(db, event.familyId, updates.attendeeMemberIds))) {
-      return c.json({ error: "invalid_member_ids" }, 400);
-    }
     const next = [...new Set(updates.attendeeMemberIds)];
     const before = new Set(previousAttendees);
     added = next.filter((m) => !before.has(m));
@@ -681,6 +761,103 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
 
   return c.json({ ok: true });
 });
+
+// POST /events/:id/action-items — turn meeting follow-ups into tasks linked
+// to this event. Additive; does not change the event itself.
+eventRoutes.post(
+  "/:id/action-items",
+  requireSession,
+  zv(actionItemsSchema),
+  async (c) => {
+    const { id: eventId } = c.req.param();
+    const userId = c.get("userId")!;
+    const data = c.req.valid("json");
+    const db = getDb(c.env);
+
+    const event = await db
+      .select()
+      .from(schema.events)
+      .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+      .get();
+    if (!event) return c.json({ error: "not_found" }, 404);
+
+    const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+    if (membership instanceof Response) return membership;
+
+    const now = Math.floor(Date.now() / 1000);
+    const tasks: { id: string; title: string }[] = [];
+    for (const title of data.titles) {
+      const id = crypto.randomUUID();
+      await db.insert(schema.tasks).values({
+        id,
+        familyId: event.familyId,
+        title: title.trim(),
+        status: "open",
+        priority: "medium",
+        dueDate: data.dueDate,
+        relatedEventId: eventId,
+        createdBy: userId,
+        updatedAt: now,
+      });
+      tasks.push({ id, title: title.trim() });
+      await insertAuditEvent(db, {
+        familyId: event.familyId,
+        actorUserId: userId,
+        action: "task_created",
+        targetType: "task",
+        targetId: id,
+        meta: { via: "event_action_items", eventId },
+      });
+    }
+
+    return c.json({ tasks }, 201);
+  },
+);
+
+// POST /events/:id/follow-up — nudge attendees with an in-app notification
+// (meeting follow-up). Never notifies the actor; skips dependents.
+eventRoutes.post(
+  "/:id/follow-up",
+  requireSession,
+  zv(followUpSchema),
+  async (c) => {
+    const { id: eventId } = c.req.param();
+    const userId = c.get("userId")!;
+    const data = c.req.valid("json");
+    const db = getDb(c.env);
+
+    const event = await db
+      .select()
+      .from(schema.events)
+      .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+      .get();
+    if (!event) return c.json({ error: "not_found" }, 404);
+
+    const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+    if (membership instanceof Response) return membership;
+
+    const memberIds = await attendeeMemberIds(db, eventId);
+    const targets = await targetsForMembers(db, memberIds, userId);
+    const body =
+      data.message?.trim() ||
+      `Follow up on “${event.title}” — any open action items?`;
+    const link = `/calendar/events/${eventId}`;
+    let sent = 0;
+    for (const t of targets) {
+      await createNotification(db, {
+        userId: t.userId,
+        familyId: event.familyId,
+        type: "meeting_followup",
+        title: `Follow-up: ${event.title}`,
+        body,
+        link,
+      });
+      sent += 1;
+    }
+
+    return c.json({ ok: true, notified: sent });
+  },
+);
 
 // POST /events/:id/attendees — add members as attendees.
 eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async (c) => {

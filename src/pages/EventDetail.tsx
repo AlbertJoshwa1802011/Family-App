@@ -2,13 +2,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
   CalendarPlus,
+  CheckSquare,
+  FileText,
+  Link2,
   MapPin,
+  NotebookPen,
   Pencil,
   Trash2,
   Users,
   XCircle,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -16,6 +21,7 @@ import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { formatEventTime, eventTypeColor } from "../lib/eventTime";
@@ -40,6 +46,7 @@ interface EventDetail {
   description: string | null;
   type: string;
   location: string | null;
+  travelBufferMins: number | null;
   startAt: number;
   endAt: number | null;
   allDay: boolean;
@@ -61,6 +68,7 @@ interface EventDetailResponse {
   attendees: Attendee[];
   rsvpSummary: Record<Rsvp, number>;
   canEdit: boolean;
+  documents: { id: string; title: string; category: string }[];
 }
 
 const RSVP_LABEL: Record<Rsvp, string> = {
@@ -92,12 +100,40 @@ export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, activeFamily } = useAuth();
+  const [actionDraft, setActionDraft] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkTitle, setLinkTitle] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["events", id],
     queryFn: () => api<EventDetailResponse>(`/events/${id}`),
     enabled: Boolean(id),
+  });
+
+  const { data: notesData } = useQuery({
+    queryKey: ["notes", "event", id, activeFamily?.id],
+    queryFn: () =>
+      api<{ notes: { id: string; title: string; body: string }[] }>(
+        `/notes?familyId=${activeFamily!.id}&eventId=${id}`,
+      ),
+    enabled: Boolean(id && activeFamily),
+  });
+
+  const { data: linksData } = useQuery({
+    queryKey: ["links", "event", id, activeFamily?.id],
+    queryFn: () =>
+      api<{
+        links: {
+          id: string;
+          kind: string;
+          url: string | null;
+          title: string | null;
+        }[];
+      }>(
+        `/links?familyId=${activeFamily!.id}&targetType=event&targetId=${id}`,
+      ),
+    enabled: Boolean(id && activeFamily),
   });
 
   // Answering an invitation is always the attendee's own right, so this is not
@@ -129,6 +165,65 @@ export function EventDetailPage() {
     },
   });
 
+  const actionItemsMutation = useMutation({
+    mutationFn: (titles: string[]) =>
+      api(`/events/${id}/action-items`, {
+        method: "POST",
+        body: JSON.stringify({ titles }),
+      }),
+    onSuccess: () => {
+      setActionDraft("");
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  const followUpMutation = useMutation({
+    mutationFn: () =>
+      api(`/events/${id}/follow-up`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+  });
+
+  const meetingNoteMutation = useMutation({
+    mutationFn: () =>
+      api<{ note: { id: string } }>("/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId: activeFamily!.id,
+          kind: "meeting",
+          eventId: id,
+          title: `Notes: ${data?.event.title ?? "Meeting"}`,
+          visibility: "family",
+          body: "",
+        }),
+      }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["notes"] });
+      if (res.note?.id) navigate(`/notes/${res.note.id}`);
+    },
+  });
+
+  const addLinkMutation = useMutation({
+    mutationFn: () =>
+      api("/links", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId: activeFamily!.id,
+          kind: linkUrl.includes("youtu") ? "youtube" : "url",
+          targetType: "event",
+          targetId: id,
+          url: linkUrl.trim(),
+          title: linkTitle.trim() || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      setLinkUrl("");
+      setLinkTitle("");
+      void qc.invalidateQueries({ queryKey: ["links"] });
+    },
+  });
+
   if (isLoading) {
     return (
       <>
@@ -150,6 +245,9 @@ export function EventDetailPage() {
   const attendees = data?.attendees ?? [];
   const summary = data?.rsvpSummary;
   const canEdit = data?.canEdit ?? false;
+  const documents = data?.documents ?? [];
+  const meetingNotes = notesData?.notes ?? [];
+  const links = linksData?.links ?? [];
   // Which row is mine? Only a real user account can answer for itself.
   const me = attendees.find((a) => a.userId === user?.id);
 
@@ -202,6 +300,12 @@ export function EventDetailPage() {
               <MapPin className="size-4 shrink-0 text-fg-subtle" />
               {ev.location}
             </div>
+          )}
+
+          {ev.travelBufferMins != null && ev.travelBufferMins > 0 && (
+            <p className="mt-2 text-xs text-fg-subtle">
+              Leave ~{ev.travelBufferMins} min early
+            </p>
           )}
 
           {ev.description && (
@@ -273,6 +377,140 @@ export function EventDetailPage() {
           </section>
         )}
 
+        {/* Linked documents */}
+        {documents.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <FileText className="size-3.5" />
+              Documents
+            </h3>
+            <Card className="divide-y divide-white/5 p-1">
+              {documents.map((d) => (
+                <Link
+                  key={d.id}
+                  to={`/documents/${d.id}`}
+                  className="lq-press flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-fg"
+                >
+                  <span className="truncate flex-1">{d.title}</span>
+                  <Badge tone="neutral">{d.category}</Badge>
+                </Link>
+              ))}
+            </Card>
+          </section>
+        )}
+
+        {/* Meeting notes */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <NotebookPen className="size-3.5" />
+            Meeting notes
+          </h3>
+          <Card className="space-y-2 p-3">
+            {meetingNotes.length === 0 ? (
+              <p className="text-xs text-fg-subtle">No notes yet.</p>
+            ) : (
+              meetingNotes.map((n) => (
+                <Link
+                  key={n.id}
+                  to={`/notes/${n.id}`}
+                  className="block text-sm text-fg underline-offset-2 hover:underline"
+                >
+                  {n.title.trim() || "Untitled note"}
+                </Link>
+              ))
+            )}
+            {activeFamily && (
+              <Button
+                variant="ghost"
+                fullWidth
+                leadingIcon={<NotebookPen className="size-4" />}
+                loading={meetingNoteMutation.isPending}
+                onClick={() => meetingNoteMutation.mutate()}
+              >
+                New meeting note
+              </Button>
+            )}
+          </Card>
+        </section>
+
+        {/* Action items → tasks */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <CheckSquare className="size-3.5" />
+            Action items
+          </h3>
+          <Card className="space-y-2 p-3">
+            <textarea
+              value={actionDraft}
+              onChange={(e) => setActionDraft(e.target.value)}
+              placeholder={"One task per line\ne.g. Book follow-up\nShare report"}
+              rows={3}
+              className={`${inputCls} resize-none`}
+            />
+            <Button
+              variant="secondary"
+              fullWidth
+              loading={actionItemsMutation.isPending}
+              onClick={() => {
+                const titles = actionDraft
+                  .split(/\r?\n/)
+                  .map((l) => l.trim())
+                  .filter(Boolean);
+                if (titles.length) actionItemsMutation.mutate(titles);
+              }}
+            >
+              Convert to tasks
+            </Button>
+            {actionItemsMutation.isSuccess && (
+              <p className="text-xs text-success">Tasks created and linked.</p>
+            )}
+          </Card>
+        </section>
+
+        {/* Links / YouTube */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <Link2 className="size-3.5" />
+            Links &amp; videos
+          </h3>
+          <Card className="space-y-2 p-3">
+            {links.map((l) => (
+              <a
+                key={l.id}
+                href={l.url ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-sm text-vault-300"
+              >
+                {l.title || l.url}
+              </a>
+            ))}
+            <input
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://…"
+              className={inputCls}
+            />
+            <input
+              type="text"
+              value={linkTitle}
+              onChange={(e) => setLinkTitle(e.target.value)}
+              placeholder="Label (optional)"
+              className={inputCls}
+            />
+            <Button
+              variant="ghost"
+              fullWidth
+              disabled={!linkUrl.trim()}
+              loading={addLinkMutation.isPending}
+              onClick={() => addLinkMutation.mutate()}
+            >
+              Save link
+            </Button>
+          </Card>
+        </section>
+
         {/* Actions */}
         <a
           href={`/api/events/${ev.id}/ics`}
@@ -281,6 +519,18 @@ export function EventDetailPage() {
           <CalendarPlus className="size-4" />
           Add to my calendar
         </a>
+
+        <Button
+          variant="ghost"
+          fullWidth
+          loading={followUpMutation.isPending}
+          onClick={() => followUpMutation.mutate()}
+        >
+          Send follow-up to attendees
+        </Button>
+        {followUpMutation.isSuccess && (
+          <p className="px-1 text-xs text-success">Follow-up sent.</p>
+        )}
 
         {ev.status === "active" && canEdit && (
           <section className="space-y-2 pt-2">
