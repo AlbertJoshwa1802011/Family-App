@@ -105,6 +105,7 @@ export function FamilyPage() {
   const tab = tabFromSearch(searchParams.toString(), "members");
 
   const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviteError, setInviteError] = useState("");
@@ -130,7 +131,12 @@ export function FamilyPage() {
   const inviteMutation = useMutation({
     mutationFn: (payload: { email: string; role: "admin" | "member" }) =>
       api<{
-        invite: { token: string; inviteUrl?: string; emailSent?: boolean };
+        invite: {
+          token: string;
+          inviteUrl?: string;
+          emailSent?: boolean;
+          emailError?: string;
+        };
       }>(`/families/${familyId}/invites`, {
         method: "POST",
         body: JSON.stringify(payload),
@@ -138,13 +144,19 @@ export function FamilyPage() {
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["family-members"] });
       setInviteEmail("");
-      setInviteSuccess(
-        res.invite.emailSent
-          ? "Invitation emailed — they can join from the link in that mail."
-          : "Invite created. Email couldn't be sent — share the invite link from your email client.",
-      );
+      if (res.invite.emailSent) {
+        setInviteSuccess(
+          "Invitation emailed — they can join from the link in that mail.",
+        );
+        setInviteLink("");
+      } else {
+        setInviteSuccess(
+          "Invite created, but email could not be sent. Copy the link and share it.",
+        );
+        setInviteLink(res.invite.inviteUrl ?? "");
+      }
       setInviteError("");
-      setTimeout(() => setInviteSuccess(""), 6000);
+      setTimeout(() => setInviteSuccess(""), 8000);
       setShowInviteForm(false);
     },
     onError: (err) => {
@@ -215,8 +227,15 @@ export function FamilyPage() {
         </Link>
 
         {inviteSuccess && (
-          <div className="rounded-xl bg-success/15 border border-success/30 p-3 text-sm text-success flex items-center gap-2">
-            <span>✓</span> {inviteSuccess}
+          <div className="rounded-xl bg-success/15 border border-success/30 p-3 text-sm text-success space-y-2">
+            <p className="flex items-center gap-2">
+              <span>✓</span> {inviteSuccess}
+            </p>
+            {inviteLink ? (
+              <p className="break-all text-xs text-fg-muted">
+                {inviteLink}
+              </p>
+            ) : null}
           </div>
         )}
 

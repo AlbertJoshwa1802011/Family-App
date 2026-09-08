@@ -121,7 +121,7 @@ async function applyReview(
         name: row.name,
         loginUrl: `${absoluteAppUrl(env)}/login`,
       }),
-    });
+    }, { fromUserId: opts.reviewerUserId ?? undefined, reminder: false });
 
     return { ok: true, status: "approved", email: row.email, name: row.name };
   }
@@ -139,7 +139,7 @@ async function applyReview(
     to: row.email,
     subject: "Update on your Family Vault access request",
     html: accessRejectedEmail({ name: row.name }),
-  });
+  }, { fromUserId: opts.reviewerUserId ?? undefined, reminder: false });
 
   return { ok: true, status: "rejected", email: row.email, name: row.name };
 }
@@ -219,7 +219,7 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
         `Reject: ${rejectUrl}`,
         `Admin: ${adminUrl}`,
       ].join("\n"),
-    });
+    }, { reminder: false });
   }
 
   await sendEmail(c.env, {
@@ -229,7 +229,7 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
       name: data.name.trim(),
       appUrl: loginUrl,
     }),
-  });
+  }, { reminder: false });
 
   return c.json({ ok: true, status: "pending" }, 201);
 });
@@ -517,7 +517,7 @@ accessRoutes.post(
         name: null,
         loginUrl: `${absoluteAppUrl(c.env, c.req.url)}/login`,
       }),
-    });
+    }, { fromUserId: c.get("userId")!, reminder: false });
 
     return c.json({ ok: true, grant: { id, email, status: "approved" } }, 201);
   },

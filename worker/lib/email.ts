@@ -60,6 +60,12 @@ export interface SendEmailResult {
   error?: string;
 }
 
+export interface SendEmailOpts {
+  fromUserId?: string;
+  /** Prefix "[Family Vault reminder]". Default true — cron/reminders. Invites pass false. */
+  reminder?: boolean;
+}
+
 /** Classify Resend error bodies so callers can explain testing-mode limits. */
 export function classifyResendError(status: number, body: string): string {
   const text = body.toLowerCase();
@@ -183,8 +189,8 @@ async function sendViaStorageGmail(
 ): Promise<{ ok: true; from: string } | { ok: false; error: string } | null> {
   const scopes = await env.KV.get(STORAGE_SCOPES_KEY);
   if (scopes && !storageHasGmailScope(scopes)) {
-    console.error("[email] storage account missing gmail.send — reconnect Admin → Storage");
-    return { ok: false, error: "gmail_auth_failed" };
+    console.error("[email] storage account missing gmail.send — skipping to next transport");
+    return null;
   }
 
   const storage = await storageSender(env);
@@ -277,7 +283,7 @@ async function sendViaResend(
 export async function sendEmail(
   env: Env,
   msg: EmailMessage,
-  opts: { fromUserId?: string } = {},
+  opts: SendEmailOpts = {},
 ): Promise<boolean> {
   const result = await sendEmailDetailed(env, msg, opts);
   return result.ok;
@@ -286,9 +292,12 @@ export async function sendEmail(
 export async function sendEmailDetailed(
   env: Env,
   msg: EmailMessage,
-  opts: { fromUserId?: string } = {},
+  opts: SendEmailOpts = {},
 ): Promise<SendEmailResult> {
-  const payload = { ...msg, subject: reminderSubject(msg.subject) };
+  const payload = {
+    ...msg,
+    subject: opts.reminder === false ? msg.subject : reminderSubject(msg.subject),
+  };
   let lastError: string | undefined;
 
   const storage = await sendViaStorageGmail(env, payload);
@@ -321,7 +330,7 @@ export async function sendEmailDetailed(
 export async function sendEmailResult(
   env: Env,
   msg: EmailMessage,
-  opts: { fromUserId?: string } = {},
+  opts: SendEmailOpts = {},
 ): Promise<SendEmailResult> {
   return sendEmailDetailed(env, msg, opts);
 }

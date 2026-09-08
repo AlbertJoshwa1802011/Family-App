@@ -100,6 +100,25 @@ describe("sendEmail", () => {
     expect(body.subject).toBe("[Family Vault reminder] Expiring soon");
   });
 
+  it("skips the reminder prefix when reminder: false (invites)", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ id: "e1" }), { status: 200 }));
+
+    const ok = await sendEmail(
+      makeEnv({ RESEND_API_KEY: "re_test" }),
+      {
+        to: "cousin@example.com",
+        subject: "You're invited to Hall Family on Family Vault",
+        html: "<p>join</p>",
+      },
+      { reminder: false },
+    );
+    expect(ok).toBe(true);
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.subject).toBe("You're invited to Hall Family on Family Vault");
+  });
+
   it("returns false on a non-2xx Resend response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("rate limited", { status: 429 }),
