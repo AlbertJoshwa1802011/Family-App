@@ -7,6 +7,7 @@ import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { parseWindows } from "../lib/reminders";
 import { reminderEmailHtml, sendEmailDetailed, canSendEmail } from "../lib/email";
+import { absoluteAppUrl } from "../lib/publicUrl";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -204,7 +205,7 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
     .get();
 
   const to = (prefs?.reminderEmail ?? user.email).trim().toLowerCase();
-  const appUrl = c.env.APP_URL ?? "";
+  const appUrl = absoluteAppUrl(c.env, c.req.url);
 
   const result = await sendEmailDetailed(
     c.env,
@@ -215,7 +216,7 @@ notificationRoutes.post("/test-email", requireSession, async (c) => {
         heading: "Family Vault test reminder",
         body: "This is a test. If you received it, reminder email delivery is working.",
         ctaLabel: "Open Family Vault",
-        ctaUrl: appUrl || "https://familyvault.app",
+        ctaUrl: appUrl,
       }),
       text: "Family Vault test reminder — delivery is working.",
     },
