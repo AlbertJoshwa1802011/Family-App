@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownLeft, Sparkles, X } from "lucide-react";
 import { Button } from "../ui/Button";
 import { useAuth } from "../../context/AuthContext";
-import { ApiError } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 
 interface Turn {
