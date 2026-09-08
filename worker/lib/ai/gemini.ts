@@ -156,6 +156,140 @@ async function callGemini(
   return json;
 }
 
+/** Merge incremental SSE chunks into one candidate content parts list. */
+function mergeStreamParts(
+  acc: GeminiCandidatePart[],
+  incoming: GeminiCandidatePart[],
+): GeminiCandidatePart[] {
+  const out = acc.map((p) => ({ ...p }));
+  for (const p of incoming) {
+    if (p.functionCall) {
+      out.push({ ...p });
+      continue;
+    }
+    if (typeof p.text === "string") {
+      // Never concatenate visible prose onto a thought part — thoughts are
+      // filtered later, and merging would erase the real reply.
+      if (p.thought) {
+        out.push({ ...p });
+        continue;
+      }
+      const last = out[out.length - 1];
+      if (
+        last &&
+        typeof last.text === "string" &&
+        !last.functionCall &&
+        !last.thought
+      ) {
+        last.text += p.text;
+        if (typeof p.thoughtSignature === "string" && p.thoughtSignature) {
+          last.thoughtSignature = p.thoughtSignature;
+        }
+      } else {
+        out.push({ ...p });
+      }
+      continue;
+    }
+    out.push({ ...p });
+  }
+  return out;
+}
+
+/**
+ * Stream a generateContent turn via SSE (`alt=sse`).
+ * Text deltas are forwarded immediately unless a functionCall appears (tool rounds).
+ */
+async function callGeminiStream(
+  apiKey: string,
+  model: string,
+  body: unknown,
+  onToken?: (text: string) => void,
+): Promise<GeminiResponse> {
+  const res = await fetch(
+    `${API_BASE}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as GeminiResponse;
+    throw new GeminiError(
+      json.error?.message ?? `Gemini returned ${res.status}`,
+      res.status,
+      json.error?.status,
+    );
+  }
+
+  if (!res.body) {
+    throw new GeminiError("Gemini stream returned no body", 502);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated: GeminiCandidatePart[] = [];
+  let promptFeedback: GeminiResponse["promptFeedback"];
+  let finishReason: string | undefined;
+  let sawFunctionCall = false;
+  let streamError: GeminiError | undefined;
+
+  const consumeEvent = (raw: string) => {
+    if (!raw || raw === "[DONE]") return;
+    let json: GeminiResponse;
+    try {
+      json = JSON.parse(raw) as GeminiResponse;
+    } catch {
+      return;
+    }
+    if (json.error?.message) {
+      streamError = new GeminiError(json.error.message, 400, json.error.status);
+      return;
+    }
+    if (json.promptFeedback) promptFeedback = json.promptFeedback;
+    const parts = json.candidates?.[0]?.content?.parts ?? [];
+    if (parts.some((p) => p.functionCall)) sawFunctionCall = true;
+    if (!sawFunctionCall && onToken) {
+      for (const p of parts) {
+        if (typeof p.text === "string" && p.text && !p.thought) onToken(p.text);
+      }
+    }
+    accumulated = mergeStreamParts(accumulated, parts);
+    finishReason = json.candidates?.[0]?.finishReason ?? finishReason;
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trimEnd();
+      if (!trimmed.startsWith("data:")) continue;
+      consumeEvent(trimmed.slice(5).trim());
+      if (streamError) throw streamError;
+    }
+  }
+  if (buffer.trim()) {
+    const trimmed = buffer.trim();
+    if (trimmed.startsWith("data:")) {
+      consumeEvent(trimmed.slice(5).trim());
+      if (streamError) throw streamError;
+    }
+  }
+
+  return {
+    candidates: [{ content: { parts: accumulated }, finishReason }],
+    promptFeedback,
+  };
+}
+
 export interface ToolCallRecord {
   name: string;
   args: Record<string, unknown>;
@@ -166,6 +300,20 @@ export interface RunResult {
   text: string;
   toolCalls: ToolCallRecord[];
   model: string;
+}
+
+/** True when a tool result already has user-facing copy — no second model call needed. */
+export function toolResultHasClearSummary(result: unknown): boolean {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+  const r = result as { summary?: unknown; message?: unknown; error?: unknown };
+  if (r.error != null && String(r.error).trim()) return false;
+  if (typeof r.summary === "string" && r.summary.trim()) return true;
+  if (typeof r.message === "string" && r.message.trim()) return true;
+  return false;
+}
+
+export function toolCallsHaveClearSummaries(toolCalls: ToolCallRecord[]): boolean {
+  return toolCalls.length > 0 && toolCalls.every((t) => toolResultHasClearSummary(t.result));
 }
 
 function summarizeToolCalls(toolCalls: ToolCallRecord[]): string {
@@ -188,6 +336,9 @@ function summarizeToolCalls(toolCalls: ToolCallRecord[]): string {
  * own authorization — this function deliberately knows nothing about users.
  *
  * `maxRounds` bounds the tool loop so a confused model can't spin forever.
+ * `onToken` receives prose deltas (SSE path). Tool-call rounds suppress tokens.
+ * When every tool result already has a clear summary/message, the follow-up
+ * model call is skipped and that summary is returned (and emitted) immediately.
  */
 export async function runAssistant(args: {
   apiKey: string;
@@ -197,6 +348,7 @@ export async function runAssistant(args: {
   tools: FunctionDeclaration[];
   execute: (name: string, toolArgs: Record<string, unknown>) => Promise<unknown>;
   maxRounds?: number;
+  onToken?: (text: string) => void;
 }): Promise<RunResult> {
   const maxRounds = args.maxRounds ?? 5;
   const contents: GeminiContent[] = [...args.history];
@@ -205,11 +357,14 @@ export async function runAssistant(args: {
   const models = modelCandidates(args.model);
   let activeModel = models[0];
   let modelIndex = 0;
+  const stream = Boolean(args.onToken);
 
   async function generate(body: unknown): Promise<GeminiResponse> {
     for (;;) {
       try {
-        return await callGemini(args.apiKey, activeModel, body);
+        return stream
+          ? await callGeminiStream(args.apiKey, activeModel, body, args.onToken)
+          : await callGemini(args.apiKey, activeModel, body);
       } catch (err) {
         if (
           err instanceof GeminiError &&
@@ -255,8 +410,14 @@ export async function runAssistant(args: {
         .map((p) => p.text ?? "")
         .join("")
         .trim();
+      const finalText =
+        text || (toolCalls.length > 0 ? summarizeToolCalls(toolCalls) : "Done.");
+      // Non-stream path (or empty model text after tools): ensure the UI gets copy.
+      if (args.onToken && !text && finalText) {
+        args.onToken(finalText);
+      }
       return {
-        text: text || (toolCalls.length > 0 ? summarizeToolCalls(toolCalls) : "Done."),
+        text: finalText,
         toolCalls,
         model: activeModel,
       };
@@ -283,6 +444,7 @@ export async function runAssistant(args: {
     });
 
     const responseParts: unknown[] = [];
+    const roundCalls: ToolCallRecord[] = [];
     for (const part of callParts) {
       const call = part.functionCall!;
       let result: unknown;
@@ -293,7 +455,9 @@ export async function runAssistant(args: {
         // rather than collapsing the whole turn.
         result = { error: err instanceof Error ? err.message : "tool failed" };
       }
-      toolCalls.push({ name: call.name, args: call.args ?? {}, result });
+      const record = { name: call.name, args: call.args ?? {}, result };
+      toolCalls.push(record);
+      roundCalls.push(record);
       const responsePayload =
         result && typeof result === "object" && !Array.isArray(result)
           ? (result as Record<string, unknown>)
@@ -306,15 +470,25 @@ export async function runAssistant(args: {
         },
       });
     }
+
+    // Tool already returned clear copy — skip the second Gemini round.
+    if (toolCallsHaveClearSummaries(roundCalls)) {
+      const text = summarizeToolCalls(roundCalls);
+      args.onToken?.(text);
+      return { text, toolCalls, model: activeModel };
+    }
+
     // IMPORTANT: functionResponse parts must use role "user", not "function".
     contents.push({ role: "user", parts: responseParts });
   }
 
+  const text =
+    toolCalls.length > 0
+      ? summarizeToolCalls(toolCalls)
+      : "I wasn't able to finish that — try rephrasing, or add it manually.";
+  args.onToken?.(text);
   return {
-    text:
-      toolCalls.length > 0
-        ? summarizeToolCalls(toolCalls)
-        : "I wasn't able to finish that — try rephrasing, or add it manually.",
+    text,
     toolCalls,
     model: activeModel,
   };

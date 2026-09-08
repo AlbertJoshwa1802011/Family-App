@@ -244,6 +244,26 @@ describe("assistant", () => {
     expect(body.message).toContain("GEMINI_API_KEY");
   });
 
+  it("keeps 501 as JSON even when the client asks for SSE", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await app.request(
+      "/api/assistant/chat",
+      {
+        method: "POST",
+        headers: {
+          Cookie: alice.cookie,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ familyId, message: "hello" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(501);
+    expect(res.headers.get("content-type") ?? "").toMatch(/json/i);
+  });
+
   it("probes a present-but-bad key and surfaces guidance", async () => {
     const { env, alice } = setup();
     env.GEMINI_API_KEY = "bad-key";
@@ -286,5 +306,180 @@ describe("assistant", () => {
   it("requires a session", async () => {
     expect((await app.request("/api/assistant/chat", { method: "POST" })).status).toBe(401);
     expect((await app.request("/api/assistant/status")).status).toBe(401);
+  });
+
+  async function readSseEvents(res: Response): Promise<Record<string, unknown>[]> {
+    const text = await res.text();
+    const events: Record<string, unknown>[] = [];
+    for (const block of text.split("\n\n")) {
+      for (const line of block.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        events.push(JSON.parse(raw) as Record<string, unknown>);
+      }
+    }
+    return events;
+  }
+
+  it("streams SSE tokens + done for a plain prose reply", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    const sse = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"You can "}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"spend $20."}]},"finishReason":"STOP"}]}\n\n',
+    ].join("");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":streamGenerateContent");
+        return new Response(sse, { status: 200 });
+      }),
+    );
+    try {
+      const res = await app.request(
+        "/api/assistant/chat",
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "how much can I spend?" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type") ?? "").toMatch(/text\/event-stream/);
+      const events = await readSseEvents(res);
+      expect(events.filter((e) => e.type === "token").map((e) => e.text)).toEqual([
+        "You can ",
+        "spend $20.",
+      ]);
+      const done = events.find((e) => e.type === "done");
+      expect(done?.reply).toBe("You can spend $20.");
+      expect(done?.actions).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("streams a tool summary without a second Gemini round and records the expense", async () => {
+    const { env, familyId, alice, sqlite } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":streamGenerateContent");
+        const sse =
+          'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"add_expense","args":{"amountMajor":70,"description":"noodles"}}}]}}]}\n\n';
+        return new Response(sse, { status: 200 });
+      }),
+    );
+    try {
+      const res = await app.request(
+        `/api/assistant/chat?stream=1`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "I spent 70 on noodles" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = await readSseEvents(res);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+      const token = events.find((e) => e.type === "token");
+      expect(String(token?.text ?? "")).toMatch(/70/);
+      expect(String(token?.text ?? "")).toMatch(/noodles/i);
+      const done = events.find((e) => e.type === "done") as {
+        reply: string;
+        actions: { name: string; result: { summary?: string } }[];
+      };
+      expect(done.actions).toHaveLength(1);
+      expect(done.actions[0].name).toBe("add_expense");
+      expect(done.actions[0].result.summary).toMatch(/noodles/i);
+      expect(done.reply).toBe(done.actions[0].result.summary);
+
+      const row = sqlite
+        .prepare(
+          `SELECT amount_minor, description FROM expenses WHERE family_id = ? AND description = 'noodles'`,
+        )
+        .get(familyId) as { amount_minor: number; description: string } | undefined;
+      expect(row?.amount_minor).toBe(7000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("emits an SSE error event when Gemini fails after the stream starts", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 }),
+      ),
+    );
+    try {
+      const res = await app.request(
+        "/api/assistant/chat",
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "hello" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = await readSseEvents(res);
+      expect(events.some((e) => e.type === "error")).toBe(true);
+      expect(String(events.find((e) => e.type === "error")?.message ?? "")).toMatch(/API key/i);
+      expect(events.some((e) => e.type === "done")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("still returns JSON when Accept is application/json", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":generateContent");
+        expect(String(url)).not.toContain("streamGenerateContent");
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: "Hello from JSON." }] } }],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    try {
+      const res = await req(env, "POST", "/api/assistant/chat", alice.cookie, {
+        familyId,
+        message: "hi",
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type") ?? "").toMatch(/json/i);
+      const body = (await res.json()) as { reply: string; actions: unknown[] };
+      expect(body.reply).toBe("Hello from JSON.");
+      expect(body.actions).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

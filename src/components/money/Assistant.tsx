@@ -128,32 +128,172 @@ export function Assistant() {
     setError(null);
     setInput("");
     const history = turns.slice(-10);
-    setTurns((t) => [...t, { role: "user", text: message }]);
+    // Placeholder model bubble so tokens can append immediately.
+    setTurns((t) => [...t, { role: "user", text: message }, { role: "model", text: "" }]);
     setBusy(true);
 
+    const appendModel = (delta: string) => {
+      // Clear "thinking" as soon as any reply text arrives.
+      setBusy(false);
+      setTurns((t) => {
+        if (t.length === 0) return t;
+        const next = t.slice();
+        const last = next[next.length - 1];
+        if (last?.role !== "model") return t;
+        next[next.length - 1] = { role: "model", text: last.text + delta };
+        return next;
+      });
+    };
+
+    const finishModel = (reply: string) => {
+      setBusy(false);
+      setTurns((t) => {
+        if (t.length === 0) return t;
+        const next = t.slice();
+        const last = next[next.length - 1];
+        if (last?.role !== "model") return t;
+        if (!last.text.trim()) {
+          next[next.length - 1] = { role: "model", text: reply || "Done." };
+        }
+        return next;
+      });
+    };
+
+    const fail = (msg: string) => {
+      setError(msg);
+      setBusy(false);
+      setTurns((t) => {
+        if (t.length === 0) return t;
+        const last = t[t.length - 1];
+        // Drop the empty placeholder bubble on error.
+        if (last?.role === "model" && !last.text.trim()) return t.slice(0, -1);
+        return t;
+      });
+    };
+
     try {
-      const res = await api<{ reply: string; actions: { name: string }[] }>("/assistant/chat", {
+      const res = await fetch("/api/assistant/chat", {
         method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify({ familyId: activeFamilyId, message, history }),
       });
-      setTurns((t) => [...t, { role: "model", text: res.reply || "Done." }]);
 
-      // Any tool that writes should refresh what's on screen behind the sheet.
-      if (res.actions.some((a) => a.name.startsWith("add_"))) {
-        await qc.invalidateQueries({ queryKey: ["expenses"] });
-        await qc.invalidateQueries({ queryKey: ["finance"] });
-        await qc.invalidateQueries({ queryKey: ["wishlist"] });
+      if (!res.ok) {
+        let messageText = res.statusText;
+        let code: string | undefined;
+        try {
+          const body = (await res.json()) as { error?: string; message?: string };
+          code = body.error;
+          messageText = body.message || body.error || messageText;
+        } catch {
+          // non-JSON
+        }
+        if (res.status === 501 || code === "not_configured") {
+          fail("The assistant isn't set up yet.");
+        } else if (messageText && messageText !== code) {
+          fail(messageText);
+        } else {
+          fail("The assistant couldn't answer. Try again.");
+        }
+        return;
+      }
+
+      const ctype = res.headers.get("content-type") ?? "";
+      let actions: { name: string }[] = [];
+
+      if (ctype.includes("text/event-stream") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let sawToken = false;
+        let streamError: string | null = null;
+
+        const handleEvent = (raw: string) => {
+          if (!raw) return;
+          let ev: {
+            type?: string;
+            text?: string;
+            reply?: string;
+            actions?: { name: string }[];
+            message?: string;
+            error?: string;
+          };
+          try {
+            ev = JSON.parse(raw) as typeof ev;
+          } catch {
+            return;
+          }
+          if (ev.type === "token" && typeof ev.text === "string" && ev.text) {
+            sawToken = true;
+            appendModel(ev.text);
+          } else if (ev.type === "done") {
+            actions = ev.actions ?? [];
+            if (!sawToken) finishModel(ev.reply || "Done.");
+            else setBusy(false);
+          } else if (ev.type === "error") {
+            streamError = ev.message || "The assistant couldn't answer. Try again.";
+          }
+        };
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() ?? "";
+          for (const chunk of chunks) {
+            for (const line of chunk.split("\n")) {
+              if (line.startsWith("data:")) handleEvent(line.slice(5).trim());
+            }
+          }
+        }
+        if (buffer.trim()) {
+          for (const line of buffer.split("\n")) {
+            if (line.startsWith("data:")) handleEvent(line.slice(5).trim());
+          }
+        }
+
+        if (streamError) {
+          fail(streamError);
+          return;
+        }
+        // If the stream ended without tokens (malformed/partial), still settle the bubble.
+        setTurns((t) => {
+          const last = t[t.length - 1];
+          if (last?.role === "model" && !last.text.trim()) {
+            return [...t.slice(0, -1), { role: "model", text: "Done." }];
+          }
+          return t;
+        });
+        setBusy(false);
+      } else {
+        // JSON fallback (non-stream clients / older workers).
+        const body = (await res.json()) as {
+          reply?: string;
+          actions?: { name: string }[];
+        };
+        actions = body.actions ?? [];
+        finishModel(body.reply || "Done.");
+      }
+
+      // Refresh lists behind the sheet without holding the thinking state.
+      if (actions.some((a) => a.name.startsWith("add_"))) {
+        void qc.invalidateQueries({ queryKey: ["expenses"] });
+        void qc.invalidateQueries({ queryKey: ["finance"] });
+        void qc.invalidateQueries({ queryKey: ["wishlist"] });
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 501) {
-        setError("The assistant isn't set up yet.");
+        fail("The assistant isn't set up yet.");
       } else if (e instanceof ApiError && e.message && e.message !== e.code) {
-        setError(e.message);
+        fail(e.message);
       } else {
-        setError("The assistant couldn't answer. Try again.");
+        fail("The assistant couldn't answer. Try again.");
       }
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -221,21 +361,28 @@ export function Assistant() {
                   </div>
                 )}
 
-                {turns.map((t, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm",
-                      t.role === "user"
-                        ? "ml-auto bg-vault-600/25 text-fg"
-                        : "bg-ink-900/80 text-fg-muted",
-                    )}
-                  >
-                    {t.text}
-                  </div>
-                ))}
+                {turns.map((t, i) =>
+                  t.role === "model" && !t.text ? null : (
+                    <div
+                      key={i}
+                      className={cn(
+                        "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm",
+                        t.role === "user"
+                          ? "ml-auto bg-vault-600/25 text-fg"
+                          : "bg-ink-900/80 text-fg-muted",
+                      )}
+                    >
+                      {t.text}
+                    </div>
+                  ),
+                )}
 
-                {busy && (
+                {busy &&
+                  !(
+                    turns.length > 0 &&
+                    turns[turns.length - 1]?.role === "model" &&
+                    turns[turns.length - 1]!.text.length > 0
+                  ) && (
                   <div className="max-w-[85%] rounded-2xl bg-ink-900/80 px-3.5 py-2.5">
                     <span className="flex gap-1" aria-label="Thinking">
                       {[0, 1, 2].map((i) => (

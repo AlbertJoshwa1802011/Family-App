@@ -134,6 +134,19 @@ function toMinor(major: number): number {
   return Math.round(major * 100);
 }
 
+/** Short currency string for tool summaries (Worker-side; mirrors src/lib/money). */
+function formatMajor(major: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(major);
+  } catch {
+    return `${major} ${currency}`;
+  }
+}
+
 interface ToolContext {
   db: Db;
   familyId: string;
@@ -211,7 +224,19 @@ async function executeTool(
         meta: { amountMinor, via: "gemini" },
       });
 
-      return { ok: true, id, amountMinor, currency: ctx.currency, expenseDate };
+      const label =
+        (typeof args.description === "string" && args.description.trim()) ||
+        (typeof args.merchant === "string" && args.merchant.trim()) ||
+        "expense";
+      return {
+        ok: true,
+        id,
+        amountMinor,
+        currency: ctx.currency,
+        expenseDate,
+        // Clear summary lets the Gemini loop skip a second model round.
+        summary: `Logged ${formatMajor(amountMajor, ctx.currency)} for ${label}.`,
+      };
     }
 
     case "list_recent_expenses": {
@@ -353,17 +378,22 @@ async function executeTool(
         ? Math.min(Math.max(Math.trunc(priorityRaw), 1), 5)
         : 3;
 
+      const name = String(args.name ?? "Item").slice(0, 160);
       const id = crypto.randomUUID();
       await ctx.db.insert(schema.wishlistItems).values({
         id,
         familyId: ctx.familyId,
         ownerUserId: ctx.userId,
-        name: String(args.name ?? "Item").slice(0, 160),
+        name,
         estimatedCostMinor: toMinor(cost),
         currency: ctx.currency,
         priority,
       });
-      return { ok: true, id };
+      return {
+        ok: true,
+        id,
+        summary: `Added “${name}” (${formatMajor(cost, ctx.currency)}) to your wishlist.`,
+      };
     }
 
     default:
@@ -423,15 +453,72 @@ assistantRoutes.post("/chat", requireSession, zValidator("json", chatSchema, (r,
     { role: "user" as const, parts: [{ text: data.message }] },
   ];
 
-  try {
-    const result = await runAssistant({
-      apiKey: c.env.GEMINI_API_KEY,
-      model: c.env.GEMINI_MODEL,
-      systemInstruction: `${SYSTEM_INSTRUCTION}\n\nToday is ${ctx.today}. The currency is ${ctx.currency}.`,
-      history,
-      tools: TOOLS,
-      execute: (name, args) => executeTool(ctx, name, args),
+  const wantsStream =
+    c.req.header("accept")?.includes("text/event-stream") === true ||
+    c.req.query("stream") === "1";
+
+  const runArgs = {
+    apiKey: c.env.GEMINI_API_KEY,
+    model: c.env.GEMINI_MODEL,
+    systemInstruction: `${SYSTEM_INSTRUCTION}\n\nToday is ${ctx.today}. The currency is ${ctx.currency}.`,
+    history,
+    tools: TOOLS,
+    execute: (name: string, toolArgs: Record<string, unknown>) =>
+      executeTool(ctx, name, toolArgs),
+  };
+
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        };
+        try {
+          const result = await runAssistant({
+            ...runArgs,
+            onToken: (text) => send({ type: "token", text }),
+          });
+          send({
+            type: "done",
+            reply: result.text,
+            actions: result.toolCalls.map((t) => ({ name: t.name, result: t.result })),
+          });
+        } catch (err) {
+          if (err instanceof GeminiError) {
+            console.error(`[assistant] gemini ${err.status}: ${err.message}`);
+            send({
+              type: "error",
+              error: "assistant_failed",
+              message: friendlyGeminiMessage(err),
+            });
+          } else {
+            console.error("[assistant] failed:", err);
+            send({
+              type: "error",
+              error: "assistant_failed",
+              message: "The assistant hit an unexpected error. Please try again.",
+            });
+          }
+        } finally {
+          controller.close();
+        }
+      },
     });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
+  try {
+    const result = await runAssistant(runArgs);
 
     return c.json({
       reply: result.text,
