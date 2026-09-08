@@ -14,13 +14,17 @@ const FEED_USER_PREFIX = "calfeed_user:";
 /**
  * Calendar-app integration.
  *
- * Two surfaces:
+ * Primary path: Google Calendar **API push** on event create/update/cancel
+ * (`worker/lib/eventCalendarSync.ts`) — Family Vault is the source of truth.
+ *
+ * Secondary surfaces (kept for Apple/Outlook and offline export):
  *  - POST /calendar/feed-token → mints (or rotates) a capability token and
  *    returns the subscribable webcal/https feed URL for the current user.
  *  - GET /calendar/feed/:token.ics → the feed itself. Calendar apps
  *    (Google/Apple/Outlook) can't send session cookies, so this is a
  *    capability URL: the unguessable token IS the credential. Rotating the
  *    token invalidates the old URL. Content respects private-doc visibility.
+ *    Note: Google polls subscribed ICS feeds slowly; prefer the API push.
  */
 
 // POST /calendar/feed-token — mint/rotate the current user's feed token.

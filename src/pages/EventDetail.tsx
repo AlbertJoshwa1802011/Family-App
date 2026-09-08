@@ -273,14 +273,22 @@ export function EventDetailPage() {
           </section>
         )}
 
-        {/* Actions */}
-        <a
-          href={`/api/events/${ev.id}/ics`}
-          className="lq lq-press flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
-        >
-          <CalendarPlus className="size-4" />
-          Add to my calendar
-        </a>
+        {/* Google Calendar is pushed automatically on create/update.
+            Keep .ics as a fallback for Apple/Outlook offline import. */}
+        <div className="space-y-2">
+          <p className="text-center text-xs text-fg-muted">
+            Synced to Google Calendar automatically when you create or change
+            this event. Re-authenticate with Google once if it doesn&apos;t
+            appear.
+          </p>
+          <a
+            href={`/api/events/${ev.id}/ics`}
+            className="lq lq-press flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
+          >
+            <CalendarPlus className="size-4" />
+            Download .ics
+          </a>
+        </div>
 
         {ev.status === "active" && canEdit && (
           <section className="space-y-2 pt-2">

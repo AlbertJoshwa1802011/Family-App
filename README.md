@@ -24,8 +24,9 @@ and coordinates life together — chat, events, tasks, reminders.
   "Remind a family member" on a document).
 - 💬 **Family chat** — WhatsApp-style bubbles, @mentions with notifications,
   soft-delete, 5s polling.
-- 📅 **Calendar** — events with attendees, per-event `.ics` download, and a
-  subscribable feed (Google/Apple/Outlook) carrying events + document expiries.
+- 📅 **Calendar** — events with attendees; creates/updates Google Calendar
+  automatically in the background; optional `.ics` download and subscribe feed
+  (Apple/Outlook backup) carrying events + document expiries.
 - 👨‍👩‍👧 **Family management** — Google-login invites (email-bound, single-use,
   beautiful HTML invite email), roles (owner/admin/member), dependents without
   accounts, member profiles, activity feed.

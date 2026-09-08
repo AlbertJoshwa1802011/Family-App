@@ -130,14 +130,22 @@ function CalendarFeedCard() {
       <div className="flex items-start gap-3">
         <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
         <div>
-          <div className="text-sm font-medium text-fg">
-            Subscribe in your calendar app
-          </div>
+          <div className="text-sm font-medium text-fg">Google Calendar</div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Family events and document expiries in Google Calendar, Apple
-            Calendar, or Outlook — updates automatically.
+            Family Vault pushes events into your Google Calendar as soon as you
+            create or change them — no manual sync button. Re-authenticate with
+            Google once to grant calendar access if events are missing.
           </p>
         </div>
+      </div>
+
+      <div className="border-t border-white/10 pt-3">
+        <div className="text-xs font-medium text-fg">Optional: subscribe URL</div>
+        <p className="mt-0.5 text-xs text-fg-subtle">
+          For Apple Calendar / Outlook, or as a read-only backup feed (Google
+          polls subscribed URLs slowly — the auto-push above is the primary
+          path).
+        </p>
       </div>
 
       {feedUrl ? (
@@ -161,9 +169,9 @@ function CalendarFeedCard() {
             </Button>
           </div>
           <p className="text-xs text-fg-subtle">
-            In your calendar app choose "Subscribe / Add calendar from URL" and
-            paste this link. Anyone with the link can read your calendar —
-            regenerate it to revoke the old one.
+            Paste this link under Subscribe / Add calendar from URL. Anyone with
+            the link can read your calendar — regenerate it to revoke the old
+            one.
           </p>
         </>
       ) : (
@@ -173,7 +181,7 @@ function CalendarFeedCard() {
           loading={mint.isPending}
           onClick={() => mint.mutate()}
         >
-          Get calendar link
+          Get subscribe link
         </Button>
       )}
       {mint.isError && (

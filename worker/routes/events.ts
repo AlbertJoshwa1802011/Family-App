@@ -19,6 +19,7 @@ import {
   notifyRsvpAnswered,
   type EventSummary,
 } from "../lib/scheduleNotify";
+import { syncEventToGoogleCalendars } from "../lib/eventCalendarSync";
 
 export const eventRoutes = new Hono<HonoEnv>();
 
@@ -295,6 +296,9 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
       { userId, name: await actorName(db, userId) },
     );
   }
+
+  // Push into Google Calendar for creator + attendees (best-effort; app is source of truth).
+  await syncEventToGoogleCalendars(db, c.env, eventId);
 
   // Advisory double-booking check — reported, never blocking.
   const conflicts = await findConflicts(
@@ -581,6 +585,8 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
     await notifyEventUninvited(db, c.env, summary, removed, actor);
   }
 
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
   const conflicts = await findConflicts(
     db,
     event.familyId,
@@ -626,6 +632,8 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
     });
   }
 
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
@@ -670,6 +678,8 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
       name: await actorName(db, userId),
     });
   }
+
+  await syncEventToGoogleCalendars(db, c.env, eventId);
 
   await insertAuditEvent(db, {
     familyId: event.familyId,
@@ -746,6 +756,7 @@ eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async
       userId,
       name: await actorName(db, userId),
     });
+    await syncEventToGoogleCalendars(db, c.env, eventId);
   }
 
   return c.json({ ok: true, added: fresh.length });
@@ -783,6 +794,8 @@ eventRoutes.delete("/:id/attendees/:memberId", requireSession, async (c) => {
     userId,
     name: await actorName(db, userId),
   });
+
+  await syncEventToGoogleCalendars(db, c.env, eventId);
 
   return c.json({ ok: true });
 });
@@ -902,6 +915,9 @@ eventRoutes.post("/:id/rsvp", requireSession, zv(rsvpSchema), async (c) => {
       onBehalfOf,
     );
   }
+
+  // Decline drops the Google Calendar copy; accept/tentative (re)creates it.
+  await syncEventToGoogleCalendars(db, c.env, eventId);
 
   return c.json({ ok: true, memberId, rsvp: status });
 });

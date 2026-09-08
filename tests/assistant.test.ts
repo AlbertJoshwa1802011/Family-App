@@ -116,6 +116,7 @@ describe("assistant tools (no LLM)", () => {
   function ctx(userId = member.userId) {
     return {
       db: getDb(t.env),
+      env: t.env,
       familyId,
       userId,
       role: "member",
