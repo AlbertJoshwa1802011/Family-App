@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Copy,
   Settings,
+  Shield,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -19,9 +20,11 @@ import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
+import { ModuleAccessPicker } from "../components/ModuleAccessPicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { FAMILY_MODULES, type FamilyModule } from "../lib/modules";
 
 interface FamilyMember {
   id: string;
@@ -33,6 +36,7 @@ interface FamilyMember {
   picture: string | null;
   role: "owner" | "admin" | "member";
   status: "active" | "invited" | "removed";
+  modules?: FamilyModule[];
 }
 
 interface ActivityItem {
@@ -167,6 +171,26 @@ export function FamilyPage() {
 
         {inviteOpen && familyId && (
           <InviteCard familyId={familyId} onClose={() => setInviteOpen(false)} />
+        )}
+
+        {canInvite && !inviteOpen && (
+          <Link
+            to="/family/access"
+            className="lq lq-flat lq-press flex items-center gap-3 rounded-2xl px-4 py-3"
+          >
+            <span className="lq lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
+              <Shield className="size-5" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-fg">
+                Member access
+              </span>
+              <span className="block text-xs text-fg-subtle">
+                Customise which menus each person can use
+              </span>
+            </span>
+            <ChevronRight className="size-4 text-fg-subtle" aria-hidden="true" />
+          </Link>
         )}
 
         {dependentOpen && familyId && (
@@ -318,20 +342,35 @@ function InviteCard({
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
+  const [modules, setModules] = useState<FamilyModule[]>([...FAMILY_MODULES]);
   const [error, setError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ invite: { token: string } }>(`/families/${familyId}/invites`, {
+      api<{
+        invite: {
+          token: string;
+          inviteUrl?: string;
+          emailSent?: boolean;
+          modules?: FamilyModule[];
+        };
+      }>(`/families/${familyId}/invites`, {
         method: "POST",
-        body: JSON.stringify({ email: email.trim(), role }),
+        body: JSON.stringify({
+          email: email.trim(),
+          role,
+          modules,
+        }),
       }),
     onSuccess: (res) => {
-      // Invite links are accepted in-app: the invitee signs in with the
-      // invited email, then the app POSTs the token.
-      setInviteLink(`${window.location.origin}/invite/${res.invite.token}`);
+      setInviteLink(
+        res.invite.inviteUrl ??
+          `${window.location.origin}/invite/${res.invite.token}`,
+      );
+      setEmailSent(Boolean(res.invite.emailSent));
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -350,11 +389,14 @@ function InviteCard({
     return (
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium text-fg">
-          Invite created for {email}
+          {emailSent
+            ? `Invitation emailed to ${email}`
+            : `Invite created for ${email}`}
         </p>
         <p className="text-xs text-fg-muted">
-          Share this link with them. It only works for the Google account with
-          that email, and expires in 7 days.
+          {emailSent
+            ? "They can join from the email link (same Google account). You can also share the link below."
+            : "Email couldn’t be sent from this server — share this link. It only works for that Google account and expires in 7 days."}
         </p>
         <div className="flex items-center gap-2">
           <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
@@ -383,7 +425,7 @@ function InviteCard({
 
   return (
     <form onSubmit={submit} noValidate>
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-4 p-4">
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
             Email <span className="text-danger">*</span>
@@ -416,14 +458,14 @@ function InviteCard({
             ))}
           </div>
           <p className="mt-2 text-xs text-fg-subtle">
-            Admins can see all documents (including private ones), invite
-            members, and manage roles.
+            Admins can see private documents, invite members, and manage access.
           </p>
         </div>
+        <ModuleAccessPicker value={modules} onChange={setModules} />
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
-            Create invite
+            Send invite
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

@@ -11,6 +11,15 @@ import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
 import { inviteEmail } from "../lib/emailTemplates";
+import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
+import {
+  FAMILY_MODULES,
+  MODULE_META,
+  modulesFieldSchema,
+  parseModulesJson,
+  serializeModules,
+  type FamilyModule,
+} from "../lib/modules";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -21,24 +30,36 @@ const createFamilySchema = z.object({
 });
 
 const inviteSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   role: z.enum(["admin", "member"]).optional().default("member"),
+  /** Enabled modules for the invitee. Omitted = all modules. */
+  modules: modulesFieldSchema,
 });
 
 const updateMemberSchema = z
   .object({
     role: z.enum(["admin", "member"]).optional(),
     status: z.enum(["active", "removed"]).optional(),
+    /** Replace enabled modules. Omit to leave unchanged; null = restore all. */
+    modules: z.array(z.enum(FAMILY_MODULES)).max(FAMILY_MODULES.length).nullable().optional(),
   })
-  .refine((d) => d.role !== undefined || d.status !== undefined, {
-    message: "At least one of role or status must be provided",
-  });
+  .refine(
+    (d) =>
+      d.role !== undefined || d.status !== undefined || d.modules !== undefined,
+    { message: "At least one of role, status, or modules must be provided" },
+  );
 
 function zv<T extends z.ZodType>(schema: T) {
   return zValidator("json", schema, (result, c) => {
     if (!result.success)
       return c.json({ error: "validation_error", issues: result.error.issues }, 400);
   });
+}
+
+function memberModulesPayload(modulesJson: string | null | undefined, role: string) {
+  const modules =
+    role === "owner" ? [...FAMILY_MODULES] : parseModulesJson(modulesJson);
+  return modules;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -222,6 +243,7 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
     memberType: "user",
     role: invite.role,
     status: "active",
+    modulesJson: invite.modulesJson,
   });
 
   await db
@@ -235,10 +257,29 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
     action: "member_joined",
     targetType: "family",
     targetId: invite.familyId,
-    meta: { role: invite.role },
+    meta: {
+      role: invite.role,
+      modules: parseModulesJson(invite.modulesJson),
+    },
   });
 
-  return c.json({ ok: true, familyId: invite.familyId });
+  return c.json({
+    ok: true,
+    familyId: invite.familyId,
+    modules: parseModulesJson(invite.modulesJson),
+  });
+});
+
+// GET /families/modules — catalog of customizable modules (labels for admin UI).
+// Must be registered before /:id so "modules" is not swallowed as a family id.
+familyRoutes.get("/modules", requireSession, async (c) => {
+  return c.json({
+    modules: FAMILY_MODULES.map((id) => ({
+      id,
+      label: MODULE_META[id].label,
+      description: MODULE_META[id].description,
+    })),
+  });
 });
 
 // GET /families/:id — get family details (requires membership).
@@ -275,6 +316,7 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
       dateOfBirth: schema.familyMembers.dateOfBirth,
       role: schema.familyMembers.role,
       status: schema.familyMembers.status,
+      modulesJson: schema.familyMembers.modulesJson,
       createdAt: schema.familyMembers.createdAt,
       name: schema.users.name,
       email: schema.users.email,
@@ -284,7 +326,22 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
     .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
     .where(eq(schema.familyMembers.familyId, familyId));
 
-  return c.json({ members });
+  return c.json({
+    members: members.map((m) => ({
+      id: m.id,
+      userId: m.userId,
+      memberType: m.memberType,
+      displayName: m.displayName,
+      dateOfBirth: m.dateOfBirth,
+      role: m.role,
+      status: m.status,
+      createdAt: m.createdAt,
+      name: m.name,
+      email: m.email,
+      picture: m.picture,
+      modules: memberModulesPayload(m.modulesJson, m.role),
+    })),
+  });
 });
 
 // POST /families/:id/members — add a DEPENDENT member (child/elder without an
@@ -376,9 +433,22 @@ familyRoutes.patch(
       return c.json({ error: "cannot_modify_owner" }, 403);
     }
 
-    const columnUpdates: Partial<Pick<typeof schema.familyMembers.$inferInsert, "role" | "status">> = {};
+    // Owner module access is always full — refuse attempts to restrict it.
+    if (target.role === "owner" && updates.modules !== undefined) {
+      return c.json({ error: "cannot_modify_owner" }, 403);
+    }
+
+    const columnUpdates: Partial<
+      Pick<typeof schema.familyMembers.$inferInsert, "role" | "status" | "modulesJson">
+    > = {};
     if (updates.role !== undefined) columnUpdates.role = updates.role;
     if (updates.status !== undefined) columnUpdates.status = updates.status;
+    if (updates.modules !== undefined) {
+      columnUpdates.modulesJson =
+        updates.modules === null
+          ? null
+          : serializeModules(updates.modules as FamilyModule[]);
+    }
 
     await db
       .update(schema.familyMembers)
@@ -400,19 +470,27 @@ familyRoutes.patch(
       .where(eq(schema.familyMembers.id, memberId))
       .get();
 
-    return c.json({ member });
+    return c.json({
+      member: member
+        ? {
+            ...member,
+            modules: memberModulesPayload(member.modulesJson, member.role),
+          }
+        : null,
+    });
   },
 );
 
 // POST /families/:id/invites — create an invite (admin+ only).
-// Email delivery is deferred to Phase 3 (Resend integration).
+// Also grants app-level access so closed signup doesn't block the invitee.
 familyRoutes.post(
   "/:id/invites",
   requireSession,
   zv(inviteSchema),
   async (c) => {
     const { id: familyId } = c.req.param();
-    const { email, role } = c.req.valid("json");
+    const { email: rawEmail, role, modules } = c.req.valid("json");
+    const email = normalizeEmail(rawEmail);
     const userId = c.get("userId")!;
 
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
@@ -427,6 +505,7 @@ familyRoutes.post(
 
     const db = getDb(c.env);
     const now = Math.floor(Date.now() / 1000);
+    const modulesJson = serializeModules(modules as FamilyModule[] | undefined);
 
     // Generate invite token and hash it for storage
     const token = crypto.randomUUID();
@@ -438,8 +517,16 @@ familyRoutes.post(
       email,
       tokenHash,
       role,
+      modulesJson,
       invitedBy: userId,
       expiresAt: now + 7 * 24 * 3600, // 7 days
+    });
+
+    // Family invite ⇒ app access (closed signup).
+    await upsertAccessGrant(db, {
+      email,
+      grantedByUserId: userId,
+      note: `family invite:${familyId}`,
     });
 
     await insertAuditEvent(db, {
@@ -447,7 +534,7 @@ familyRoutes.post(
       actorUserId: userId,
       action: "invite_created",
       targetType: "invite",
-      meta: { email, role },
+      meta: { email, role, modules: parseModulesJson(modulesJson) },
     });
 
     // Best-effort invite email (no-op without RESEND_API_KEY — the caller
@@ -456,25 +543,28 @@ familyRoutes.post(
       db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
       db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
     ]);
-    const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-    await sendEmail(c.env, {
+    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+    const inviteUrl = `${appUrl}/invite/${token}`;
+    const emailSent = await sendEmail(c.env, {
       to: email,
       subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
       html: inviteEmail({
         inviterName: inviter?.name ?? null,
         familyName: family?.name ?? "your family",
-        inviteUrl: `${appUrl}/invite/${token}`,
+        inviteUrl,
       }),
     });
 
-    // Return the plain token so the caller can include it in an email link.
     return c.json(
       {
         invite: {
           email,
           role,
           expiresAt: now + 7 * 24 * 3600,
-          token, // include in invite link: /invites/<token>/accept
+          token,
+          inviteUrl,
+          emailSent,
+          modules: parseModulesJson(modulesJson),
         },
       },
       201,

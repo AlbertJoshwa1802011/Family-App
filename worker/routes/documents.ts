@@ -159,7 +159,7 @@ documentRoutes.get("/", requireSession, async (c) => {
 
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   let where = visibilityWhere(familyId, userId, membership.role);
@@ -231,7 +231,7 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -294,7 +294,7 @@ documentRoutes.get("/:id", requireSession, async (c) => {
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -319,7 +319,7 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -370,7 +370,7 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   // A private doc another member can't see must 404, not 403 (don't reveal it).
@@ -421,7 +421,7 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -468,7 +468,7 @@ documentRoutes.get("/:id/files", requireSession, async (c) => {
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -499,7 +499,7 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -576,7 +576,7 @@ documentRoutes.get("/:id/files/:fid/download", csrfProtectGet, requireSession, a
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -661,7 +661,7 @@ documentRoutes.post("/:id/remind", requireSession, zv(remindSchema), async (c) =
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, senderId, membership.role)) {
@@ -707,7 +707,7 @@ documentRoutes.get("/:id/comments", requireSession, async (c) => {
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -752,7 +752,7 @@ documentRoutes.post("/:id/comments", requireSession, zv(createCommentSchema), as
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   if (isDocHiddenFrom(doc, userId, membership.role)) {
@@ -807,7 +807,7 @@ documentRoutes.delete("/:id/comments/:cid", requireSession, async (c) => {
 
   if (!doc) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, doc.familyId);
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
   if (membership instanceof Response) return membership;
 
   // Only the comment author or admins/owners can delete

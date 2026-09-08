@@ -161,7 +161,7 @@ eventRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -205,7 +205,7 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -315,7 +315,7 @@ eventRoutes.get("/availability", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const from = parseInt(c.req.query("from") ?? "", 10);
@@ -348,7 +348,7 @@ eventRoutes.get("/:id", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const attendees = await db
@@ -398,7 +398,7 @@ eventRoutes.get("/:id/ics", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const body = buildCalendar({
@@ -441,7 +441,7 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
@@ -606,7 +606,7 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
@@ -652,7 +652,7 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
@@ -697,7 +697,7 @@ eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
@@ -765,7 +765,7 @@ eventRoutes.delete("/:id/attendees/:memberId", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
@@ -807,7 +807,7 @@ eventRoutes.post("/:id/rsvp", requireSession, zv(rsvpSchema), async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   // A cancelled event has nothing left to answer.

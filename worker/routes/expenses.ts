@@ -64,7 +64,7 @@ expenseRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -104,7 +104,7 @@ expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -156,7 +156,7 @@ expenseRoutes.get("/:id", requireSession, async (c) => {
 
   if (!expense) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   return c.json({ expense: serializeExpense(expense) });
@@ -177,7 +177,7 @@ expenseRoutes.patch("/:id", requireSession, zv(updateExpenseSchema), async (c) =
 
   if (!expense) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (expense.createdBy !== userId && membership.role === "member") {
@@ -218,7 +218,7 @@ expenseRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!expense) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (expense.createdBy !== userId && membership.role === "member") {

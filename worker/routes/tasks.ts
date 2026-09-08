@@ -182,7 +182,7 @@ taskRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const viewRaw = c.req.query("view");
@@ -242,7 +242,7 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -333,7 +333,7 @@ taskRoutes.get("/:id", requireSession, async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const familyTasks = await loadFamilyTasks(db, task.familyId);
@@ -366,7 +366,7 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   if (!canEditTask(task, userId, membership)) {
@@ -481,7 +481,7 @@ taskRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   if (task.createdBy !== userId && membership.role === "member") {
