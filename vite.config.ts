@@ -22,7 +22,7 @@ export default defineConfig({
         // The Worker owns /api/*; never let the SPA navigation fallback or the SW
         // intercept API calls.
         navigateFallback: "index.html",
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/access\/review/],
         // NOTE: deliberately NO runtime caching of /api/* responses. Those are
         // auth-gated, per-family PII (document/family metadata) and persisting them
         // in browser Cache Storage would survive logout and leak on shared devices.

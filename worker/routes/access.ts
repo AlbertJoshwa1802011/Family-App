@@ -2,14 +2,16 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
-import type { HonoEnv } from "../types";
+import type { AppContext, HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { generateRandom, sha256Hex } from "../lib/crypto";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
+import { absoluteAppUrl } from "../lib/publicUrl";
 import {
   accessApprovedEmail,
   accessRejectedEmail,
+  accessReviewResultHtml,
   demoRequestNotifyEmail,
   demoRequestReceivedEmail,
 } from "../lib/accessEmails";
@@ -52,13 +54,21 @@ const revokeSchema = z.object({
   email: z.string().trim().email().max(254),
 });
 
+/** Email-safe path (no `?` / `&`) so Gmail/Outlook cannot mangle the action. */
 function reviewUrls(appUrl: string, token: string) {
-  const base = `${appUrl}/access/review`;
+  const encoded = encodeURIComponent(token);
   return {
-    approveUrl: `${base}?token=${encodeURIComponent(token)}&action=approve`,
-    rejectUrl: `${base}?token=${encodeURIComponent(token)}&action=reject`,
+    approveUrl: `${appUrl}/api/access/review/approve/${encoded}`,
+    rejectUrl: `${appUrl}/api/access/review/reject/${encoded}`,
+    adminUrl: `${appUrl}/admin/access`,
+    loginUrl: `${appUrl}/login`,
   };
 }
+
+const REVIEW_HEADERS = {
+  "Cache-Control": "no-store",
+  "Referrer-Policy": "no-referrer",
+} as const;
 
 async function applyReview(
   env: HonoEnv["Bindings"],
@@ -107,7 +117,7 @@ async function applyReview(
       subject: "You're approved — sign in to Family Vault",
       html: accessApprovedEmail({
         name: row.name,
-        loginUrl: `${env.APP_URL}/login`,
+        loginUrl: `${absoluteAppUrl(env)}/login`,
       }),
     });
 
@@ -184,8 +194,8 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
     reviewTokenHash: tokenHash,
   });
 
-  const appUrl = c.env.APP_URL ?? "";
-  const { approveUrl, rejectUrl } = reviewUrls(appUrl, token);
+  const appUrl = absoluteAppUrl(c.env, c.req.url);
+  const { approveUrl, rejectUrl, adminUrl, loginUrl } = reviewUrls(appUrl, token);
   const notifyTo = accessNotifyEmail(c.env);
 
   if (notifyTo) {
@@ -199,8 +209,14 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
         message,
         approveUrl,
         rejectUrl,
-        adminUrl: `${appUrl}/admin/access`,
+        adminUrl,
       }),
+      text: [
+        `Access request from ${data.name.trim()} <${email}>`,
+        `Approve: ${approveUrl}`,
+        `Reject: ${rejectUrl}`,
+        `Admin: ${adminUrl}`,
+      ].join("\n"),
     });
   }
 
@@ -209,14 +225,153 @@ accessRoutes.post("/demo-requests", zv(demoRequestSchema), async (c) => {
     subject: "We received your Family Vault access request",
     html: demoRequestReceivedEmail({
       name: data.name.trim(),
-      appUrl: `${appUrl}/login`,
+      appUrl: loginUrl,
     }),
   });
 
   return c.json({ ok: true, status: "pending" }, 201);
 });
 
-// POST /access/review — public tokenized approve/reject (from email landing page).
+async function reviewByToken(
+  env: HonoEnv["Bindings"],
+  token: string,
+  action: "approve" | "reject",
+) {
+  const parsed = reviewSchema.safeParse({ token, action });
+  if (!parsed.success) {
+    return { ok: false as const, error: "validation_error", status: 400 };
+  }
+
+  const tokenHash = await sha256Hex(parsed.data.token);
+  const db = getDb(env);
+  const row = await db
+    .select({ id: schema.demoRequests.id, status: schema.demoRequests.status })
+    .from(schema.demoRequests)
+    .where(eq(schema.demoRequests.reviewTokenHash, tokenHash))
+    .get();
+
+  if (!row) return { ok: false as const, error: "not_found", status: 404 };
+  if (row.status !== "pending") {
+    return { ok: false as const, error: "already_reviewed", status: 409 };
+  }
+
+  return applyReview(env, {
+    requestId: row.id,
+    action: parsed.data.action,
+    reviewerUserId: null,
+  });
+}
+
+function parseReviewAction(raw: string | undefined): "approve" | "reject" | null {
+  if (raw === "approve" || raw === "reject") return raw;
+  return null;
+}
+
+function reviewLanding(c: AppContext, opts: {
+  status: number;
+  kind: "approved" | "rejected" | "already" | "error";
+  title: string;
+  message: string;
+}) {
+  const appUrl = absoluteAppUrl(c.env, c.req.url);
+  return c.html(
+    accessReviewResultHtml({
+      kind: opts.kind,
+      title: opts.title,
+      message: opts.message,
+      adminUrl: `${appUrl}/admin/access`,
+      loginUrl: `${appUrl}/login`,
+    }),
+    { status: opts.status as 200 | 400 | 404, headers: REVIEW_HEADERS },
+  );
+}
+
+/**
+ * Email "Approve access" / "Reject" buttons are GET (Gmail cannot POST).
+ * Handles:
+ *   GET /api/access/review/approve/:token
+ *   GET /api/access/review?token=&action=
+ *   GET /access/review?token=&action=   (links already sitting in inboxes)
+ */
+export async function handlePublicReviewGet(c: AppContext) {
+  const limited = await checkRateLimit(c, `access-review:${clientIp(c)}`, {
+    limit: 20,
+    windowSecs: 3600,
+  });
+  if (limited) return limited;
+
+  const url = new URL(c.req.url);
+  const pathAction = c.req.param("action");
+  const pathToken = c.req.param("token");
+  let action: "approve" | "reject";
+  let token: string;
+
+  if (pathToken) {
+    const parsed = parseReviewAction(pathAction);
+    if (!parsed) {
+      return reviewLanding(c, {
+        status: 400,
+        kind: "error",
+        title: "Couldn’t complete",
+        message: "This review link is invalid.",
+      });
+    }
+    action = parsed;
+    token = pathToken.trim();
+  } else {
+    action =
+      parseReviewAction(url.searchParams.get("action") ?? undefined) ?? "approve";
+    token = (url.searchParams.get("token") ?? "").trim();
+  }
+
+  if (!token) {
+    return reviewLanding(c, {
+      status: 400,
+      kind: "error",
+      title: "Couldn’t complete",
+      message: "This review link is missing a token.",
+    });
+  }
+
+  const result = await reviewByToken(c.env, token, action);
+  if (result.ok) {
+    return reviewLanding(c, {
+      status: 200,
+      kind: result.status,
+      title: result.status === "approved" ? "Access approved" : "Request rejected",
+      message:
+        result.status === "approved"
+          ? "They can now sign in with Google using the email on their request."
+          : "They’ve been notified that access wasn’t approved.",
+    });
+  }
+
+  if (result.error === "already_reviewed") {
+    return reviewLanding(c, {
+      status: 200,
+      kind: "already",
+      title: "Already handled",
+      message: "This access request was already reviewed.",
+    });
+  }
+
+  return reviewLanding(c, {
+    status: result.status === 400 ? 400 : 404,
+    kind: "error",
+    title: "Couldn’t complete",
+    message:
+      result.error === "validation_error"
+        ? "This review link is invalid."
+        : "This review link is invalid or has expired.",
+  });
+}
+
+// GET /access/review/:action/:token — email-safe (no query string).
+accessRoutes.get("/review/:action/:token", handlePublicReviewGet);
+// GET /access/review?token=&action= — still works if a client rewrites the path URL.
+accessRoutes.get("/review", handlePublicReviewGet);
+
+// POST /access/review — SPA landing page (JSON).
 accessRoutes.post("/review", zv(reviewSchema), async (c) => {
   const limited = await checkRateLimit(c, `access-review:${clientIp(c)}`, {
     limit: 20,
@@ -225,25 +380,14 @@ accessRoutes.post("/review", zv(reviewSchema), async (c) => {
   if (limited) return limited;
 
   const { token, action } = c.req.valid("json");
-  const tokenHash = await sha256Hex(token);
-  const db = getDb(c.env);
-  const row = await db
-    .select({ id: schema.demoRequests.id, status: schema.demoRequests.status })
-    .from(schema.demoRequests)
-    .where(eq(schema.demoRequests.reviewTokenHash, tokenHash))
-    .get();
-
-  if (!row) return c.json({ error: "not_found" }, 404);
-  if (row.status !== "pending") {
-    return c.json({ error: "already_reviewed", status: row.status }, 409);
+  const result = await reviewByToken(c.env, token, action);
+  if (!result.ok) {
+    const status = result.status === 409 ? 409 : result.status === 400 ? 400 : 404;
+    return c.json(
+      { error: result.error, ...(result.error === "already_reviewed" ? { status: "already_reviewed" } : {}) },
+      status,
+    );
   }
-
-  const result = await applyReview(c.env, {
-    requestId: row.id,
-    action,
-    reviewerUserId: null,
-  });
-  if (!result.ok) return c.json({ error: result.error }, result.status as 404);
 
   return c.json({ ok: true, status: result.status });
 });
@@ -369,7 +513,7 @@ accessRoutes.post(
       subject: "You're invited to Family Vault",
       html: accessApprovedEmail({
         name: null,
-        loginUrl: `${c.env.APP_URL}/login`,
+        loginUrl: `${absoluteAppUrl(c.env, c.req.url)}/login`,
       }),
     });
 

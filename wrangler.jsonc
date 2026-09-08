@@ -10,11 +10,13 @@
   // When using @cloudflare/vite-plugin, do NOT set `assets.directory` here — the plugin
   // injects the built client directory at build time. `run_worker_first` ensures /api/*
   // hits the Worker before the SPA fallback can swallow it (so unknown /api routes get a
-  // JSON 404, not index.html).
+  // JSON 404, not index.html). `/access/review` is the email approve/reject landing —
+  // it must hit the Worker (HTML, no JS) instead of the SPA, including links already
+  // sitting in admin inboxes.
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/access/review"]
   },
   "d1_databases": [
     {

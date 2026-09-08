@@ -27,7 +27,7 @@ import { churchRoutes } from "./routes/church";
 import { settlementRoutes } from "./routes/settlements";
 import { deviceLockRoutes } from "./routes/deviceLock";
 import { chatRoutes } from "./routes/chat";
-import { accessRoutes } from "./routes/access";
+import { accessRoutes, handlePublicReviewGet } from "./routes/access";
 import { runExpiryReminders, runLifeEventReminders } from "./cron";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { getDb } from "./db/client";
@@ -108,6 +108,10 @@ api.route("/access", accessRoutes);
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
 
 app.route("/api", api);
+
+// Email "Approve access" links land here (legacy inbox URLs). Must be on the
+// Worker — the SPA/SW would otherwise swallow GET /access/review as index.html.
+app.get("/access/review", handlePublicReviewGet);
 
 // Consistent JSON error shape for API; never leak internals to the client.
 app.onError((err, c) => {
