@@ -13,11 +13,13 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
 import { insertAuditEvent } from "../lib/audit";
 import {
   contributionsConfigured,
   fetchChurchFunds,
   fetchChurchPurchases,
+  isSuperAdminOnlyChurchFund,
   rupeesToMinor,
 } from "../lib/contributions";
 
@@ -82,14 +84,30 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
   const purchases = purchasesRes.ok ? purchasesRes.purchases : [];
 
   const db = getDb(c.env);
+  const userId = c.get("userId")!;
+  const canSeeRestricted = await isPlatformAdmin(db, c.env, userId);
+
+  const visibleUpstreamFunds = canSeeRestricted
+    ? fundsRes.funds
+    : fundsRes.funds.filter((f) => !isSuperAdminOnlyChurchFund(f));
+  const restrictedSlugs = new Set(
+    fundsRes.funds
+      .filter((f) => isSuperAdminOnlyChurchFund(f))
+      .map((f) => f.slug),
+  );
+
   const settlements = await db
     .select()
     .from(schema.churchSettlements)
     .where(eq(schema.churchSettlements.familyId, familyId))
     .orderBy(desc(schema.churchSettlements.settledAt));
 
-  const outstanding = outstandingByFund(settlements);
-  const funds = fundsRes.funds.map((f) => {
+  const visibleSettlements = canSeeRestricted
+    ? settlements
+    : settlements.filter((s) => !restrictedSlugs.has(s.fundSlug));
+
+  const outstanding = outstandingByFund(visibleSettlements);
+  const funds = visibleUpstreamFunds.map((f) => {
     const outstandingMinor = outstanding.get(f.slug) ?? 0;
     const availableMinor = rupeesToMinor(f.availableBalance);
     // Prefer unpaid carry when present; otherwise suggest live available.
@@ -102,12 +120,20 @@ churchRoutes.get("/snapshot", requireSession, async (c) => {
     };
   });
 
+  const visiblePurchases = canSeeRestricted
+    ? purchases
+    : purchases.filter(
+        (p) =>
+          !restrictedSlugs.has(p.fund) &&
+          !isSuperAdminOnlyChurchFund({ slug: p.fund }),
+      );
+
   return c.json({
     configured: true,
     currency: fundsRes.currency,
     funds,
-    purchases,
-    settlements,
+    purchases: visiblePurchases,
+    settlements: visibleSettlements,
   });
 });
 
@@ -146,6 +172,12 @@ churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
   if (!fund) return c.json({ error: "not_found" }, 404);
 
   const db = getDb(c.env);
+  if (isSuperAdminOnlyChurchFund(fund)) {
+    if (!(await isPlatformAdmin(db, c.env, userId))) {
+      // Same shape as unknown fund — do not reveal restricted pots exist.
+      return c.json({ error: "not_found" }, 404);
+    }
+  }
   const collectedMinor = rupeesToMinor(fund.totalCollected);
   const spentMinor = rupeesToMinor(fund.spentOnProducts);
   const dueMinor = data.dueMinor;

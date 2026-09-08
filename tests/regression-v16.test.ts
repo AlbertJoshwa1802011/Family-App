@@ -44,14 +44,14 @@ function authed(
   );
 }
 
-function churchFundsResponse(slug = "tech-fund") {
+function churchFundsResponse(slug = "christmas-fund") {
   return new Response(
     JSON.stringify({
       success: true,
       funds: [
         {
           slug,
-          name: "Tech fund",
+          name: "Christmas Fund",
           totalCollected: 1000,
           spentOnProducts: 250,
           availableBalance: 750,
@@ -550,7 +550,7 @@ describe("Church snapshot + settle", () => {
     const alice = seedActor(sqlite, family.id, "owner");
     const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-08",
       dueMinor: 75_000,
       paidMinor: 75_000,
@@ -567,7 +567,7 @@ describe("Church snapshot + settle", () => {
     const alice = seedActor(sqlite, family.id, "owner");
     const res = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-08",
       dueMinor: 75_000,
       paidMinor: 75_000,
@@ -595,7 +595,7 @@ describe("Church snapshot + settle", () => {
 
     const settle = await authed(env, "POST", "/api/church/settle", cara.cookie, {
       familyId: famA.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-08",
       dueMinor: 75_000,
       paidMinor: 75_000,
@@ -635,7 +635,7 @@ describe("Church snapshot + settle", () => {
 
     const settle = await authed(env, "POST", "/api/church/settle", alice.cookie, {
       familyId: family.id,
-      fundSlug: "tech-fund",
+      fundSlug: "christmas-fund",
       periodKey: "2026-09",
       dueMinor: 75_000,
       paidMinor: 75_000,
