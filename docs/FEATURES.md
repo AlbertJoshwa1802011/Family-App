@@ -21,13 +21,14 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+| Workspace intelligence | ✅ Complete | Meeting loop (notes/action-items/follow-ups), related docs + tags, travel buffer, resource links (YouTube/URL), conflict UI |
 
 See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
 the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (28 tables, 12 migrations)
+## 2. Database Schema (29 tables, 14 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
@@ -71,6 +72,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `money_movements` | Fund ledger: received into pot / settled to a destination | 0010 |
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
+| `resource_links` | YouTube / URL / photo refs on events/tasks/notes/docs | 0013 |
 
 ### Key Design Decisions
 
@@ -122,12 +124,17 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/documents/:id/files` | version list / record after Drive upload |
 | GET | `/documents/:id/files/:fid/download` | streaming proxy, `attachment` + nosniff, CSRF-checked GET |
 | GET/POST | `/documents/:id/comments` · DELETE `.../:cid` | comments (soft-delete; author or admin+) |
+| GET | `/documents/:id/related` | advisory related-doc ranking (visibility filtered) |
+| GET/POST | `/tags?familyId` · PUT `/tags/documents/:docId` | family tags + replace document tag set |
+| GET/POST/DELETE | `/links` (+`/:id`) | YouTube/URL/photo resource links on event/task/note/document |
 | GET | `/notifications?unreadOnly` | inbox + unread count |
 | POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
 | GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
-| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated) |
-| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees / update / trash |
+| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated; optional `travelBufferMins`) |
+| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees + linked `documents` / update (incl. `documentIds` replace + travel buffer) / trash |
 | POST | `/events/:id/cancel` | cancelled stays visible |
+| POST | `/events/:id/action-items` | create tasks linked via `relatedEventId` |
+| POST | `/events/:id/follow-up` | in-app `meeting_followup` to attendees (not actor) |
 | GET | `/events/:id/ics` | "Add to calendar" download |
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
