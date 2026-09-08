@@ -13,10 +13,14 @@ import {
   LOGIN_SCOPES,
   extraScopesFromConnect,
   clearUserGoogleAccessCache,
-  storeGrantedScopes,
+  cacheUserGoogleAccessToken,
+  replaceGrantedScopes,
   refreshKey,
   GOOGLE_SCOPES,
   userHasScope,
+  userHasRefreshToken,
+  userCalendarReady,
+  scopeListIncludes,
 } from "../lib/google";
 import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
 import {
@@ -134,15 +138,18 @@ authRoutes.get("/me", async (c) => {
   });
 });
 
-// GET /auth/google/status — which extra Google scopes this session has granted.
+// GET /auth/google/status — which extra Google scopes this session can use.
+// `calendar` is true only when calendar.events was granted AND a refresh token
+// exists (otherwise event create cannot write to Google Calendar).
 authRoutes.get("/google/status", requireSession, async (c) => {
   const userId = c.get("userId")!;
-  const [contacts, gmail, calendar] = await Promise.all([
+  const [contacts, gmail, calendar, hasRefreshToken] = await Promise.all([
     userHasScope(c.env, userId, GOOGLE_SCOPES.contacts),
     userHasScope(c.env, userId, GOOGLE_SCOPES.gmailSend),
-    userHasScope(c.env, userId, GOOGLE_SCOPES.calendarEvents),
+    userCalendarReady(c.env, userId),
+    userHasRefreshToken(c.env, userId),
   ]);
-  return c.json({ contacts, gmail, calendar });
+  return c.json({ contacts, gmail, calendar, hasRefreshToken });
 });
 
 // GET /auth/google/start — build and return a Google OAuth redirect (PKCE).
@@ -249,6 +256,7 @@ authRoutes.get("/google/callback", async (c) => {
     id_token: string;
     access_token: string;
     refresh_token?: string;
+    expires_in?: number;
     scope?: string;
   };
 
@@ -310,16 +318,54 @@ authRoutes.get("/google/callback", async (c) => {
 
   if (!user) return redirect("/login?error=user_create_failed");
 
-  // Cache owner refresh token in KV (Drive upload/download needs it in Phase 2)
+  const wantedExtras = stored.extra ?? [];
+  const wantedCalendar = wantedExtras.includes(GOOGLE_SCOPES.calendarEvents);
+  const grantedScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
+
+  // Persist refresh token when Google issues one (first consent / force consent).
   if (tokens.refresh_token) {
     await c.env.KV.put(refreshKey(user.id), tokens.refresh_token);
   }
-  // Drop cached access tokens so the next call picks up newly granted scopes.
-  // Include the legacy calendar-only cache so reconnect cannot keep serving a
-  // token minted before calendar.events / gmail.send was granted.
-  await clearUserGoogleAccessCache(c.env, user.id);
-  // Only persist scopes Google actually returned — never the requested extras.
-  await storeGrantedScopes(c.env, user.id, tokens.scope);
+
+  // Always cache the access token from THIS consent — it already carries any
+  // newly granted scopes (calendar.events). Clearing-only left us with no
+  // usable token when Google omitted refresh_token on incremental Connect.
+  if (tokens.access_token) {
+    await cacheUserGoogleAccessToken(
+      c.env,
+      user.id,
+      tokens.access_token,
+      tokens.expires_in,
+    );
+  } else {
+    await clearUserGoogleAccessCache(c.env, user.id);
+  }
+
+  // Google's scope string is the live grant (include_granted_scopes=true).
+  if (tokens.scope) {
+    await replaceGrantedScopes(c.env, user.id, tokens.scope);
+  }
+
+  // Connect Calendar must actually grant calendar.events + leave us able to
+  // refresh later. Otherwise Settings showed "On" while create could not write.
+  if (wantedCalendar) {
+    if (!scopeListIncludes(grantedScopes, GOOGLE_SCOPES.calendarEvents)) {
+      return redirect(
+        `/settings?error=${encodeURIComponent("calendar_not_granted")}`,
+      );
+    }
+    const hasRefresh =
+      Boolean(tokens.refresh_token) ||
+      Boolean(await c.env.KV.get(refreshKey(user.id)));
+    if (!hasRefresh) {
+      // Rare: Google withheld refresh_token and we never stored one. Force a
+      // consent pass so offline Calendar writes work on every create.
+      const returnTo = encodeURIComponent(safeAppPath(stored.returnTo ?? "/settings"));
+      return redirect(
+        `/api/auth/google/start?connect=calendar&consent=1&returnTo=${returnTo}`,
+      );
+    }
+  }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
 

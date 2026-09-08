@@ -334,6 +334,101 @@ describe("Event edit hydration + notify", () => {
     expect(created.event.googleCalendarEventId).toBe("gcal-instant");
   });
 
+  it("stale access token 403 triggers refresh retry and syncs in-app", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+    await env.KV.put(`user:access_token:${alice.userId}`, "ya29.stale");
+    await env.KV.put(
+      `user:google_scopes:${alice.userId}`,
+      JSON.stringify(["https://www.googleapis.com/auth/calendar.events"]),
+    );
+
+    let calendarPosts = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "ya29.fresh",
+            expires_in: 3600,
+            scope: "https://www.googleapis.com/auth/calendar.events",
+          }),
+        );
+      }
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "POST") {
+        calendarPosts += 1;
+        const auth = ((init as RequestInit).headers as Record<string, string>).Authorization;
+        if (auth?.includes("ya29.stale")) {
+          return new Response("insufficient permissions", { status: 403 });
+        }
+        return new Response(JSON.stringify({ id: "gcal-after-retry" }), { status: 200 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Retry after stale token",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    expect(create.status).toBe(201);
+    const created = (await create.json()) as {
+      event: { googleCalendarEventId: string | null };
+      calendar: { status: string };
+    };
+    expect(created.calendar.status).toBe("synced");
+    expect(created.event.googleCalendarEventId).toBe("gcal-after-retry");
+    expect(calendarPosts).toBe(2);
+  });
+
+  it("DELETE removes Google Calendar event using the creator token", async () => {
+    const { env, sqlite } = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    const owner = seedUser(sqlite);
+    const family = seedFamily(sqlite, owner.id);
+    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
+    await env.KV.put(`user:refresh_token:${alice.userId}`, "refresh-token");
+    await env.KV.put(`user:access_token:${alice.userId}`, "ya29.alice");
+    await env.KV.put(
+      `user:google_scopes:${alice.userId}`,
+      JSON.stringify(["https://www.googleapis.com/auth/calendar.events"]),
+    );
+
+    const deleted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "POST") {
+        return new Response(JSON.stringify({ id: "gcal-to-delete" }), { status: 200 });
+      }
+      if (url.includes("calendar/v3") && (init as RequestInit | undefined)?.method === "DELETE") {
+        deleted.push(url);
+        return new Response(null, { status: 204 });
+      }
+      return new Response("nope", { status: 404 });
+    });
+
+    const create = await authed(env, "POST", "/api/events", alice.cookie, {
+      familyId: family.id,
+      title: "Will delete",
+      startAt: Math.floor(Date.now() / 1000) + 86400,
+    });
+    const created = (await create.json()) as { event: { id: string } };
+
+    const del = await authed(env, "DELETE", `/api/events/${created.event.id}`, alice.cookie);
+    expect(del.status).toBe(200);
+    const body = (await del.json()) as { ok: boolean; googleCalendarRemoved: boolean };
+    expect(body.googleCalendarRemoved).toBe(true);
+    expect(deleted.some((u) => u.includes("gcal-to-delete"))).toBe(true);
+  });
+
   it("POST /events/:id/sync-calendar retries a Google write", async () => {
     const { env, sqlite } = createTestEnv({
       GOOGLE_CLIENT_ID: "cid",

@@ -3,10 +3,20 @@ import { buildCalendar, icsEscape } from "../worker/lib/ics";
 import {
   toGcalBody,
   calendarStatusMessage,
-  googleCalendarTemplateUrl,
   toWebcalUrl,
 } from "../worker/lib/googleCalendar";
-import { classifyGoogleApiError } from "../worker/lib/google";
+import {
+  classifyGoogleApiError,
+  scopeListIncludes,
+  replaceGrantedScopes,
+  userHasScope,
+  userCalendarReady,
+  cacheUserGoogleAccessToken,
+  accessKey,
+  scopesKey,
+  refreshKey,
+} from "../worker/lib/google";
+import type { Env } from "../worker/types";
 
 describe("icsEscape", () => {
   it("escapes commas, semicolons and newlines", () => {
@@ -110,33 +120,17 @@ describe("calendarStatusMessage", () => {
     expect(calendarStatusMessage("needs_api_enabled")).toMatch(/Calendar API/i);
   });
 
-  it("tells the user the event is on their phone when synced", () => {
-    expect(calendarStatusMessage("synced")).toMatch(/phone/i);
+  it("tells the user the event is on Google when synced", () => {
+    expect(calendarStatusMessage("synced")).toMatch(/Google Calendar/i);
   });
 
-  it("points needs_reconnect at Connect Google Calendar", () => {
+  it("points needs_reconnect at Connect Google Calendar in the app", () => {
     expect(calendarStatusMessage("needs_reconnect")).toMatch(/Connect Google Calendar/i);
   });
 
-  it("points failed sync at Add to Google / Apple fallbacks", () => {
-    expect(calendarStatusMessage("failed")).toMatch(/Add to Google Calendar|Apple/i);
-  });
-});
-
-describe("googleCalendarTemplateUrl", () => {
-  it("builds a Google TEMPLATE deep link for timed events", () => {
-    const url = googleCalendarTemplateUrl({
-      title: "Dinner",
-      description: "Bring cake",
-      location: "Home",
-      startAt: 1_800_000_000,
-      endAt: 1_800_003_600,
-      allDay: false,
-    });
-    expect(url).toContain("calendar.google.com/calendar/render");
-    expect(url).toContain("action=TEMPLATE");
-    expect(url).toContain("text=Dinner");
-    expect(url).toContain("dates=");
+  it("does not push users to external TEMPLATE links", () => {
+    expect(calendarStatusMessage("failed")).not.toMatch(/Add to Google Calendar|TEMPLATE/i);
+    expect(calendarStatusMessage("skipped_no_token")).toMatch(/Connect Google Calendar/i);
   });
 });
 
@@ -145,5 +139,78 @@ describe("toWebcalUrl", () => {
     expect(toWebcalUrl("https://fam.example/api/calendar/feed/abc.ics")).toBe(
       "webcal://fam.example/api/calendar/feed/abc.ics",
     );
+  });
+});
+
+describe("scope helpers", () => {
+  function memKv(store: Map<string, string>): KVNamespace {
+    return {
+      get: async (key: string) => store.get(key) ?? null,
+      put: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+      delete: async (key: string) => {
+        store.delete(key);
+      },
+    } as unknown as KVNamespace;
+  }
+
+  function envWithKv(store: Map<string, string>): Env {
+    return {
+      ASSETS: {} as Fetcher,
+      DB: {} as D1Database,
+      KV: memKv(store),
+      APP_URL: "https://vault.example",
+    };
+  }
+
+  it("scopeListIncludes matches full and short forms", () => {
+    expect(
+      scopeListIncludes(
+        ["https://www.googleapis.com/auth/calendar.events"],
+        "https://www.googleapis.com/auth/calendar.events",
+      ),
+    ).toBe(true);
+    expect(scopeListIncludes(["calendar.events"], "https://www.googleapis.com/auth/calendar.events")).toBe(
+      true,
+    );
+  });
+
+  it("replaceGrantedScopes overwrites stale calendar flags", async () => {
+    const store = new Map<string, string>();
+    const env = envWithKv(store);
+    const userId = "u1";
+    store.set(
+      scopesKey(userId),
+      JSON.stringify([
+        "openid",
+        "https://www.googleapis.com/auth/calendar.events",
+      ]),
+    );
+    await replaceGrantedScopes(env, userId, "openid email");
+    expect(await userHasScope(env, userId, "https://www.googleapis.com/auth/calendar.events")).toBe(
+      false,
+    );
+  });
+
+  it("userCalendarReady requires both scope and refresh token", async () => {
+    const store = new Map<string, string>();
+    const env = envWithKv(store);
+    const userId = "u1";
+    await replaceGrantedScopes(
+      env,
+      userId,
+      "https://www.googleapis.com/auth/calendar.events",
+    );
+    expect(await userCalendarReady(env, userId)).toBe(false);
+    store.set(refreshKey(userId), "rt");
+    expect(await userCalendarReady(env, userId)).toBe(true);
+  });
+
+  it("cacheUserGoogleAccessToken writes the access key", async () => {
+    const store = new Map<string, string>();
+    const env = envWithKv(store);
+    await cacheUserGoogleAccessToken(env, "u1", "ya29.fresh", 3600);
+    expect(store.get(accessKey("u1"))).toBe("ya29.fresh");
   });
 });

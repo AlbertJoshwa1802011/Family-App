@@ -110,10 +110,16 @@ describe("POST /api/contacts/sync", () => {
       headers: { Cookie: actor.cookie },
     }, env);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { contacts: boolean; gmail: boolean; calendar: boolean };
+    const body = (await res.json()) as {
+      contacts: boolean;
+      gmail: boolean;
+      calendar: boolean;
+      hasRefreshToken: boolean;
+    };
     expect(body.contacts).toBe(false);
     expect(body.gmail).toBe(false);
     expect(body.calendar).toBe(false);
+    expect(body.hasRefreshToken).toBe(false);
   });
 
   it("People API 403 becomes google_sync_failed with a human message", async () => {
