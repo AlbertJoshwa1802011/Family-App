@@ -180,7 +180,7 @@ labelRoutes.post("/", requireSession, zv(createLabelSchema), async (c) => {
 
 // PATCH /labels/:id
 labelRoutes.patch("/:id", requireSession, zv(updateLabelSchema), async (c) => {
-  const id = c.req.param("id");
+  const id = c.req.param("id")!;
   const updates = c.req.valid("json");
   if (
     updates.label === undefined &&
@@ -231,7 +231,7 @@ labelRoutes.patch("/:id", requireSession, zv(updateLabelSchema), async (c) => {
 
 // DELETE /labels/:id — removes the custom row (entities keep their slug).
 labelRoutes.delete("/:id", requireSession, async (c) => {
-  const id = c.req.param("id");
+  const id = c.req.param("id")!;
   const db = getDb(c.env);
   const existing = await db
     .select()
