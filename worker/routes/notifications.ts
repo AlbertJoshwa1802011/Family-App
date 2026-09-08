@@ -5,7 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
-import { parseWindows } from "../lib/reminders";
+import { DEFAULT_WINDOWS, parseWindows } from "../lib/reminders";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -14,8 +14,8 @@ const NOTIFICATION_LIMIT = 50;
 const prefsSchema = z.object({
   emailEnabled: z.boolean().optional(),
   pushEnabled: z.boolean().optional(),
-  // Lead-time windows in days; sanitized server-side before storage.
-  windows: z.array(z.number().int().positive().max(365)).max(10).optional(),
+  // Lead-time windows in days (0 = day of expiry/event); sanitized server-side.
+  windows: z.array(z.number().int().min(0).max(365)).max(10).optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -131,7 +131,7 @@ notificationRoutes.put("/prefs", requireSession, zv(prefsSchema), async (c) => {
   const windowsJson =
     updates.windows !== undefined
       ? JSON.stringify(parseWindows(JSON.stringify(updates.windows)))
-      : (existing?.windowsJson ?? "[30,7,1]");
+      : (existing?.windowsJson ?? JSON.stringify(DEFAULT_WINDOWS));
 
   const emailEnabled = updates.emailEnabled ?? existing?.emailEnabled ?? true;
   const pushEnabled = updates.pushEnabled ?? existing?.pushEnabled ?? false;

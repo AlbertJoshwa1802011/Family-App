@@ -446,10 +446,11 @@ describe("task due-date reminders", () => {
     expect(taskReminderText("Visa", 2).body).toContain("2 days");
     expect(dueReminderWindow(5, TASK_WINDOWS)).toBe(7);
     expect(dueReminderWindow(2, TASK_WINDOWS)).toBe(2);
-    expect(dueReminderWindow(1, TASK_WINDOWS)).toBe(1);
+    expect(dueReminderWindow(1, TASK_WINDOWS)).toBe(2);
+    expect(dueReminderWindow(0, TASK_WINDOWS)).toBe(0);
     expect(dueReminderWindow(7, TASK_WINDOWS)).toBe(7);
     expect(dueReminderWindow(10, TASK_WINDOWS)).toBeNull();
-    expect(TASK_WINDOWS).toEqual([7, 2, 1]);
+    expect(TASK_WINDOWS).toEqual([7, 2, 0]);
   });
 
   it("cron notifies at the 7-day window for an unassigned task", async () => {

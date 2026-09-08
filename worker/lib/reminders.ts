@@ -4,16 +4,22 @@
  * The cron scans documents/events whose deadline is approaching and emits at
  * most ONE reminder per (subject, recipient, window, channel). The window
  * selection below is the heart of that: as a deadline counts down it crosses
- * progressively tighter windows (e.g. 30 → 7 → 1), and we fire the *tightest*
- * window the subject currently falls within. Combined with the per-window
- * dedupe in `reminders_log` / `event_reminders_log`, this yields exactly one
- * notification per window crossing — never a burst when a doc is created late.
+ * progressively tighter windows (e.g. 30 → 7 → 2 → 0), and we fire the
+ * *tightest* window the subject currently falls within. Combined with the
+ * per-window dedupe in `reminders_log` / `event_reminders_log`, this yields
+ * exactly one notification per window crossing — never a burst when a doc is
+ * created late.
+ *
+ * Window `0` is the day-of deadline. It must be distinct from "1 day before"
+ * so that yesterday's lead-time email does not suppress today's "expires
+ * today" email (the critical path when the user does not open the app).
  */
 
-export const DEFAULT_WINDOWS = [30, 7, 1];
+/** Default lead times: ~1 month, 1 week, 2 days, and day-of (0). */
+export const DEFAULT_WINDOWS = [30, 7, 2, 0];
 
-/** Task due-date windows: 7 days, 2 days, and 1 day (plus overdue → 1). */
-export const TASK_WINDOWS = [7, 2, 1];
+/** Task due-date windows: 7 days, 2 days, and day-of (plus overdue → 0). */
+export const TASK_WINDOWS = [7, 2, 0];
 
 /** Largest horizon we scan for upcoming deadlines (days). Bounds the query. */
 export const REMINDER_SCAN_DAYS = 90;
@@ -50,11 +56,12 @@ export function daysUntilUnix(startAtSecs: number, nowMs: number): number {
  * recipient's configured `windows`. Returns the tightest window the deadline
  * falls within, or null if it's still beyond every window.
  *
- *   daysUntil=25, windows=[30,7,1] → 30  (within 30 only)
- *   daysUntil=5,  windows=[30,7,1] → 7   (within 30 & 7 → tightest = 7)
- *   daysUntil=0,  windows=[30,7,1] → 1   (within all → tightest = 1)
- *   daysUntil=-3, windows=[30,7,1] → 1   (expired → still the tightest)
- *   daysUntil=45, windows=[30,7,1] → null
+ *   daysUntil=25, windows=[30,7,2,0] → 30  (within 30 only)
+ *   daysUntil=5,  windows=[30,7,2,0] → 7   (within 30 & 7 → tightest = 7)
+ *   daysUntil=2,  windows=[30,7,2,0] → 2
+ *   daysUntil=0,  windows=[30,7,2,0] → 0   (day-of — distinct from lead-times)
+ *   daysUntil=-3, windows=[30,7,2,0] → 0   (past due → day-of / catch-up)
+ *   daysUntil=45, windows=[30,7,2,0] → null
  */
 export function dueReminderWindow(
   daysUntil: number,
@@ -66,9 +73,24 @@ export function dueReminderWindow(
 }
 
 /**
+ * Documents always include day-of (window 0). Lead-time prefs control how far
+ * ahead we warn; the "expires today" email must still fire even if the user
+ * customized windows and dropped 0 — otherwise a missed login means a missed
+ * passport/license renewal.
+ */
+export function withDayOfWindow(windows: number[]): number[] {
+  if (windows.includes(0)) return windows;
+  return [...windows, 0].sort((a, b) => b - a);
+}
+
+/**
  * Parse the stored `windows_json` into a sane, sorted-descending, de-duped
- * list of positive integer day-windows. Falls back to DEFAULT_WINDOWS on any
- * malformed / empty input so a corrupt pref never silences reminders.
+ * list of non-negative integer day-windows (0 = day-of). Falls back to
+ * DEFAULT_WINDOWS on any malformed / empty input so a corrupt pref never
+ * silences reminders.
+ *
+ * Also upgrades the legacy default `[30,7,1]` (no day-of, no 2-day) to the
+ * current default so existing Settings saves still get today's email.
  */
 export function parseWindows(json: string | null | undefined): number[] {
   if (!json) return [...DEFAULT_WINDOWS];
@@ -81,11 +103,18 @@ export function parseWindows(json: string | null | undefined): number[] {
   if (!Array.isArray(raw)) return [...DEFAULT_WINDOWS];
   const cleaned = Array.from(
     new Set(
-      raw
-        .filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n > 0),
+      raw.filter(
+        (n): n is number =>
+          typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 365,
+      ),
     ),
   ).sort((a, b) => b - a);
-  return cleaned.length > 0 ? cleaned : [...DEFAULT_WINDOWS];
+  if (cleaned.length === 0) return [...DEFAULT_WINDOWS];
+  // Legacy shipped default lacked day-of (0) and the 2-day planning window.
+  if (cleaned.length === 3 && cleaned[0] === 30 && cleaned[1] === 7 && cleaned[2] === 1) {
+    return [...DEFAULT_WINDOWS];
+  }
+  return cleaned;
 }
 
 /** Human label + body for an expiry reminder, phrased by urgency. */
@@ -94,13 +123,23 @@ export function expiryReminderText(
   daysUntil: number,
 ): { title: string; body: string } {
   if (daysUntil < 0) {
+    const ago = Math.abs(daysUntil);
     return {
       title: `Expired: ${title}`,
-      body: `"${title}" expired ${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? "" : "s"} ago. Renew it as soon as possible.`,
+      body: `"${title}" expired ${ago} day${ago === 1 ? "" : "s"} ago. Renew or replace it as soon as possible so your family records stay current.`,
     };
   }
   if (daysUntil === 0) {
-    return { title: `Expires today: ${title}`, body: `"${title}" expires today.` };
+    return {
+      title: `Expires today: ${title}`,
+      body: `"${title}" expires today. Open Family Vault now to renew or update it before it lapses.`,
+    };
+  }
+  if (daysUntil <= 2) {
+    return {
+      title: `Expiring in ${daysUntil} day${daysUntil === 1 ? "" : "s"}: ${title}`,
+      body: `"${title}" expires in ${daysUntil} day${daysUntil === 1 ? "" : "s"}. Plan the renewal now so you are not caught out.`,
+    };
   }
   return {
     title: `Expiring soon: ${title}`,

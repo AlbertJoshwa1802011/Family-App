@@ -247,7 +247,9 @@ export const reminderPrefs = sqliteTable("reminder_prefs", {
   pushEnabled: integer("push_enabled", { mode: "boolean" })
     .notNull()
     .default(false),
-  windowsJson: text("windows_json").notNull().default("[30,7,1]"),
+  // Day-of (0) is required so "expires today" is a distinct dedupe slot from
+  // lead-time windows. App code also upgrades the legacy "[30,7,1]" default.
+  windowsJson: text("windows_json").notNull().default("[30,7,2,0]"),
 });
 
 export const auditLog = sqliteTable("audit_log", {
