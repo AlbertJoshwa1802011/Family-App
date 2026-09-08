@@ -244,6 +244,26 @@ describe("assistant", () => {
     expect(body.message).toContain("GEMINI_API_KEY");
   });
 
+  it("keeps 501 as JSON even when the client asks for SSE", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await app.request(
+      "/api/assistant/chat",
+      {
+        method: "POST",
+        headers: {
+          Cookie: alice.cookie,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ familyId, message: "hello" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(501);
+    expect(res.headers.get("content-type") ?? "").toMatch(/json/i);
+  });
+
   it("probes a present-but-bad key and surfaces guidance", async () => {
     const { env, alice } = setup();
     env.GEMINI_API_KEY = "bad-key";

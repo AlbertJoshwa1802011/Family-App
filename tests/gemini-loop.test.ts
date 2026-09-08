@@ -12,6 +12,7 @@ import {
   friendlyGeminiMessage,
   GeminiError,
   runAssistant,
+  toolResultHasClearSummary,
 } from "../worker/lib/ai/gemini";
 
 afterEach(() => {
@@ -75,6 +76,7 @@ describe("runAssistant Gemini loop", () => {
       }),
     );
 
+    // No summary on the tool result → second model round still runs (thoughtSignature path).
     const result = await runAssistant({
       apiKey: "test-key",
       systemInstruction: "You are a test assistant.",
@@ -86,7 +88,7 @@ describe("runAssistant Gemini loop", () => {
           parameters: { type: "object", properties: {}, required: [] },
         },
       ],
-      execute: async () => ({ ok: true, summary: "Added ₹70 for noodles" }),
+      execute: async () => ({ ok: true, id: "exp-1" }),
     });
 
     expect(result.text).toBe("Logged ₹70 for noodles.");
@@ -126,6 +128,88 @@ describe("runAssistant Gemini loop", () => {
       string
     >;
     expect(headers["x-goog-api-key"]).toBe("test-key");
+  });
+
+  it("skips the second model call when the tool already returns a clear summary", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: "add_expense",
+                      args: { amountMajor: 70, description: "noodles" },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runAssistant({
+      apiKey: "test-key",
+      systemInstruction: "sys",
+      history: [{ role: "user", parts: [{ text: "spent 70 on noodles" }] }],
+      tools: [
+        {
+          name: "add_expense",
+          description: "d",
+          parameters: { type: "object", properties: { amountMajor: { type: "number" } } },
+        },
+      ],
+      execute: async () => ({ ok: true, summary: "Logged ₹70 for noodles." }),
+    });
+
+    expect(result.text).toBe("Logged ₹70 for noodles.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(":generateContent");
+  });
+
+  it("does not treat tool errors as clear summaries", () => {
+    expect(toolResultHasClearSummary({ error: "amountMajor must be positive" })).toBe(false);
+    expect(toolResultHasClearSummary({ ok: true })).toBe(false);
+    expect(toolResultHasClearSummary({ summary: "Logged ₹70." })).toBe(true);
+    expect(toolResultHasClearSummary({ message: "Here is your plan." })).toBe(true);
+  });
+
+  it("streams token deltas via streamGenerateContent when onToken is set", async () => {
+    const tokens: string[] = [];
+    const sse = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":" there."}]},"finishReason":"STOP"}]}\n\n',
+    ].join("");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":streamGenerateContent");
+        expect(String(url)).toContain("alt=sse");
+        return new Response(sse, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }),
+    );
+
+    const result = await runAssistant({
+      apiKey: "test-key",
+      systemInstruction: "sys",
+      history: [{ role: "user", parts: [{ text: "hi" }] }],
+      tools: [],
+      execute: async () => ({}),
+      onToken: (t) => tokens.push(t),
+    });
+
+    expect(tokens).toEqual(["Hello", " there."]);
+    expect(result.text).toBe("Hello there.");
   });
 
   it("maps missing thought_signature 400s to a clear message", () => {
@@ -195,8 +279,8 @@ describe("runAssistant Gemini loop", () => {
                     parts: [
                       {
                         functionCall: {
-                          name: "add_expense",
-                          args: { amountMajor: 70 },
+                          name: "list_recent_expenses",
+                          args: {},
                         },
                       },
                     ],
@@ -214,20 +298,22 @@ describe("runAssistant Gemini loop", () => {
       }),
     );
 
+    // Structured data without summary → second round; empty model text → synthesize.
     const result = await runAssistant({
       apiKey: "k",
       systemInstruction: "s",
-      history: [{ role: "user", parts: [{ text: "spent 70" }] }],
+      history: [{ role: "user", parts: [{ text: "what did I spend?" }] }],
       tools: [
         {
-          name: "add_expense",
+          name: "list_recent_expenses",
           description: "d",
-          parameters: { type: "object", properties: { amountMajor: { type: "number" } } },
+          parameters: { type: "object", properties: {} },
         },
       ],
-      execute: async () => ({ summary: "Added ₹70 for noodles" }),
+      execute: async () => ({ currency: "INR", expenses: [] }),
     });
-    expect(result.text).toContain("Added ₹70");
+    expect(result.text).toContain("list recent expenses");
+    expect(round).toBe(2);
   });
 
   it("maps GeminiError to a helpful user message", () => {
