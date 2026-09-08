@@ -9,6 +9,7 @@ import {
   ListTodo,
   Lock,
   MessageCircle,
+  NotebookPen,
   Plus,
   Quote,
   Wallet,
@@ -748,6 +749,7 @@ export function Dashboard() {
               [
                 { to: "/chat", label: "Chat", icon: MessageCircle, tint: "bg-m3-blue-bg text-m3-blue" },
                 { to: "/tasks", label: "Tasks", icon: ListTodo, tint: "bg-m3-green-bg text-m3-green" },
+                { to: "/notes", label: "Notes", icon: NotebookPen, tint: "bg-m3-yellow-bg text-m3-yellow" },
                 { to: "/contacts", label: "People", icon: Contact, tint: "bg-m3-red-bg text-m3-red" },
                 { to: "/vault", label: "Vault", icon: Lock, tint: "bg-m3-cyan-bg text-m3-cyan" },
                 { to: "/money", label: "Money", icon: Wallet, tint: "bg-vault-500/15 text-vault-300" },
