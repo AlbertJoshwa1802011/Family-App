@@ -164,12 +164,9 @@ export default function App() {
           <Route path="/contacts/new" element={<ContactForm />} />
           <Route path="/contacts/:id/edit" element={<ContactForm />} />
 
-<<<<<<< HEAD
           <Route path="/notes" element={<Notes />} />
           <Route path="/notes/:id" element={<NoteDetailPage />} />
 
-=======
->>>>>>> 174a2eb (feat: autofill access request email and send family invite mail)
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/notifications" element={<Notifications />} />
