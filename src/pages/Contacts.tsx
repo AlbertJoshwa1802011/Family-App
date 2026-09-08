@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Mail, Phone, Plus, Contact as ContactIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Mail, Phone, Plus, Contact as ContactIcon, Search, X } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -36,28 +36,67 @@ function ContactSkeleton() {
 export function Contacts() {
   const { activeFamily } = useAuth();
   const [composerOpen, setComposerOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+
+  // Debounce so we don't hit the API per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", activeFamily?.id],
+    queryKey: ["contacts", activeFamily?.id, debounced],
     queryFn: () =>
       api<{ contacts: ContactSummary[] }>(
-        `/contacts?familyId=${activeFamily!.id}`,
+        `/contacts?familyId=${activeFamily!.id}${
+          debounced ? `&q=${encodeURIComponent(debounced)}` : ""
+        }`,
       ),
     enabled: Boolean(activeFamily),
   });
 
   const contacts = data?.contacts ?? [];
+  const searching = debounced.length > 0;
 
   return (
     <>
       <AppBar title="Emergency contacts" back />
-      <Page>
+      <Page className="space-y-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 z-1 size-4 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, email, or phone…"
+            aria-label="Search contacts"
+            className={`${inputCls} pr-10 pl-10`}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-3 z-1 -translate-y-1/2 text-fg-subtle hover:text-fg"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+
         {isLoading ? (
           <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <ContactSkeleton key={i} />
             ))}
           </Card>
+        ) : contacts.length === 0 && searching ? (
+          <EmptyState
+            icon={Search}
+            title="No matching contacts"
+            description="Try a different name, email, or phone number."
+          />
         ) : contacts.length === 0 && !composerOpen ? (
           <EmptyState
             icon={ContactIcon}

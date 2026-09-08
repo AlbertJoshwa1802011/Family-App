@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, like, or, sql } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
@@ -33,21 +33,52 @@ function zv<T extends z.ZodType>(s: T) {
   });
 }
 
+/** Strip formatting so "5550102" matches "+1 555 010 2000". */
+function phoneDigitsSql() {
+  return sql`replace(replace(replace(replace(replace(replace(coalesce(${schema.contacts.phone}, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', '')`;
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// GET /contacts?familyId=:id
+// GET /contacts?familyId=:id&q=:search — list contacts; optional search over
+// name, email, and phone (phone also matches digits-only substrings).
 contactRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
+  const q = c.req.query("q")?.trim();
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
   const membership = await requireFamilyMember(c, familyId);
   if (membership instanceof Response) return membership;
 
+  let where = eq(schema.contacts.familyId, familyId);
+  if (q) {
+    // SQLite LIKE has no default ESCAPE char — neutralize user wildcards.
+    const sanitized = q.replace(/[%_]/g, " ").trim();
+    if (!sanitized) return c.json({ contacts: [] });
+    const pattern = `%${sanitized}%`;
+    const digits = sanitized.replace(/\D/g, "");
+    const matchNameEmailPhone = or(
+      like(schema.contacts.name, pattern),
+      like(schema.contacts.email, pattern),
+      like(schema.contacts.phone, pattern),
+    );
+    const matchPhoneDigits =
+      digits.length > 0
+        ? sql`${phoneDigitsSql()} like ${`%${digits}%`}`
+        : undefined;
+    where = and(
+      where,
+      matchPhoneDigits
+        ? or(matchNameEmailPhone, matchPhoneDigits)
+        : matchNameEmailPhone,
+    )!;
+  }
+
   const db = getDb(c.env);
   const contacts = await db
     .select()
     .from(schema.contacts)
-    .where(eq(schema.contacts.familyId, familyId))
+    .where(where)
     .orderBy(asc(schema.contacts.name));
 
   return c.json({ contacts });

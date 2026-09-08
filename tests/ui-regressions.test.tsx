@@ -50,7 +50,11 @@ describe("regression: nav pill rendered as a giant misplaced blob", () => {
 describe("regression: search icons vanished behind the glass field", () => {
   // Cause: backdrop-filter makes the field a stacking context that paints at
   // the positioned-descendant level, covering earlier absolute siblings.
-  it.each(["src/pages/Documents.tsx", "src/pages/Tasks.tsx"])(
+  it.each([
+    "src/pages/Documents.tsx",
+    "src/pages/Tasks.tsx",
+    "src/pages/Contacts.tsx",
+  ])(
     "%s lifts its search overlays above the field",
     (file) => {
       const src = readFileSync(file, "utf8");
