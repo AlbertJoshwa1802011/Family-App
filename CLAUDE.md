@@ -33,8 +33,9 @@ npm run build          # tsc -b && vite build — produces dist/client (+ sw.js,
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
-npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth needed)
-npm run dev:screenshots  # Playwright mobile screenshots of every screen → screenshots/
+npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth) — for curl against npm run dev
+# Prefer Vitest seedActor for feature proof — see .claude/skills/verify-authenticated/SKILL.md
+# Production curl without sid → 401 is EXPECTED (middleware), not a feature bug.
 ```
 
 **Definition of done for any change:** `npm run gate` (alias `test:gate`) must pass.
@@ -42,7 +43,7 @@ If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` 
 
 `test:ship` and `test:regression` are **local shortcuts**. They are **not** a substitute for `npm run gate`. GitHub CI and production deploy already run `npm run gate`. Never skip the full suite because a slice was green. Catalog: `docs/TESTING.md`.
 
-Every agent in this repo **must** follow this. Invoke `.claude/skills/gate/SKILL.md` before committing. A red suite is a blocker, not a “known failure.”
+Every agent in this repo **must** follow this. Invoke `.claude/skills/gate/SKILL.md` before committing. For any auth-gated `/api/*` work, also invoke `.claude/skills/verify-authenticated/SKILL.md` (Vitest + `seedActor` — never “fix prod 401”). A red suite is a blocker, not a “known failure.”
 
 ---
 
