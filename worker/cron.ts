@@ -248,6 +248,9 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     try {
       const daysUntil = daysUntilUnix(ev.startAt, nowMs);
       if (daysUntil < 0) continue; // past events don't remind
+      // System renew markers are driven by the document-expiry pipeline —
+      // skipping here avoids a duplicate "Today: Renew: …" email.
+      if (ev.source === "document_expiry") continue;
 
       // Attendee-scoped: an event with a named guest list concerns those people,
       // not the whole household — mirrors how private documents only remind

@@ -136,6 +136,15 @@ export const documents = sqliteTable(
     description: text("description"),
     expiryDate: text("expiry_date"), // ISO yyyy-mm-dd
     issuedDate: text("issued_date"),
+    // When true, Family Vault upserts a calendar marker ~7 days before expiry
+    // (family-visible docs → in-app event + ICS; private → owner ICS only).
+    calendarReminderEnabled: integer("calendar_reminder_enabled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    // Linked system event for family-visible calendar reminders (nullable).
+    expiryReminderEventId: text("expiry_reminder_event_id"),
     currentFileId: text("current_file_id"),
     visibility: text("visibility", { enum: ["family", "private"] })
       .notNull()
@@ -307,6 +316,10 @@ export const events = sqliteTable(
     // this: it has one-second granularity, so two members saving within the
     // same second would both appear to hold the current version.
     version: integer("version").notNull().default(1),
+    // Null for user-created events. `document_expiry` = system renew marker
+    // linked from documents.expiry_reminder_event_id (skipped by event cron
+    // so email reminders aren't doubled with the document expiry pipeline).
+    source: text("source"),
   },
   (t) => [
     index("idx_event_family_start").on(t.familyId, t.startAt),

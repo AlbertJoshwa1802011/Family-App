@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   BellRing,
+  CalendarPlus,
   Download,
   FileText,
   Lock,
@@ -36,6 +37,8 @@ interface DocumentDetailPayload {
   issuedDate: string | null;
   visibility: "family" | "private";
   currentFileId: string | null;
+  calendarReminderEnabled?: boolean;
+  expiryReminderEventId?: string | null;
 }
 
 interface FileVersion {
@@ -230,6 +233,25 @@ export function DocumentDetail() {
               </span>
             }
           />
+          {doc.calendarReminderEnabled && (
+            <ListItem
+              leading={<CalendarPlus className="size-5 text-fg-muted" />}
+              title="Calendar reminder"
+              subtitle="Renew event one week before expiry"
+              trailing={
+                doc.expiryReminderEventId ? (
+                  <Link
+                    to={`/calendar/events/${doc.expiryReminderEventId}`}
+                    className="text-sm font-semibold text-vault-300"
+                  >
+                    View
+                  </Link>
+                ) : (
+                  <span className="text-sm text-fg-muted">On</span>
+                )
+              }
+            />
+          )}
         </Card>
 
         <RemindSomeone doc={doc} />

@@ -134,8 +134,11 @@ function CalendarFeedCard() {
             Subscribe in your calendar app
           </div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Family events and document expiries in Google Calendar, Apple
-            Calendar, or Outlook — updates automatically.
+            Family events, document expiries, and opt-in &quot;Renew&quot;
+            markers (one week before) appear in Google Calendar, Apple
+            Calendar, or Outlook — updates automatically. Enable &quot;Add to
+            family calendar&quot; on a document to get the week-before planning
+            event.
           </p>
         </div>
       </div>
