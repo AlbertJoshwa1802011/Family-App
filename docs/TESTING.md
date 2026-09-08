@@ -103,7 +103,8 @@ a dependency (see §5).
 | OAuth start: 10/min/IP → 429 with Retry-After; per-IP isolation | `security-hardening` |
 | Invites: 20/h/user → 429; upload-url: 30/min/user → 429 | `security-hardening` |
 | Rate limiter fails open without KV (never 429 in unit envs) | `security-hardening` |
-| Invite tokens are email-bound (403 `invite_email_mismatch`), single-use (409), expire (410) | `integration-flows` |
+| Invite tokens are email-bound (403 `invite_email_mismatch`), single-use (409), expire (410) | `integration-flows`, `invite-email-join` |
+| Invite emails join URL via Resend, upserts `access_grants`, returns `emailSent`/`inviteUrl`; Resend failure still creates invite; revoked email re-approved; OAuth `?next=/invite/:token` survives sign-in | `invite-email-join` |
 | Cross-family injection rejected: event attendees/documents, task assignee/related IDs (400 `invalid_*_ids`) | `integration-flows`, `events` |
 | All protected routes 401 without a session cookie | `auth`, `worker-extended` |
 | Security headers present on every endpoint incl. errors | `worker-extended` |
@@ -120,7 +121,7 @@ a dependency (see §5).
 | Create task → nest subtasks → toggle done (root leaves To-do / appears in Completed; done child stays nested under an open parent) → unassign via null → cascade-delete descendants | `integration-flows`, `tasks` |
 | Task views: todo / priority / due / recent / mine / completed; sorts due/added/priority; search includes ancestors; depth cap; cycle reject | `tasks`, `taskTree` |
 | Contact create → update → delete | `integration-flows` |
-| Invite → accept with matching email → new member can read family docs | `integration-flows` |
+| Invite → accept with matching email → new member can read family docs; invite grants closed-signup access so mail-link join works | `integration-flows`, `invite-email-join` |
 | **Reminder pipeline**: expiring doc → cron run → in-app notification for every active member → second run dedupes → mark read works | `integration-flows` |
 | Private-doc reminders go ONLY to the doc owner | `integration-flows` |
 | Reminder prefs PUT persists, normalizes windows; GET returns defaults | `integration-flows` |
