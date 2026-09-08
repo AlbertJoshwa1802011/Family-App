@@ -10,11 +10,13 @@
  *  - OAuth ?next= preserves /invite/:token through sign-in
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { app } from "../worker/index";
 import { canSignIn } from "../worker/lib/appAccess";
 import { sha256Hex } from "../worker/lib/crypto";
 import { getDb } from "../worker/db/client";
 import { loginBounceHtml, safeAppPath } from "../worker/lib/publicUrl";
+import { GOOGLE_SCOPES } from "../worker/lib/google";
 import {
   createTestEnv,
   seedActor,
@@ -31,6 +33,7 @@ type InviteBody = {
     token: string;
     inviteUrl: string;
     emailSent: boolean;
+    emailError?: string;
     expiresAt: number;
   };
 };
@@ -129,7 +132,8 @@ describe("invite email → join family", () => {
     // Resend payload carries the clickable join URL.
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe("cousin@example.com");
-    expect(sent[0].subject).toContain("Hall Family");
+    expect(sent[0].subject).toBe("You're invited to Hall Family on Family Vault");
+    expect(sent[0].subject).not.toContain("[Family Vault reminder]");
     expect(sent[0].html).toContain(invite.inviteUrl);
     expect(sent[0].html).toContain("Join the family");
     expect(sent[0].html).toContain("Hall Family");
@@ -269,6 +273,61 @@ describe("invite email → join family", () => {
       googleSub: "sub-offline",
     });
     expect(gate).toEqual({ ok: true });
+  });
+
+  it("sends via the inviter's Gmail when Resend is not configured", async () => {
+    vi.unstubAllGlobals();
+    const bare = createTestEnv({
+      APP_URL: "https://vault.example",
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "csecret",
+    });
+    const ownerUser = seedUser(bare.sqlite, {
+      email: "olive@example.com",
+      name: "Olive",
+    });
+    const famId = seedFamily(bare.sqlite, ownerUser.id, "Hall Family").id;
+    const actor = seedActor(bare.sqlite, famId, "owner", {
+      email: "olive-owner@example.com",
+      name: "Olive Owner",
+    });
+    await bare.env.KV.put(`user:refresh_token:${actor.userId}`, "refresh-token");
+
+    let gmailRaw = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("oauth2.googleapis.com/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "ya29.test",
+              expires_in: 3600,
+              scope: GOOGLE_SCOPES.gmailSend,
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("gmail.googleapis.com")) {
+          gmailRaw = u;
+          return new Response("{}", { status: 200 });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+
+    const create = await api(
+      bare,
+      "POST",
+      `/api/families/${famId}/invites`,
+      actor.cookie,
+      { email: "cousin@example.com" },
+    );
+    expect(create.status).toBe(201);
+    const { invite } = (await create.json()) as InviteBody;
+    expect(invite.emailSent).toBe(true);
+    expect(invite.emailError).toBeUndefined();
+    expect(gmailRaw).toContain("gmail.googleapis.com");
   });
 
   it("re-inviting a revoked email re-approves access", async () => {
@@ -427,5 +486,14 @@ describe("invite deep-link survives OAuth (?next=)", () => {
     expect(safeAppPath("//evil.example/phish")).toBe("/");
     expect(safeAppPath("https://evil.example")).toBe("/");
     expect(safeAppPath("/invite/ok")).toBe("/invite/ok");
+  });
+});
+
+describe("Family invite UI surfaces a copyable link when mail fails", () => {
+  it("Family page keeps inviteUrl on emailSent false", () => {
+    const src = readFileSync("src/pages/Family.tsx", "utf8");
+    expect(src).toContain("setInviteLink(res.invite.inviteUrl");
+    expect(src).toContain("email could not be sent");
+    expect(src).toContain("{inviteLink}");
   });
 });

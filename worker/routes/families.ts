@@ -9,9 +9,10 @@ import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent, ACTIONS } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
-import { sendEmail } from "../lib/email";
+import { sendEmailDetailed } from "../lib/email";
 import { inviteEmail } from "../lib/accessEmails";
 import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
+import { absoluteAppUrl } from "../lib/publicUrl";
 import {
   relabelFamilyCurrency,
   totalRelabeled,
@@ -705,17 +706,28 @@ familyRoutes.post(
         .where(eq(schema.families.id, familyId))
         .get(),
     ]);
-    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+    const appUrl = absoluteAppUrl(c.env, c.req.url);
     const inviteUrl = `${appUrl}/invite/${token}`;
-    const emailSent = await sendEmail(c.env, {
-      to: email,
-      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
-      html: inviteEmail({
-        inviterName: inviter?.name ?? null,
-        familyName: family?.name ?? "Family Vault",
-        inviteUrl,
-      }),
-    });
+    const familyName = family?.name ?? "Family Vault";
+    const subject = `You're invited to ${familyName} on Family Vault`;
+    const sent = await sendEmailDetailed(
+      c.env,
+      {
+        to: email,
+        subject,
+        html: inviteEmail({
+          inviterName: inviter?.name ?? null,
+          familyName,
+          inviteUrl,
+        }),
+        text: [
+          `${inviter?.name ?? "A family member"} invited you to ${familyName}.`,
+          `Join: ${inviteUrl}`,
+          "This invite only works for this email address and expires in 7 days.",
+        ].join("\n"),
+      },
+      { fromUserId: userId, reminder: false },
+    );
 
     return c.json(
       {
@@ -725,7 +737,8 @@ familyRoutes.post(
           expiresAt,
           token,
           inviteUrl,
-          emailSent,
+          emailSent: sent.ok,
+          emailError: sent.ok ? undefined : sent.error,
         },
       },
       201,

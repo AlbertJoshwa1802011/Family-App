@@ -212,6 +212,10 @@ export function inviteEmail(opts: {
       Sign in with this email address to accept.
     </td></tr>
     <tr><td style="padding:0 24px 12px">${button("Join the family", opts.inviteUrl)}</td></tr>
+    <tr><td style="padding:0 24px 8px;font-size:12px;line-height:1.6;color:${COLORS.subtle};word-break:break-all">
+      If the button doesn't open, use this link:<br>
+      <a href="${escapeHtml(opts.inviteUrl)}" style="color:${COLORS.brand}">${escapeHtml(opts.inviteUrl)}</a>
+    </td></tr>
     <tr><td style="padding:0 24px 28px;font-size:12px;color:${COLORS.subtle}">This invite only works for this email address and expires in 7 days.</td></tr>`;
 
   return shell({
