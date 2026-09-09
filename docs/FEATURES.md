@@ -37,7 +37,8 @@ Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables)
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
 `0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji),
 `0015` (reminder windows day-of + document calendar renew markers),
-`0016` (event_google_sync — Google Calendar push mapping).
+`0016` (event_google_sync — Google Calendar push mapping),
+`0017` (location_sharing_prefs + location_points — opt-in travel trail).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -62,6 +63,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
 | `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0016 |
+| `location_sharing_prefs` | Per-member opt-in for location sharing | 0017 |
+| `location_points` | GPS breadcrumbs for travel trails | 0017 |
 | `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
 | `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
