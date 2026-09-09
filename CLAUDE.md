@@ -354,6 +354,13 @@ visibility-filtered D1 snapshot (you, family, members, docs, tasks, events,
 expenses, stats) and can write via tools (add expense/task/event/contact,
 complete a task). Family expenses (`/expenses`) store integer cents.
 
+**Location tracking (done):** opt-in per member (`location_sharing_prefs`);
+device posts GPS breadcrumbs to `/locations/points` while sharing is on and the
+PWA can read geolocation; `/locations` shows an SVG trail map + weekly km,
+trips, stops, and daily breakdown. Family can view another member's track only
+while that member has sharing enabled. `Permissions-Policy` allows
+`geolocation=(self)`.
+
 **Money settlements (done):** `/expenses` Money page has Settlements | Expenses.
 Settlements use `settlement_destinations` (Mom, Church, …) + `money_movements`
 (`received` / `settled`). Summary exposes available / settled / inHand; any

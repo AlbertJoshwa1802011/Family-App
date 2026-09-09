@@ -48,6 +48,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   ai_not_configured:
     "The family assistant isn't set up yet — ask the owner to add a Gemini API key.",
   ai_unavailable: "The assistant had a hiccup — please try again in a moment.",
+  location_sharing_disabled:
+    "Turn on location sharing before the app can save your travel trail.",
+  invalid_range: "That date range isn't valid.",
+  range_too_large: "Pick a shorter range — up to 31 days at a time.",
+  invalid_week: "That week selection isn't valid.",
   internal_error: "Something went wrong on our side — please try again.",
 };
 

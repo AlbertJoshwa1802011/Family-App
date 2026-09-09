@@ -19,6 +19,7 @@ export const FAMILY_MODULES = [
   "chat",
   "expenses",
   "assistant",
+  "location",
 ] as const;
 
 export type FamilyModule = (typeof FAMILY_MODULES)[number];
@@ -61,6 +62,10 @@ export const MODULE_META: Record<
   assistant: {
     label: "Assistant",
     description: "In-app helper that can read and write for you",
+  },
+  location: {
+    label: "Location",
+    description: "Opt-in travel map, weekly km, and family sharing",
   },
 };
 
