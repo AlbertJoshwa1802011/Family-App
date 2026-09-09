@@ -28,14 +28,14 @@ the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (29 tables, 14 migrations)
+## 2. Database Schema (30 tables, 15 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
-`0011` (notebooks + notes).
+`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -73,11 +73,13 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
 | `resource_links` | YouTube / URL / photo refs on events/tasks/notes/docs | 0013 |
+| `family_labels` | Family-scoped custom type/category chips + emoji | 0014 |
 
 ### Key Design Decisions
 
 - **All timestamps**: Unix epoch integers (seconds) via `DEFAULT (unixepoch())`. Exception: expiry/issued/due dates are ISO `yyyy-mm-dd` text (calendar dates, not instants).
-- **Events `type` vs `status`**: `type` = what kind (`gathering|appointment|milestone|other`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Events `type` vs `status`**: `type` = what kind (built-ins `gathering|appointment|milestone|other` plus family customs via `family_labels`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Custom labels**: classification fields (event type, document/expense category, note kind, contact relationship) accept free slugs; `family_labels` stores family-created options with emoji. Lifecycle/authz enums stay fixed.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
 - **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
@@ -127,6 +129,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET | `/documents/:id/related` | advisory related-doc ranking (visibility filtered) |
 | GET/POST | `/tags?familyId` · PUT `/tags/documents/:docId` | family tags + replace document tag set |
 | GET/POST/DELETE | `/links` (+`/:id`) | YouTube/URL/photo resource links on event/task/note/document |
+| GET/POST | `/labels?familyId&domain` · PATCH/DELETE `/labels/:id` | family type/category chips + emoji (builtins merged with customs) · RL 30/min on create |
 | GET | `/notifications?unreadOnly` | inbox + unread count |
 | POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
 | GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
@@ -152,15 +155,17 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 ### Zod Validation Rules (Critical Constraints)
 
-**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` enum `["gathering","appointment","milestone","other"]`; `attendeeMemberIds` array.
+**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` slug (built-ins + family customs via `/labels`); `attendeeMemberIds` array.
 
 **POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `priority` enum `["low","medium","high"]` (default medium); `parentTaskId` must belong to the same family; nesting deeper than 5 returns `max_task_depth`. **PATCH:** `status` enum `["open","done","archived"]` (done sets `completedAt`, reopen clears it); `parentTaskId` null promotes to root; cycle → `task_cycle`.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
-**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` enum `general|bible|journal|other` (default general); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
+**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` slug (built-ins `general|bible|journal|other` + customs); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
 
-**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
+**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` slug (built-ins + customs); `spentOn` yyyy-mm-dd.
+
+**POST /labels:** `familyId`; `domain` `event_type|document_category|expense_category|note_kind|contact_relationship`; `label` 1–40; `emoji` 1–16; optional `slug`. Max 50 customs per domain.
 
 **POST /money/destinations:** `name` 1–80 chars; `kind` enum `person|organization|other` (default other). Duplicate active names in the same family → `409 destination_exists`.
 

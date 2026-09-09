@@ -7,11 +7,8 @@ import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
-import {
-  EXPENSE_CATEGORIES,
-  fromCents,
-  toCents,
-} from "../lib/expenses";
+import { fromCents, toCents } from "../lib/expenses";
+import { labelSlugSchema } from "../lib/labels";
 
 export const expenseRoutes = new Hono<HonoEnv>();
 
@@ -25,7 +22,8 @@ const createExpenseSchema = z.object({
     .regex(/^[A-Z]{3}$/, "Must be a 3-letter currency code")
     .optional()
     .default("INR"),
-  category: z.enum(EXPENSE_CATEGORIES).optional().default("other"),
+  // Free slug: built-ins plus family customs from /labels.
+  category: labelSlugSchema.optional().default("other"),
   note: z.string().max(500).optional(),
   spentOn: isoDate.optional(),
 });
@@ -36,7 +34,7 @@ const updateExpenseSchema = z.object({
     .string()
     .regex(/^[A-Z]{3}$/, "Must be a 3-letter currency code")
     .optional(),
-  category: z.enum(EXPENSE_CATEGORIES).optional(),
+  category: labelSlugSchema.optional(),
   note: z.string().max(500).nullable().optional(),
   spentOn: isoDate.optional(),
 });
@@ -79,7 +77,7 @@ expenseRoutes.get("/", requireSession, async (c) => {
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
     conditions.push(lte(schema.expenses.spentOn, to));
   }
-  if (category && EXPENSE_CATEGORIES.includes(category as (typeof EXPENSE_CATEGORIES)[number])) {
+  if (category && labelSlugSchema.safeParse(category).success) {
     conditions.push(eq(schema.expenses.category, category));
   }
 

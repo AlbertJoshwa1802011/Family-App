@@ -25,6 +25,7 @@ import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { formatEventTime, eventTypeColor } from "../lib/eventTime";
+import { useLabels } from "../lib/useLabels";
 
 type Rsvp = "invited" | "accepted" | "declined" | "tentative";
 
@@ -89,18 +90,15 @@ function attendeeLabel(a: Attendee): string {
   return a.name ?? a.displayName ?? a.email ?? "Member";
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  gathering: "Gathering",
-  appointment: "Appointment",
-  milestone: "Milestone",
-  other: "Event",
-};
-
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, activeFamily } = useAuth();
+  const { format: formatType, find: findType } = useLabels(
+    activeFamily?.id,
+    "event_type",
+  );
   const [actionDraft, setActionDraft] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkTitle, setLinkTitle] = useState("");
@@ -252,11 +250,12 @@ export function EventDetailPage() {
   const me = attendees.find((a) => a.userId === user?.id);
 
   const colors = eventTypeColor(ev.type);
+  const typeMeta = findType(ev.type);
 
   return (
     <>
       <AppBar
-        title={TYPE_LABELS[ev.type] ?? "Event"}
+        title={formatType(ev.type) || "Event"}
         back
         trailing={
           ev.status === "active" && canEdit ? (
@@ -278,7 +277,13 @@ export function EventDetailPage() {
               className={`lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full ${colors.text}`}
               style={{ ["--lq-tint" as string]: colors.tint }}
             >
-              <CalendarDays className="size-5" />
+              {typeMeta ? (
+                <span className="text-lg" aria-hidden="true">
+                  {typeMeta.emoji}
+                </span>
+              ) : (
+                <CalendarDays className="size-5" />
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">

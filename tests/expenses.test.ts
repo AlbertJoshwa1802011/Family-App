@@ -132,7 +132,13 @@ describe("expenses API", () => {
       (await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, currency: "rupee" })).status,
     ).toBe(400);
     expect(
-      (await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, category: "snacks" })).status,
+      (
+        await req("POST", "/api/expenses", member.cookie, {
+          familyId,
+          amount: 10,
+          category: "!!!bad!!!",
+        })
+      ).status,
     ).toBe(400);
     expect(
       (await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, spentOn: "5 Sept" })).status,

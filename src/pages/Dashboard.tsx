@@ -29,6 +29,7 @@ import type { EventSummary } from "./Calendar";
 import { eventTypeColor, formatEventTime } from "../lib/eventTime";
 import { expiryStatus } from "../lib/expiry";
 import { hasModuleAccess, type FamilyModule } from "../lib/modules";
+import { useLabels } from "../lib/useLabels";
 
 interface DocumentSummary {
   id: string;
@@ -231,6 +232,10 @@ function UpcomingEventsWidget({ familyId }: { familyId: string }) {
 
 export function Dashboard() {
   const { user, activeFamily } = useAuth();
+  const { format: formatCategory } = useLabels(
+    activeFamily?.id,
+    "document_category",
+  );
   const firstName = user?.name?.split(" ")[0] ?? "there";
   const [nowMs] = useState(() => Date.now());
 
@@ -398,7 +403,7 @@ export function Dashboard() {
                       </ListIcon>
                     }
                     title={doc.title}
-                    subtitle={doc.category}
+                    subtitle={formatCategory(doc.category)}
                     trailing={
                       status ? <Badge tone={status.tone}>{status.label}</Badge> : null
                     }

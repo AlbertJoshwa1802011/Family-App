@@ -8,9 +8,11 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useLabels } from "../lib/useLabels";
 
 interface ContactSummary {
   id: string;
@@ -38,6 +40,10 @@ export function Contacts() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const { format: formatRelationship, find: findRelationship } = useLabels(
+    activeFamily?.id,
+    "contact_relationship",
+  );
 
   // Debounce so we don't hit the API per keystroke.
   useEffect(() => {
@@ -113,11 +119,17 @@ export function Contacts() {
           />
         ) : (
           <Card className="divide-y divide-white/8 overflow-hidden">
-            {contacts.map((c) => (
+            {contacts.map((c) => {
+              const rel = findRelationship(c.relationship);
+              return (
               <div key={c.id} className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
-                    <ContactIcon className="size-5" aria-hidden="true" />
+                    {rel ? (
+                      <span className="text-lg" aria-hidden="true">{rel.emoji}</span>
+                    ) : (
+                      <ContactIcon className="size-5" aria-hidden="true" />
+                    )}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-fg">
@@ -125,7 +137,7 @@ export function Contacts() {
                     </div>
                     {c.relationship && (
                       <div className="truncate text-xs text-fg-muted">
-                        {c.relationship}
+                        {formatRelationship(c.relationship)}
                       </div>
                     )}
                   </div>
@@ -153,7 +165,8 @@ export function Contacts() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </Card>
         )}
 
@@ -239,6 +252,17 @@ function ContactComposer({
           <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
             Relationship
           </label>
+          <TypePicker
+            domain="contact_relationship"
+            familyId={familyId}
+            value={form.relationship}
+            onChange={(relationship) =>
+              setForm((f) => ({ ...f, relationship }))
+            }
+            title=""
+            valueMode="label"
+            className="mb-2"
+          />
           <input
             type="text"
             value={form.relationship}

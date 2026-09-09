@@ -24,6 +24,7 @@ import {
 } from "../lib/categorize";
 import { allMembersInFamily } from "../lib/familyScope";
 import { loadMentionableMembers, notifyMember } from "../lib/mentions";
+import { labelSlugSchema } from "../lib/labels";
 import { findRelatedDocuments } from "../lib/relatedDocuments";
 
 export const documentRoutes = new Hono<HonoEnv>();
@@ -38,7 +39,7 @@ const isoDate = z
 const createDocumentSchema = z.object({
   familyId: z.string().min(1),
   title: z.string().min(1).max(300),
-  category: z.string().max(100).optional().default("other"),
+  category: labelSlugSchema.optional().default("other"),
   subjectMemberId: z.string().optional(),
   description: z.string().max(2000).optional(),
   expiryDate: isoDate,
@@ -48,7 +49,7 @@ const createDocumentSchema = z.object({
 
 const updateDocumentSchema = z.object({
   title: z.string().min(1).max(300).optional(),
-  category: z.string().max(100).optional(),
+  category: labelSlugSchema.optional(),
   subjectMemberId: z.string().nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   expiryDate: isoDate,
