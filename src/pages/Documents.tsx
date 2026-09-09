@@ -27,6 +27,7 @@ import { expiryStatus } from "../lib/expiry";
 import { titleFromFileName } from "../lib/documentTitle";
 import { createAndUploadDocument } from "../lib/uploadDocumentFile";
 import { useAuth } from "../context/AuthContext";
+import { useLabels } from "../lib/useLabels";
 import { cn } from "../lib/cn";
 
 /** Stay under the upload-url rate limit (30/min) with headroom for retries. */
@@ -90,6 +91,10 @@ export function Documents() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { activeFamily } = useAuth();
+  const { format: formatCategory } = useLabels(
+    activeFamily?.id,
+    "document_category",
+  );
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -350,7 +355,7 @@ export function Documents() {
                       )}
                     </span>
                   }
-                  subtitle={doc.category}
+                  subtitle={formatCategory(doc.category)}
                   trailing={
                     status ? <Badge tone={status.tone}>{status.label}</Badge> : null
                   }

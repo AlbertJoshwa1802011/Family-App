@@ -455,7 +455,7 @@ describe("notes security", () => {
       (
         await req("POST", "/api/notes", member.cookie, {
           familyId,
-          kind: "sermon",
+          kind: "has spaces",
         })
       ).status,
     ).toBe(400);

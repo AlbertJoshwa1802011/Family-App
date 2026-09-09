@@ -24,6 +24,8 @@ import {
 } from "../lib/categorize";
 import { allMembersInFamily } from "../lib/familyScope";
 import { loadMentionableMembers, notifyMember } from "../lib/mentions";
+import { labelSlugSchema } from "../lib/labels";
+import { findRelatedDocuments } from "../lib/relatedDocuments";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -37,7 +39,7 @@ const isoDate = z
 const createDocumentSchema = z.object({
   familyId: z.string().min(1),
   title: z.string().min(1).max(300),
-  category: z.string().max(100).optional().default("other"),
+  category: labelSlugSchema.optional().default("other"),
   subjectMemberId: z.string().optional(),
   description: z.string().max(2000).optional(),
   expiryDate: isoDate,
@@ -47,7 +49,7 @@ const createDocumentSchema = z.object({
 
 const updateDocumentSchema = z.object({
   title: z.string().min(1).max(300).optional(),
-  category: z.string().max(100).optional(),
+  category: labelSlugSchema.optional(),
   subjectMemberId: z.string().nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   expiryDate: isoDate,
@@ -302,6 +304,37 @@ documentRoutes.get("/:id", requireSession, async (c) => {
   }
 
   return c.json({ document: doc });
+});
+
+// GET /documents/:id/related — advisory related-doc ranking (visibility filtered).
+documentRoutes.get("/:id/related", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
+  if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  const related = await findRelatedDocuments(db, {
+    familyId: doc.familyId,
+    documentId: docId,
+    userId,
+    role: membership.role,
+  });
+
+  return c.json({ related });
 });
 
 // PATCH /documents/:id — update document metadata.

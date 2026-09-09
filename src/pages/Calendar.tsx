@@ -18,6 +18,7 @@ import {
   eventMonthKey,
   eventTypeColor,
 } from "../lib/eventTime";
+import { useLabels } from "../lib/useLabels";
 
 export interface EventSummary {
   id: string;
@@ -43,15 +44,24 @@ function EventSkeleton() {
 }
 
 function EventRow({ event }: { event: EventSummary }) {
+  const { activeFamily } = useAuth();
+  const { find: findType } = useLabels(activeFamily?.id, "event_type");
   const colors = eventTypeColor(event.type);
+  const typeMeta = findType(event.type);
   return (
     <ListItem
       to={`/calendar/events/${event.id}`}
       leading={
-        <span
-          className={`mt-0.5 size-2.5 shrink-0 self-start rounded-full ${colors.dot}`}
-          aria-hidden="true"
-        />
+        typeMeta ? (
+          <span className="mt-0.5 text-base leading-none" aria-hidden="true">
+            {typeMeta.emoji}
+          </span>
+        ) : (
+          <span
+            className={`mt-0.5 size-2.5 shrink-0 self-start rounded-full ${colors.dot}`}
+            aria-hidden="true"
+          />
+        )
       }
       title={
         <span

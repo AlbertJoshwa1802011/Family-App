@@ -95,11 +95,19 @@ expiry date, upload a file, and download it.
 ## 4. CI/CD
 
 `.github/workflows/ci.yml` runs typecheck + lint + tests + migration validation
-+ build on every push/PR. To enable auto-deploy, add repo secrets
-`CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + D1:Edit) and
-`CLOUDFLARE_ACCOUNT_ID`, then uncomment the deploy job at the bottom of the
-workflow — it applies D1 migrations and runs `wrangler deploy` on pushes to the
-default branch.
++ build on every push/PR.
+
+On every **push to `claude/family-vault-pwa-plan-TrvxG`** (including merges), the
+`deploy` job:
+
+1. Reconciles remote `d1_migrations` if schema objects already exist
+   (`scripts/reconcile_remote_migrations.mjs`) — fixes drift after partial applies
+2. Applies pending D1 migrations remotely (`wrangler d1 migrations apply … --remote`)
+3. Deploys the Worker + assets (`wrangler deploy`)
+4. Smokes `GET /api/health` and checks new API surfaces respond (not HTML 404)
+
+Requires repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + D1:Edit)
+and optionally `CLOUDFLARE_ACCOUNT_ID`.
 
 ## 5. Operations
 

@@ -72,7 +72,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   {
     name: "add_task",
     description:
-      "Create a family to-do. Use for reminders the user wants tracked (renew passport, call dentist). Set dueDate so the daily email scheduler can remind them 7, 2, and 1 days before.",
+      "Create a family to-do. Use for reminders the user wants tracked (renew passport, call dentist). Set dueDate so the daily email scheduler can remind them 7, 2, and 1 days before. When converting a meeting into tasks, pass relatedEventId.",
     input_schema: {
       type: "object",
       properties: {
@@ -83,8 +83,34 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
           type: "string",
           description: "family_members.id of the assignee, if known from context",
         },
+        relatedEventId: {
+          type: "string",
+          description: "events.id when this task comes from a meeting",
+        },
+        relatedDocumentId: {
+          type: "string",
+          description: "documents.id when this task is about a vault document",
+        },
       },
       required: ["title"],
+    },
+  },
+  {
+    name: "create_tasks_from_event",
+    description:
+      "Create one or more action-item tasks linked to an existing calendar event (meeting follow-ups).",
+    input_schema: {
+      type: "object",
+      properties: {
+        eventId: { type: "string" },
+        titles: {
+          type: "array",
+          items: { type: "string" },
+          description: "Action item titles",
+        },
+        dueDate: { type: "string", description: "ISO yyyy-mm-dd for all items" },
+      },
+      required: ["eventId", "titles"],
     },
   },
   {
@@ -161,6 +187,14 @@ const addTaskInput = z.object({
   notes: z.string().max(2000).optional(),
   dueDate: isoDate.optional(),
   assignedToMemberId: z.string().optional(),
+  relatedEventId: z.string().optional(),
+  relatedDocumentId: z.string().optional(),
+});
+
+const createTasksFromEventInput = z.object({
+  eventId: z.string().min(1),
+  titles: z.array(z.string().min(1).max(300)).min(1).max(20),
+  dueDate: isoDate.optional(),
 });
 
 const completeTaskInput = z.object({ taskId: z.string().min(1) });
@@ -205,6 +239,8 @@ export async function executeAssistantTool(
         return await addExpense(rawInput, ctx);
       case "add_task":
         return await addTask(rawInput, ctx);
+      case "create_tasks_from_event":
+        return await createTasksFromEvent(rawInput, ctx);
       case "complete_task":
         return await completeTask(rawInput, ctx);
       case "add_event":
@@ -286,6 +322,28 @@ async function addTask(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     if (!member) return { ok: false, error: "invalid_member_ids" };
   }
 
+  if (data.relatedEventId) {
+    const ev = await ctx.db
+      .select({ id: schema.events.id, familyId: schema.events.familyId })
+      .from(schema.events)
+      .where(eq(schema.events.id, data.relatedEventId))
+      .get();
+    if (!ev || ev.familyId !== ctx.familyId) {
+      return { ok: false, error: "invalid_event_id" };
+    }
+  }
+
+  if (data.relatedDocumentId) {
+    const doc = await ctx.db
+      .select({ id: schema.documents.id, familyId: schema.documents.familyId })
+      .from(schema.documents)
+      .where(eq(schema.documents.id, data.relatedDocumentId))
+      .get();
+    if (!doc || doc.familyId !== ctx.familyId) {
+      return { ok: false, error: "invalid_document_id" };
+    }
+  }
+
   const id = crypto.randomUUID();
   const now = Math.floor(ctx.nowMs / 1000);
   await ctx.db.insert(schema.tasks).values({
@@ -295,6 +353,8 @@ async function addTask(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     notes: data.notes,
     dueDate: data.dueDate,
     assignedToMemberId: data.assignedToMemberId,
+    relatedEventId: data.relatedEventId,
+    relatedDocumentId: data.relatedDocumentId,
     status: "open",
     createdBy: ctx.userId,
     updatedAt: now,
@@ -317,6 +377,65 @@ async function addTask(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
       summary: `Added task “${data.title}”${due}`,
       id,
       href: "/tasks",
+    },
+  };
+}
+
+async function createTasksFromEvent(
+  raw: unknown,
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  const parsed = createTasksFromEventInput.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "invalid_input" };
+  const data = parsed.data;
+
+  const ev = await ctx.db
+    .select({
+      id: schema.events.id,
+      familyId: schema.events.familyId,
+      title: schema.events.title,
+      status: schema.events.status,
+    })
+    .from(schema.events)
+    .where(eq(schema.events.id, data.eventId))
+    .get();
+  if (!ev || ev.familyId !== ctx.familyId || ev.status === "trashed") {
+    return { ok: false, error: "invalid_event_id" };
+  }
+
+  const now = Math.floor(ctx.nowMs / 1000);
+  const created: { id: string; title: string }[] = [];
+  for (const title of data.titles) {
+    const id = crypto.randomUUID();
+    await ctx.db.insert(schema.tasks).values({
+      id,
+      familyId: ctx.familyId,
+      title: title.trim(),
+      dueDate: data.dueDate,
+      relatedEventId: data.eventId,
+      status: "open",
+      priority: "medium",
+      createdBy: ctx.userId,
+      updatedAt: now,
+    });
+    created.push({ id, title: title.trim() });
+    await insertAuditEvent(ctx.db, {
+      familyId: ctx.familyId,
+      actorUserId: ctx.userId,
+      action: "task_created",
+      targetType: "task",
+      targetId: id,
+      meta: { via: "assistant", eventId: data.eventId },
+    });
+  }
+
+  return {
+    ok: true,
+    data: { eventId: data.eventId, tasks: created },
+    action: {
+      tool: "create_tasks_from_event",
+      summary: `Created ${created.length} action item(s) for “${ev.title}”`,
+      href: `/calendar/events/${data.eventId}`,
     },
   };
 }

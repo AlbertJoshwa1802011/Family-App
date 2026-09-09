@@ -22,9 +22,9 @@ import {
 } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema, type Db } from "../db/client";
-import { NOTE_KINDS } from "../db/schema";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
+import { labelSlugSchema } from "../lib/labels";
 
 export const noteRoutes = new Hono<HonoEnv>();
 
@@ -33,9 +33,11 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd");
 // Default-free field set so PATCH .partial() never re-injects defaults.
 const noteFieldsSchema = z.object({
   notebookId: z.string().min(1).nullable(),
+  eventId: z.string().min(1).nullable(),
   title: z.string().max(200),
   body: z.string().max(100_000),
-  kind: z.enum(NOTE_KINDS),
+  // Free slug: built-ins (general|bible|…) plus family customs from /labels.
+  kind: labelSlugSchema,
   noteDate: isoDate.nullable(),
   visibility: z.enum(["family", "private"]),
   pinned: z.boolean(),
@@ -49,7 +51,7 @@ const createNoteSchema = z
     noteFieldsSchema.partial().extend({
       title: z.string().max(200).optional().default(""),
       body: z.string().max(100_000).optional().default(""),
-      kind: z.enum(NOTE_KINDS).optional().default("general"),
+      kind: labelSlugSchema.optional().default("general"),
       visibility: z.enum(["family", "private"]).optional().default("private"),
       pinned: z.boolean().optional().default(false),
     }),
@@ -110,6 +112,7 @@ function serializeNote(row: typeof schema.notes.$inferSelect) {
     id: row.id,
     familyId: row.familyId,
     notebookId: row.notebookId,
+    eventId: row.eventId,
     ownerUserId: row.ownerUserId,
     title: row.title,
     body: row.body,
@@ -139,6 +142,26 @@ async function assertNotebookInFamily(
     .get();
   if (!nb || nb.familyId !== familyId) {
     return Response.json({ error: "invalid_notebook_id" }, { status: 400 });
+  }
+  return true;
+}
+
+async function assertEventInFamily(
+  db: Db,
+  eventId: string,
+  familyId: string,
+): Promise<true | Response> {
+  const ev = await db
+    .select({
+      id: schema.events.id,
+      familyId: schema.events.familyId,
+      status: schema.events.status,
+    })
+    .from(schema.events)
+    .where(eq(schema.events.id, eventId))
+    .get();
+  if (!ev || ev.familyId !== familyId || ev.status === "trashed") {
+    return Response.json({ error: "invalid_event_id" }, { status: 400 });
   }
   return true;
 }
@@ -264,7 +287,7 @@ noteRoutes.delete("/notebooks/:id", requireSession, async (c) => {
 
 // ── Notes ────────────────────────────────────────────────────────────────────
 
-// GET /notes?familyId=&notebookId=&kind=&q=&trashed=1
+// GET /notes?familyId=&notebookId=&kind=&eventId=&q=&trashed=1
 noteRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
@@ -277,6 +300,7 @@ noteRoutes.get("/", requireSession, async (c) => {
   const trashed = c.req.query("trashed") === "1";
   const notebookId = c.req.query("notebookId");
   const kind = c.req.query("kind");
+  const eventId = c.req.query("eventId");
   const q = c.req.query("q")?.trim();
 
   const conditions = [
@@ -294,8 +318,12 @@ noteRoutes.get("/", requireSession, async (c) => {
     conditions.push(eq(schema.notes.notebookId, notebookId));
   }
 
-  if (kind && (NOTE_KINDS as readonly string[]).includes(kind)) {
-    conditions.push(eq(schema.notes.kind, kind as (typeof NOTE_KINDS)[number]));
+  if (kind && labelSlugSchema.safeParse(kind).success) {
+    conditions.push(eq(schema.notes.kind, kind));
+  }
+
+  if (eventId) {
+    conditions.push(eq(schema.notes.eventId, eventId));
   }
 
   if (q) {
@@ -339,6 +367,10 @@ noteRoutes.post("/", requireSession, zv(createNoteSchema), async (c) => {
     const ok = await assertNotebookInFamily(db, data.notebookId, data.familyId);
     if (ok !== true) return ok;
   }
+  if (data.eventId) {
+    const ok = await assertEventInFamily(db, data.eventId, data.familyId);
+    if (ok !== true) return ok;
+  }
 
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
@@ -347,6 +379,7 @@ noteRoutes.post("/", requireSession, zv(createNoteSchema), async (c) => {
     id,
     familyId: data.familyId,
     notebookId: data.notebookId ?? null,
+    eventId: data.eventId ?? null,
     ownerUserId: userId,
     title: data.title,
     body: data.body,
@@ -405,12 +438,17 @@ noteRoutes.patch("/:id", requireSession, zv(updateNoteSchema), async (c) => {
     const ok = await assertNotebookInFamily(db, updates.notebookId, note.familyId);
     if (ok !== true) return ok;
   }
+  if (updates.eventId) {
+    const ok = await assertEventInFamily(db, updates.eventId, note.familyId);
+    if (ok !== true) return ok;
+  }
 
   const set: Partial<typeof schema.notes.$inferInsert> = {
     updatedAt: Math.floor(Date.now() / 1000),
   };
   // null clears nullable fields (never ?? undefined — that drops the clear).
   if (updates.notebookId !== undefined) set.notebookId = updates.notebookId;
+  if (updates.eventId !== undefined) set.eventId = updates.eventId;
   if (updates.title !== undefined) set.title = updates.title;
   if (updates.body !== undefined) set.body = updates.body;
   if (updates.kind !== undefined) set.kind = updates.kind;

@@ -43,6 +43,8 @@ export interface TaskRecord {
   status: TaskStatus;
   priority: TaskPriority;
   parentTaskId?: string | null;
+  relatedDocumentId?: string | null;
+  relatedEventId?: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt?: number | null;

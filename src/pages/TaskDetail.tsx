@@ -228,6 +228,27 @@ export function TaskDetailPage() {
             </p>
           )}
 
+          {(task.relatedEventId || task.relatedDocumentId) && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {task.relatedEventId && (
+                <Link
+                  to={`/calendar/events/${task.relatedEventId}`}
+                  className="text-vault-300 hover:underline"
+                >
+                  Linked event
+                </Link>
+              )}
+              {task.relatedDocumentId && (
+                <Link
+                  to={`/documents/${task.relatedDocumentId}`}
+                  className="text-vault-300 hover:underline"
+                >
+                  Linked document
+                </Link>
+              )}
+            </div>
+          )}
+
           <TaskEditFields
             key={task.id + String(task.updatedAt)}
             task={task}

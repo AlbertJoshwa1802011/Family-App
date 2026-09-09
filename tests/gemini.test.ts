@@ -55,7 +55,7 @@ describe("gemini schema + message conversion", () => {
   it("declares every assistant tool as a Gemini function with OBJECT parameters", () => {
     const decls = toGeminiFunctionDeclarations(ASSISTANT_TOOLS);
     expect(decls.map((d) => d.name).sort()).toEqual(
-      ["add_contact", "add_event", "add_expense", "add_task", "complete_task", "list_expenses"].sort(),
+      ["add_contact", "add_event", "add_expense", "add_task", "complete_task", "create_tasks_from_event", "list_expenses"].sort(),
     );
     const expense = decls.find((d) => d.name === "add_expense")!;
     expect(expense.parameters.type).toBe("OBJECT");

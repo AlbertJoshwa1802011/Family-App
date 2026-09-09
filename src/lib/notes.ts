@@ -1,6 +1,6 @@
 /** Shared note types + tiny display helpers for the Notebook UI. */
 
-export const NOTE_KINDS = ["general", "bible", "journal", "other"] as const;
+export const NOTE_KINDS = ["general", "bible", "journal", "meeting", "other"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
 
 export interface Notebook {
@@ -17,10 +17,11 @@ export interface Note {
   id: string;
   familyId: string;
   notebookId: string | null;
+  eventId: string | null;
   ownerUserId: string;
   title: string;
   body: string;
-  kind: NoteKind;
+  kind: string;
   noteDate: string | null;
   visibility: "family" | "private";
   pinned: boolean;
@@ -29,10 +30,11 @@ export interface Note {
   deletedAt: number | null;
 }
 
-export const KIND_LABELS: Record<NoteKind, string> = {
+export const KIND_LABELS: Record<string, string> = {
   general: "General",
   bible: "Bible",
   journal: "Journal",
+  meeting: "Meeting",
   other: "Other",
 };
 

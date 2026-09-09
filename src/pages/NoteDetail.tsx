@@ -7,23 +7,21 @@ import { Page } from "../components/ui/Page";
 import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { Chip } from "../components/ui/Chip";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
 import {
-  KIND_LABELS,
-  NOTE_KINDS,
   noteDisplayTitle,
   type Note,
-  type NoteKind,
   type Notebook,
 } from "../lib/notes";
 
 type Draft = {
   title: string;
   body: string;
-  kind: NoteKind;
+  kind: string;
   noteDate: string;
   visibility: "family" | "private";
   pinned: boolean;
@@ -404,20 +402,13 @@ function NoteEditor({
         {!isTrashed && canEdit && (
           <div className="mt-6 space-y-4 border-t border-white/8 pt-4">
             <div>
-              <p className="mb-2 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                Kind
-              </p>
-              <div className="-mx-1 flex flex-wrap gap-2 px-1">
-                {NOTE_KINDS.map((k) => (
-                  <Chip
-                    key={k}
-                    selected={draft.kind === k}
-                    onClick={() => update("kind", k)}
-                  >
-                    {KIND_LABELS[k]}
-                  </Chip>
-                ))}
-              </div>
+              <TypePicker
+                domain="note_kind"
+                familyId={activeFamily?.id}
+                value={draft.kind}
+                onChange={(kind) => update("kind", kind)}
+                title="Kind"
+              />
             </div>
 
             <div>

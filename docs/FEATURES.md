@@ -21,21 +21,22 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+| Workspace intelligence | ✅ Complete | Meeting loop (notes/action-items/follow-ups), related docs + tags, travel buffer, resource links (YouTube/URL), conflict UI |
 
 See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
 the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (34 tables, 14 migrations)
+## 2. Database Schema (36 tables, 16 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
-`0011` (notebooks + notes), `0012` (modules_json on members/invites),
-`0013` (event_google_sync — Google Calendar push mapping).
+`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji),
+`0015` (event_google_sync — Google Calendar push mapping).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -59,7 +60,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_attendees` | Tagged family members per event (CASCADE) | 0001 |
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
-| `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0013 |
+| `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0015 |
 | `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
 | `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
@@ -73,16 +74,19 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `money_movements` | Fund ledger: received into pot / settled to a destination | 0010 |
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
+| `resource_links` | YouTube / URL / photo refs on events/tasks/notes/docs | 0013 |
+| `family_labels` | Family-scoped custom type/category chips + emoji | 0014 |
 
 ### Key Design Decisions
 
 - **All timestamps**: Unix epoch integers (seconds) via `DEFAULT (unixepoch())`. Exception: expiry/issued/due dates are ISO `yyyy-mm-dd` text (calendar dates, not instants).
-- **Events `type` vs `status`**: `type` = what kind (`gathering|appointment|milestone|other`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Events `type` vs `status`**: `type` = what kind (built-ins `gathering|appointment|milestone|other` plus family customs via `family_labels`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Custom labels**: classification fields (event type, document/expense category, note kind, contact relationship) accept free slugs; `family_labels` stores family-created options with emoji. Lifecycle/authz enums stay fixed.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
 - **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
-- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|other`; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
+- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|meeting|other`; optional `event_id` for meeting notes; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
 
 ---
 
@@ -124,13 +128,19 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/documents/:id/files` | version list / record after Drive upload |
 | GET | `/documents/:id/files/:fid/download` | streaming proxy, `attachment` + nosniff, CSRF-checked GET |
 | GET/POST | `/documents/:id/comments` · DELETE `.../:cid` | comments (soft-delete; author or admin+) |
+| GET | `/documents/:id/related` | advisory related-doc ranking (visibility filtered) |
+| GET/POST | `/tags?familyId` · PUT `/tags/documents/:docId` | family tags + replace document tag set |
+| GET/POST/DELETE | `/links` (+`/:id`) | YouTube/URL/photo resource links on event/task/note/document |
+| GET/POST | `/labels?familyId&domain` · PATCH/DELETE `/labels/:id` | family type/category chips + emoji (builtins merged with customs) · RL 30/min on create |
 | GET | `/notifications?unreadOnly` | inbox + unread count |
 | POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
 | GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
-| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated) |
-| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees / update / trash |
+| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated; optional `travelBufferMins`) |
+| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees + linked `documents` / update (incl. `documentIds` replace + travel buffer) / trash |
 | POST | `/events/:id/cancel` | cancelled stays visible |
-| GET | `/events/:id/ics` | optional .ics download (Google Calendar is auto-pushed) |
+| POST | `/events/:id/action-items` | create tasks linked via `relatedEventId` |
+| POST | `/events/:id/follow-up` | in-app `meeting_followup` to attendees (not actor) |
+| GET | `/events/:id/ics` | optional .ics (Apple); Google Calendar is API-pushed on save |
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
@@ -147,15 +157,17 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
 ### Zod Validation Rules (Critical Constraints)
 
-**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` enum `["gathering","appointment","milestone","other"]`; `attendeeMemberIds` array.
+**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` slug (built-ins + family customs via `/labels`); `attendeeMemberIds` array.
 
 **POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `priority` enum `["low","medium","high"]` (default medium); `parentTaskId` must belong to the same family; nesting deeper than 5 returns `max_task_depth`. **PATCH:** `status` enum `["open","done","archived"]` (done sets `completedAt`, reopen clears it); `parentTaskId` null promotes to root; cycle → `task_cycle`.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
-**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` enum `general|bible|journal|other` (default general); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
+**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` slug (built-ins `general|bible|journal|other` + customs); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
 
-**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` enum food/groceries/transport/household/medical/education/entertainment/travel/other; `spentOn` yyyy-mm-dd.
+**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` slug (built-ins + customs); `spentOn` yyyy-mm-dd.
+
+**POST /labels:** `familyId`; `domain` `event_type|document_category|expense_category|note_kind|contact_relationship`; `label` 1–40; `emoji` 1–16; optional `slug`. Max 50 customs per domain.
 
 **POST /money/destinations:** `name` 1–80 chars; `kind` enum `person|organization|other` (default other). Duplicate active names in the same family → `409 destination_exists`.
 
