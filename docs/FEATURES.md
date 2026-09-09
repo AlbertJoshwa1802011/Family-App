@@ -28,14 +28,16 @@ the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (30 tables, 15 migrations)
+## 2. Database Schema (36 tables, 17 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
-`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji).
+`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji),
+`0015` (reminder windows day-of + document calendar renew markers),
+`0016` (event_google_sync — Google Calendar push mapping).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -59,6 +61,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_attendees` | Tagged family members per event (CASCADE) | 0001 |
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
+| `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0016 |
 | `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
 | `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
@@ -138,7 +141,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | POST | `/events/:id/cancel` | cancelled stays visible |
 | POST | `/events/:id/action-items` | create tasks linked via `relatedEventId` |
 | POST | `/events/:id/follow-up` | in-app `meeting_followup` to attendees (not actor) |
-| GET | `/events/:id/ics` | "Add to calendar" download |
+| GET | `/events/:id/ics` | optional .ics (Apple); Google Calendar is API-pushed on save |
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
 | GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
@@ -155,8 +158,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/money/destinations` · PATCH/DELETE `/money/destinations/:id` | named settlement tracks; DELETE archives if used |
 | GET/POST | `/money/movements` · GET/PATCH/DELETE `/money/movements/:id` | received / settled ledger entries |
 | GET/POST | `/assistant?familyId` | private Gemini assistant (Claude fallback); D1 snapshot + tools · RL 20/10min · needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` |
-| POST | `/calendar/feed-token` | mint/rotate capability URL |
-| GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries, per-user visibility, no cookie) |
+| POST | `/calendar/feed-token` | mint/rotate capability URL (optional Apple/Outlook subscribe) |
+| GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries); Google Calendar is primarily **pushed** via Calendar API on event create/update/cancel |
 
 ### Zod Validation Rules (Critical Constraints)
 

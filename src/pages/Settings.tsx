@@ -123,7 +123,9 @@ function CalendarFeedCard() {
 
   const mint = useMutation({
     mutationFn: () =>
-      api<{ url: string }>("/calendar/feed-token", { method: "POST" }),
+      api<{ url: string; webcalUrl?: string }>("/calendar/feed-token", {
+        method: "POST",
+      }),
     onSuccess: (res) => {
       setFeedUrl(res.url);
       setCopied(false);
@@ -135,17 +137,23 @@ function CalendarFeedCard() {
       <div className="flex items-start gap-3">
         <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
         <div>
-          <div className="text-sm font-medium text-fg">
-            Subscribe in your calendar app
-          </div>
+          <div className="text-sm font-medium text-fg">Calendar sync</div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Family events, document expiries, and opt-in &quot;Renew&quot;
-            markers (one week before) appear in Google Calendar, Apple
-            Calendar, or Outlook — updates automatically. Enable &quot;Add to
-            family calendar&quot; on a document to get the week-before planning
-            event.
+            New events default to Google Calendar and Apple Calendar (checkboxes
+            on the create form — both on). No separate connect button. The
+            optional feed below can also carry document expiries and opt-in
+            &quot;Renew&quot; markers (enable on a document for the week-before
+            planning event).
           </p>
         </div>
+      </div>
+
+      <div className="border-t border-white/10 pt-3">
+        <div className="text-xs font-medium text-fg">Optional feed URL</div>
+        <p className="mt-0.5 text-xs text-fg-subtle">
+          Advanced: subscribe Apple Calendar / Outlook to a live feed of family
+          events. Most people can ignore this.
+        </p>
       </div>
 
       {feedUrl ? (
@@ -169,9 +177,8 @@ function CalendarFeedCard() {
             </Button>
           </div>
           <p className="text-xs text-fg-subtle">
-            In your calendar app choose "Subscribe / Add calendar from URL" and
-            paste this link. Anyone with the link can read your calendar —
-            regenerate it to revoke the old one.
+            Anyone with the link can read your calendar — regenerate it to
+            revoke the old one.
           </p>
         </>
       ) : (
@@ -181,7 +188,7 @@ function CalendarFeedCard() {
           loading={mint.isPending}
           onClick={() => mint.mutate()}
         >
-          Get calendar link
+          Show feed URL
         </Button>
       )}
       {mint.isError && (

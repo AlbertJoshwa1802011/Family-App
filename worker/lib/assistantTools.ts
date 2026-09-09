@@ -8,7 +8,9 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Db } from "../db/client";
 import { schema } from "../db/client";
+import type { Env } from "../types";
 import { insertAuditEvent } from "./audit";
+import { syncEventToGoogleCalendars } from "./eventCalendarSync";
 import {
   EXPENSE_CATEGORIES,
   formatMoney,
@@ -18,6 +20,7 @@ import {
 
 export interface ToolContext {
   db: Db;
+  env: Env;
   familyId: string;
   userId: string;
   role: string;
@@ -509,6 +512,8 @@ async function addEvent(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     targetId: id,
     meta: { via: "assistant", title: data.title },
   });
+
+  await syncEventToGoogleCalendars(ctx.db, ctx.env, id);
 
   return {
     ok: true,

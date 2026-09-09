@@ -18,13 +18,17 @@ const FEED_USER_PREFIX = "calfeed_user:";
 /**
  * Calendar-app integration.
  *
- * Two surfaces:
+ * Primary path: Google Calendar **API push** on event create/update/cancel
+ * (`worker/lib/eventCalendarSync.ts`) — Family Vault is the source of truth.
+ *
+ * Secondary surfaces (kept for Apple/Outlook and offline export):
  *  - POST /calendar/feed-token → mints (or rotates) a capability token and
  *    returns the subscribable webcal/https feed URL for the current user.
  *  - GET /calendar/feed/:token.ics → the feed itself. Calendar apps
  *    (Google/Apple/Outlook) can't send session cookies, so this is a
  *    capability URL: the unguessable token IS the credential. Rotating the
  *    token invalidates the old URL. Content respects private-doc visibility.
+ *    Note: Google polls subscribed ICS feeds slowly; prefer the API push.
  */
 
 // POST /calendar/feed-token — mint/rotate the current user's feed token.
@@ -40,7 +44,9 @@ calendarRoutes.post("/feed-token", requireSession, async (c) => {
   await c.env.KV.put(`${FEED_USER_PREFIX}${userId}`, token);
 
   const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json({ url: `${appUrl}/api/calendar/feed/${token}.ics` });
+  const httpsUrl = `${appUrl}/api/calendar/feed/${token}.ics`;
+  const webcalUrl = httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
+  return c.json({ url: httpsUrl, webcalUrl });
 });
 
 // GET /calendar/feed/:token.ics — subscribable calendar (capability URL).
@@ -98,6 +104,8 @@ calendarRoutes.get("/feed/:file", async (c) => {
         endAt: ev.endAt,
         allDay: Boolean(ev.allDay),
         cancelled: ev.status === "cancelled",
+        sequence: Math.max(0, (ev.version ?? 1) - 1),
+        updatedAt: ev.updatedAt ?? ev.createdAt,
       });
     }
 
@@ -159,13 +167,16 @@ calendarRoutes.get("/feed/:file", async (c) => {
     events,
     allDayItems: expiries,
     nowSecs,
+    refreshMinutes: 15,
   });
 
   return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="family-vault.ics"',
-      "Cache-Control": "private, max-age=300",
+      "Content-Disposition": 'inline; filename="family-vault.ics"',
+      // Subscribed calendars must re-fetch often — new events should appear
+      // without waiting hours. Apple respects this better than Google.
+      "Cache-Control": "no-cache, max-age=0, must-revalidate",
       "X-Content-Type-Options": "nosniff",
     },
   });

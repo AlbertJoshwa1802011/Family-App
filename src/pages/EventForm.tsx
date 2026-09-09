@@ -31,6 +31,10 @@ interface FormState {
   description: string;
   attendeeMemberIds: string[];
   documentIds: string[];
+  /** Default on — push to Google Calendar on save. */
+  syncGoogleCalendar: boolean;
+  /** Default on — email .ics + open Add-to-Calendar for Apple. */
+  syncAppleCalendar: boolean;
 }
 
 interface ScheduleConflict {
@@ -70,6 +74,8 @@ export function EventForm() {
     description: "",
     attendeeMemberIds: [],
     documentIds: [],
+    syncGoogleCalendar: true,
+    syncAppleCalendar: true,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
@@ -113,6 +119,8 @@ export function EventForm() {
           description: ev.description ?? "",
           attendeeMemberIds: res.attendees.map((a) => a.memberId),
           documentIds: (res.documents ?? []).map((d) => d.id),
+          syncGoogleCalendar: true,
+          syncAppleCalendar: true,
         });
         setHydrated(true);
       }
@@ -147,31 +155,36 @@ export function EventForm() {
   const mutation = useMutation({
     mutationFn: (payload: object) =>
       isEdit
-        ? api<{ event: { id: string }; conflicts: ScheduleConflict[] }>(
-            `/events/${id}`,
-            { method: "PATCH", body: JSON.stringify(payload) },
-          )
-        : api<{ event: { id: string }; conflicts: ScheduleConflict[] }>(
-            "/events",
-            { method: "POST", body: JSON.stringify(payload) },
-          ),
+        ? api<{
+            event: { id: string };
+            conflicts: ScheduleConflict[];
+            appleCalendar?: boolean;
+          }>(`/events/${id}`, { method: "PATCH", body: JSON.stringify(payload) })
+        : api<{
+            event: { id: string };
+            conflicts: ScheduleConflict[];
+            appleCalendar?: boolean;
+          }>("/events", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ["events"] });
+      const go = () => {
+        const evId = data.event?.id;
+        if (!isEdit && data.appleCalendar && evId) {
+          window.location.assign(`/api/events/${evId}/ics`);
+          return;
+        }
+        navigate(evId ? `/calendar/events/${evId}` : "/calendar", {
+          replace: true,
+        });
+      };
       const list = data.conflicts ?? [];
       if (list.length > 0) {
         setConflicts(list);
         // Stay on the form briefly so the advisory banner is visible, then go.
-        window.setTimeout(() => {
-          navigate(
-            data.event?.id ? `/calendar/events/${data.event.id}` : "/calendar",
-            { replace: true },
-          );
-        }, 1200);
+        window.setTimeout(go, 1200);
         return;
       }
-      navigate(data.event?.id ? `/calendar/events/${data.event.id}` : "/calendar", {
-        replace: true,
-      });
+      go();
     },
   });
 
@@ -216,6 +229,12 @@ export function EventForm() {
       description: form.description.trim() || undefined,
       attendeeMemberIds: form.attendeeMemberIds,
       documentIds: form.documentIds,
+      ...(!isEdit
+        ? {
+            syncGoogleCalendar: form.syncGoogleCalendar,
+            syncAppleCalendar: form.syncAppleCalendar,
+          }
+        : {}),
     });
   }
 
@@ -458,6 +477,43 @@ export function EventForm() {
                   </li>
                 ))}
               </ul>
+            </Card>
+          )}
+
+          {/* Calendars — default checked; no separate “connect” buttons. */}
+          {!isEdit && (
+            <Card className="space-y-3 p-4">
+              <p className="text-xs font-semibold text-fg-muted">
+                Add to my calendars
+              </p>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncGoogleCalendar}
+                  onChange={(e) => set("syncGoogleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Google Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Pushed automatically when you save
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncAppleCalendar}
+                  onChange={(e) => set("syncAppleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Apple Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Opens Add to Calendar on iPhone after save
+                  </span>
+                </span>
+              </label>
             </Card>
           )}
 

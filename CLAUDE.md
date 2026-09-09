@@ -267,8 +267,11 @@ tests.
 - CSRF: Origin/Referer check on mutations **and** the download proxy (Lax cookies ride top-level
   GETs). Downloads always `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`.
 - Google OAuth: Auth Code + PKCE + `state`; ID token verified with `jose` against Google JWKS.
-- Drive scope is `drive.file` (non-sensitive). Its durability across re-consent is **unproven** —
-  a Phase 0.5 spike must validate create→revoke→re-consent→still-readable before Phase 2 UI breadth.
+- Drive scope is `drive.file` (non-sensitive). Calendar push uses
+`calendar.events`. Existing users must sign out/in once after the scope was
+added so Google re-consents and issues a refresh token that includes Calendar.
+Drive durability across re-consent is **unproven** — a Phase 0.5 spike must
+validate create→revoke→re-consent→still-readable before Phase 2 UI breadth.
 - Audit log: write entries on upload/download/delete/role-change (Phase 2 write path is mandatory,
   else the log is permanently empty for early actions).
 
@@ -340,8 +343,9 @@ invite flow + `/invite/:token` accept page; Dashboard real stats.
 **Premium batch (done):** family chat (`chat_messages`, paginated, soft-delete, @mention →
 notification + email via `worker/lib/mentions.ts`); document search (`?q=`) + AI category
 suggestion (`worker/lib/categorize.ts`, Claude structured output behind `ANTHROPIC_API_KEY`,
-heuristics otherwise); calendar integration (per-event ICS + rotatable capability-URL feed,
-`worker/lib/ics.ts` / `routes/calendar.ts`); document remind (`POST /documents/:id/remind`);
+heuristics otherwise); calendar integration (Google Calendar **API push** on
+create/update/cancel via `worker/lib/eventCalendarSync.ts`, plus per-event ICS +
+rotatable capability-URL feed); document remind (`POST /documents/:id/remind`);
 dependents (`POST /families/:id/members`) + member profiles (`?member=` filter); rich HTML
 email templates (`worker/lib/emailTemplates.ts` — email-client-safe: tables, inline styles,
 light palette) + Monday weekly digest (`worker/lib/digest.ts`, `digest_log` dedupe); Instagram
