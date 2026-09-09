@@ -21,26 +21,39 @@ jobs:
       - run: npm run test
       - run: npm run build
 
-  # Auto-deploy: uncomment and add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
-  # repo secrets to enable (see docs/DEPLOYMENT.md §4).
-  #
-  # deploy:
-  #   needs: build
-  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: npm
-  #     - run: npm ci
-  #     - run: npm run build
-  #     - run: npx wrangler d1 migrations apply family-vault-db --remote
-  #       env:
-  #         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  #         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  #     - run: npx wrangler deploy
-  #       env:
-  #         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  #         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  # Production deploy on push to the default feature branch.
+  # Requires repo secrets CLOUDFLARE_API_TOKEN (+ optional CLOUDFLARE_ACCOUNT_ID).
+  # Migrations run before wrangler deploy — new schema must exist when the
+  # Worker boots (see docs/DEPLOYMENT.md §4).
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/claude/family-vault-pwa-plan-TrvxG'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Apply D1 migrations (remote)
+        run: npx wrangler d1 migrations apply family-vault-db --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy Worker + assets
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Smoke health
+        run: |
+          set -e
+          for i in 1 2 3 4 5; do
+            body=$(curl -fsS https://fam.connect-cloud.workers.dev/api/health || true)
+            echo "$body" | grep -q '"ok":true' && exit 0
+            sleep 3
+          done
+          echo "health check failed: $body" >&2
+          exit 1
