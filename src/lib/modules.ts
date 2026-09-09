@@ -11,6 +11,7 @@ export const FAMILY_MODULES = [
   "chat",
   "expenses",
   "assistant",
+  "location",
 ] as const;
 
 export type FamilyModule = (typeof FAMILY_MODULES)[number];
@@ -51,6 +52,10 @@ export const MODULE_META: Record<
     label: "Assistant",
     description: "In-app helper that can read and write for you",
   },
+  location: {
+    label: "Location",
+    description: "Opt-in travel map, weekly km, and family sharing",
+  },
 };
 
 /** Route prefix → module (for deep-link guards). */
@@ -63,6 +68,7 @@ export const ROUTE_MODULE: Array<{ prefix: string; module: FamilyModule }> = [
   { prefix: "/chat", module: "chat" },
   { prefix: "/expenses", module: "expenses" },
   { prefix: "/assistant", module: "assistant" },
+  { prefix: "/locations", module: "location" },
 ];
 
 export function hasModuleAccess(

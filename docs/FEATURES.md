@@ -37,7 +37,8 @@ Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables)
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
 `0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji),
 `0015` (reminder windows day-of + document calendar renew markers),
-`0016` (event_google_sync — Google Calendar push mapping).
+`0016` (event_google_sync — Google Calendar push mapping),
+`0017` (location_sharing_prefs + location_points — opt-in travel trail).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -62,6 +63,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
 | `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0016 |
+| `location_sharing_prefs` | Per-member opt-in for location sharing | 0017 |
+| `location_points` | GPS breadcrumbs for travel trails | 0017 |
 | `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
 | `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
@@ -149,6 +152,11 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/notes` · GET/PATCH/DELETE `/notes/:id` · POST `/notes/:id/restore` | notebook notes (private visibility filtered; soft-delete trash; `?q` `?kind` `?notebookId` `?trashed=1`) |
 | GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
 | GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
+| GET/PUT | `/locations/prefs?familyId` | opt-in location sharing (required before points are accepted) |
+| POST | `/locations/points` | batch GPS breadcrumbs (max 100) · RL 120/min · requires sharing on |
+| GET | `/locations/track?familyId&userId&week=` | trail points for a week (0=this UTC week) or `from`/`to` |
+| GET | `/locations/stats?familyId&userId&week=` | km, trips, stops, daily breakdown (haversine) |
+| GET | `/locations/members?familyId` | who is sharing + last known point (only when opted in) |
 | GET | `/money/summary?familyId` | settlement balances (available / settled / inHand) + destinations + movements |
 | GET/POST | `/money/destinations` · PATCH/DELETE `/money/destinations/:id` | named settlement tracks; DELETE archives if used |
 | GET/POST | `/money/movements` · GET/PATCH/DELETE `/money/movements/:id` | received / settled ledger entries |
@@ -169,6 +177,8 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 **POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` slug (built-ins + customs); `spentOn` yyyy-mm-dd.
 
 **POST /labels:** `familyId`; `domain` `event_type|document_category|expense_category|note_kind|contact_relationship`; `label` 1–40; `emoji` 1–16; optional `slug`. Max 50 customs per domain.
+
+**PUT /locations/prefs:** `familyId`; `enabled` boolean. **POST /locations/points:** `points[]` of `{lat,lng,recordedAt}` (optional accuracy/speed/heading); max 100; rejected unless sharing enabled → `403 location_sharing_disabled`. Track/stats for another member require that member's sharing to be on → otherwise `403`.
 
 **POST /money/destinations:** `name` 1–80 chars; `kind` enum `person|organization|other` (default other). Duplicate active names in the same family → `409 destination_exists`.
 
@@ -200,6 +210,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | `/chat` | `Chat` | Yes |
 | `/assistant` | `Assistant` | Yes |
 | `/expenses` | `Expenses` (Money: Settlements + Expenses) | Yes |
+| `/locations` | `Locations` (opt-in trail + weekly km/stats) | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
@@ -209,7 +220,7 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
 unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
 the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Money and the Assistant are in
-the Dashboard "Quick access" grid. A **sparkles icon in the AppBar** on every
+the Dashboard "Quick access" grid (including Location). A **sparkles icon in the AppBar** on every
 family screen opens the assistant as a sheet (stay on the current page). Active state: `text-vault-300` +
 `strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
 

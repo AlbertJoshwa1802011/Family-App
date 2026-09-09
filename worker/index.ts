@@ -22,6 +22,7 @@ import { accessRoutes } from "./routes/access";
 import { labelRoutes } from "./routes/labels";
 import { tagRoutes } from "./routes/tags";
 import { linkRoutes } from "./routes/links";
+import { locationRoutes } from "./routes/locations";
 import { csrfProtect } from "./middleware/csrf";
 import { runExpiryReminders } from "./cron";
 import { runWeeklyDigest } from "./lib/digest";
@@ -76,6 +77,7 @@ api.route("/access", accessRoutes);
 api.route("/labels", labelRoutes);
 api.route("/tags", tagRoutes);
 api.route("/links", linkRoutes);
+api.route("/locations", locationRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));

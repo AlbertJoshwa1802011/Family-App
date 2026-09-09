@@ -26,6 +26,7 @@ import { NoteDetailPage } from "./pages/NoteDetail";
 import { Chat } from "./pages/Chat";
 import { Assistant } from "./pages/Assistant";
 import { Expenses } from "./pages/Expenses";
+import { Locations } from "./pages/Locations";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
@@ -151,6 +152,7 @@ export default function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/assistant" element={<Assistant />} />
           <Route path="/expenses" element={<Expenses />} />
+          <Route path="/locations" element={<Locations />} />
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/family/access" element={<FamilyAccessPage />} />
           <Route path="/family/members/:id" element={<MemberProfile />} />

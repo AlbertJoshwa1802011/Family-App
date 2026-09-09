@@ -926,3 +926,57 @@ export const appRoleAssignments = sqliteTable(
     index("idx_app_role_role").on(t.role),
   ],
 );
+
+// ── Location tracking (opt-in breadcrumbs) ───────────────────────────────────
+// Device posts GPS points while the member has sharing enabled. Family members
+// only see tracks for users who opted in. Distance/stops/trips are computed
+// from points (no Google Maps dependency).
+
+export const locationSharingPrefs = sqliteTable(
+  "location_sharing_prefs",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 0/1 — member must explicitly enable before points are accepted / visible.
+    enabled: integer("enabled").notNull().default(0),
+    updatedAt: integer("updated_at").notNull().default(now),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_location_pref_family_user").on(t.familyId, t.userId),
+    index("idx_location_pref_family").on(t.familyId),
+  ],
+);
+
+export const locationPoints = sqliteTable(
+  "location_points",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lat: text("lat").notNull(), // decimal degrees as text for precision
+    lng: text("lng").notNull(),
+    accuracyM: integer("accuracy_m"),
+    speedMps: text("speed_mps"),
+    headingDeg: integer("heading_deg"),
+    recordedAt: integer("recorded_at").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_location_points_user_time").on(
+      t.familyId,
+      t.userId,
+      t.recordedAt,
+    ),
+    index("idx_location_points_family_time").on(t.familyId, t.recordedAt),
+  ],
+);
