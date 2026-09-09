@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.com.albert.familyvault",
+        "paths": ["/tasks/*", "/tasks"]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.com.albert.familyvault"]
+  }
+}

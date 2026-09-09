@@ -83,14 +83,18 @@ Cloud setup, smoke tests, and ops: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 ```
 src/              React PWA — pages/, components/ (ui/ kit + BottomNav), context/, lib/
 worker/           Hono API + cron — db/schema.ts (★ source of truth), routes/, lib/, middleware/
-migrations/       Generated D1 SQL (0000–0004) — never hand-edit applied ones
+ios/              Native Albert iOS companion (SwiftUI + WidgetKit) — see ios/README.md
+migrations/       Generated D1 SQL — never hand-edit applied ones
 tests/            Vitest — contract + real-D1 integration + authz matrix + stress
 scripts/          dev-seed, dev-screenshots, validate_migrations.py, gen_icons.py
-docs/             FEATURES, ARCHITECTURE, TESTING, DEPLOYMENT, PLAN, PRODUCTION_READINESS…
+docs/             FEATURES, ARCHITECTURE, TESTING, DEPLOYMENT, PLAN, ios-architecture…
 .claude/skills/   Agent workflows: gate, add-api-resource, live-test, db-migration,
                   email-template, release
 ```
 
+Native iOS: `open ios/Albert.xcodeproj` (or `npm run ios:open`). Web scripts also
+have `web:*` aliases (`npm run web:dev`, `npm run web:test`) that map to the
+existing Vite/Vitest commands.
 ## Documentation map
 
 | Read… | When you need… |
