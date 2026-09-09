@@ -104,7 +104,7 @@ document_tags(document_id, tag_id, PRIMARY KEY(document_id, tag_id))   -- indexa
 notifications(id, user_id, family_id NULL, type, title, body, link, read, created_at)
 reminders_log(id, document_id, user_id, window_days, channel, sent_at,
               UNIQUE(document_id,user_id,window_days,channel))
-reminder_prefs(user_id PK, email_enabled, push_enabled, windows_json /*e.g. [30,7,1]*/)
+reminder_prefs(user_id PK, email_enabled, push_enabled, windows_json /*e.g. [30,7,2,0] — 0 = day-of*/)
 audit_log    (id, family_id, actor_user_id, action, target_type, target_id, meta, created_at)
 ```
 
@@ -162,14 +162,15 @@ enter the model prompt.
 > `reminders_log` dedupe (so a doc is reminded once per window, and a missed day is caught the
 > next run).
 
-1. For each user's reminder windows (default [30,7,1], from `reminder_prefs`), query the family's
+1. For each user's reminder windows (default [30,7,2,0], from `reminder_prefs`;
+   document reminders always include day-of `0`), query the family's
    active documents where `expiry_date <= today + window_days` AND no `reminders_log` row exists
    for `(document, recipient, window_days, channel)`.
 2. For each (document, recipient): insert a `notifications` row and (if enabled) send a Resend
    email; record in `reminders_log` (dedupe / idempotent re-runs).
 3. Throttle email + Drive calls (app-wide token bucket — see below); wrap in `ctx.waitUntil`.
 4. Health check: ping Drive once; on `invalid_grant` raise an owner alert (refresh-token SPOF).
-5. Open tasks with a `due_date` use dedicated windows **[7, 2, 1]** (`task_reminders_log`).
+5. Open tasks with a `due_date` use dedicated windows **[7, 2, 0]** (`task_reminders_log`).
    Assigned tasks notify the assignee (when they have an account); unassigned tasks notify
    the family. Same in-app + Resend email path as document/event reminders.
 

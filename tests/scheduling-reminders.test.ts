@@ -17,7 +17,7 @@ beforeEach(() => {
   c = seedCast();
 });
 
-/** One day out, inside the default [30,7,1] reminder windows. */
+/** One day out, inside the default [30,7,2,0] reminder windows. */
 const TOMORROW = Math.floor(Date.now() / 1000) + 86_400;
 
 async function makeEvent(attendeeMemberIds: string[], title = "Reminder subject") {

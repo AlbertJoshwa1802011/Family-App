@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Lock, Sparkles, Users } from "lucide-react";
+import { Lock, Sparkles, Users, CalendarPlus } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -21,6 +21,8 @@ interface DocumentPayload {
   issuedDate: string | null;
   visibility: "family" | "private";
   subjectMemberId: string | null;
+  calendarReminderEnabled: boolean;
+  expiryReminderEventId: string | null;
 }
 
 interface Member {
@@ -38,6 +40,7 @@ interface FormState {
   issuedDate: string;
   visibility: "family" | "private";
   subjectMemberId: string;
+  calendarReminderEnabled: boolean;
 }
 
 export function DocumentForm() {
@@ -59,6 +62,7 @@ export function DocumentForm() {
     issuedDate: "",
     visibility: "family",
     subjectMemberId: "",
+    calendarReminderEnabled: false,
   });
 
   const { data: membersData } = useQuery({
@@ -114,6 +118,7 @@ export function DocumentForm() {
           issuedDate: d.issuedDate ?? "",
           visibility: d.visibility,
           subjectMemberId: d.subjectMemberId ?? "",
+          calendarReminderEnabled: Boolean(d.calendarReminderEnabled),
         });
         setLoaded(true);
       }
@@ -161,6 +166,7 @@ export function DocumentForm() {
       issuedDate: form.issuedDate || undefined,
       visibility: form.visibility,
       subjectMemberId: form.subjectMemberId || (isEdit ? null : undefined),
+      calendarReminderEnabled: form.calendarReminderEnabled,
     });
   }
 
@@ -224,9 +230,52 @@ export function DocumentForm() {
                 className={inputCls}
               />
               <p className="mt-1 text-xs text-fg-subtle">
-                We'll remind everyone before this date.
+                We&apos;ll email reminders before this date (and on the day).
               </p>
             </div>
+            <button
+              type="button"
+              disabled={!form.expiryDate}
+              onClick={() =>
+                set("calendarReminderEnabled", !form.calendarReminderEnabled)
+              }
+              className={`lq lq-flat lq-press flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left disabled:opacity-40 ${
+                form.calendarReminderEnabled
+                  ? "lq-tint [--lq-tint:var(--color-vault-400)]"
+                  : ""
+              }`}
+            >
+              <CalendarPlus
+                className={`mt-0.5 size-5 shrink-0 ${
+                  form.calendarReminderEnabled ? "text-vault-300" : "text-fg-muted"
+                }`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-fg">
+                  Add to family calendar
+                </span>
+                <span className="mt-0.5 block text-xs text-fg-muted">
+                  Places a &quot;Renew&quot; event one week before expiry — shows
+                  in Family Vault and in Google Calendar when you subscribe
+                  (Settings).
+                </span>
+              </span>
+              <span
+                role="switch"
+                aria-checked={form.calendarReminderEnabled}
+                className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  form.calendarReminderEnabled ? "lq lq-primary" : "lq lq-field"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform duration-300 ease-[var(--ease-liquid)] ${
+                    form.calendarReminderEnabled
+                      ? "translate-x-5"
+                      : "translate-x-0"
+                  }`}
+                />
+              </span>
+            </button>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
                 Issued date (optional)

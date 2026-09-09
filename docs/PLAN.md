@@ -105,7 +105,7 @@ Core (MVP, Phases 1–4):
    School/Education, Warranty, Financial, Utility/Bills, Travel, Other.
 5. Per-document **subject member** ("this passport belongs to child Aanya").
 6. Visibility: **family-shared** vs **private** (only uploader + admins).
-7. Expiry + issued dates; multi-window reminders (30/7/1 days, configurable).
+7. Expiry + issued dates; multi-window reminders (30/7/2/day-of, configurable).
 8. In-app notifications + email reminders.
 9. Search/filter; dashboard (upcoming expiries, recently added, storage used).
 10. Soft delete (trash) + restore.
