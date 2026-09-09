@@ -5,6 +5,10 @@ import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { buildCalendar, type IcsAllDayItem, type IcsEvent } from "../lib/ics";
 import { generateRandom } from "../lib/crypto";
+import {
+  CALENDAR_REMINDER_LEAD_DAYS,
+  isoMinusDays,
+} from "../lib/expiryCalendar";
 
 export const calendarRoutes = new Hono<HonoEnv>();
 
@@ -124,6 +128,29 @@ calendarRoutes.get("/feed/:file", async (c) => {
         date: doc.expiryDate!,
         description: "Family Vault expiry reminder",
       });
+
+      // Opt-in "renew a week before" marker. Family-visible docs also get a
+      // real events row (already in `events` above); private docs only appear
+      // here so the title never leaks onto the shared family calendar.
+      if (doc.calendarReminderEnabled) {
+        const renewDate = isoMinusDays(
+          doc.expiryDate!,
+          CALENDAR_REMINDER_LEAD_DAYS,
+        );
+        if (renewDate) {
+          // Skip duplicate when a shared renew event already exists in the feed.
+          const hasSharedEvent =
+            doc.visibility === "family" && Boolean(doc.expiryReminderEventId);
+          if (!hasSharedEvent) {
+            expiries.push({
+              uid: `renew-${doc.id}@family-vault`,
+              title: `Renew: ${doc.title}`,
+              date: renewDate,
+              description: `Plan renewal — expires ${doc.expiryDate}`,
+            });
+          }
+        }
+      }
     }
   }
 

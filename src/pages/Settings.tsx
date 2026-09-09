@@ -18,8 +18,12 @@ interface ReminderPrefs {
   windows: number[];
 }
 
-// Lead-time options offered in the UI (days before expiry/event).
-const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+// Lead-time options offered in the UI (days before expiry/event). 0 = day of.
+const WINDOW_OPTIONS = [0, 2, 7, 14, 30, 60];
+
+function windowLabel(w: number): string {
+  return w === 0 ? "Today" : `${w}d`;
+}
 
 function ReminderPrefsCard() {
   const qc = useQueryClient();
@@ -87,7 +91,8 @@ function ReminderPrefsCard() {
       <div className="px-4 py-3">
         <div className="text-sm font-medium text-fg">Lead time</div>
         <div className="mt-0.5 text-xs text-fg-muted">
-          How far ahead to remind you. Pick one or more.
+          How far ahead to remind you. &quot;Today&quot; is always sent for
+          document expiry even if unchecked here.
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {WINDOW_OPTIONS.map((w) => {
@@ -102,7 +107,7 @@ function ReminderPrefsCard() {
                   on ? "lq-primary text-white" : "text-fg-muted hover:text-fg",
                 )}
               >
-                {w}d
+                {windowLabel(w)}
               </button>
             );
           })}
@@ -134,8 +139,11 @@ function CalendarFeedCard() {
             Subscribe in your calendar app
           </div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Family events and document expiries in Google Calendar, Apple
-            Calendar, or Outlook — updates automatically.
+            Family events, document expiries, and opt-in &quot;Renew&quot;
+            markers (one week before) appear in Google Calendar, Apple
+            Calendar, or Outlook — updates automatically. Enable &quot;Add to
+            family calendar&quot; on a document to get the week-before planning
+            event.
           </p>
         </div>
       </div>
