@@ -18,8 +18,12 @@ interface ReminderPrefs {
   windows: number[];
 }
 
-// Lead-time options offered in the UI (days before expiry/event).
-const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+// Lead-time options offered in the UI (days before expiry/event). 0 = day of.
+const WINDOW_OPTIONS = [0, 2, 7, 14, 30, 60];
+
+function windowLabel(w: number): string {
+  return w === 0 ? "Today" : `${w}d`;
+}
 
 function ReminderPrefsCard() {
   const qc = useQueryClient();
@@ -87,7 +91,8 @@ function ReminderPrefsCard() {
       <div className="px-4 py-3">
         <div className="text-sm font-medium text-fg">Lead time</div>
         <div className="mt-0.5 text-xs text-fg-muted">
-          How far ahead to remind you. Pick one or more.
+          How far ahead to remind you. &quot;Today&quot; is always sent for
+          document expiry even if unchecked here.
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {WINDOW_OPTIONS.map((w) => {
@@ -102,7 +107,7 @@ function ReminderPrefsCard() {
                   on ? "lq-primary text-white" : "text-fg-muted hover:text-fg",
                 )}
               >
-                {w}d
+                {windowLabel(w)}
               </button>
             );
           })}
@@ -135,7 +140,10 @@ function CalendarFeedCard() {
           <div className="text-sm font-medium text-fg">Calendar sync</div>
           <p className="mt-0.5 text-xs text-fg-muted">
             New events default to Google Calendar and Apple Calendar (checkboxes
-            on the create form — both on). No separate connect button.
+            on the create form — both on). No separate connect button. The
+            optional feed below can also carry document expiries and opt-in
+            &quot;Renew&quot; markers (enable on a document for the week-before
+            planning event).
           </p>
         </div>
       </div>

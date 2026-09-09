@@ -26,6 +26,7 @@ import { allMembersInFamily } from "../lib/familyScope";
 import { loadMentionableMembers, notifyMember } from "../lib/mentions";
 import { labelSlugSchema } from "../lib/labels";
 import { findRelatedDocuments } from "../lib/relatedDocuments";
+import { syncExpiryCalendarReminder } from "../lib/expiryCalendar";
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -45,6 +46,7 @@ const createDocumentSchema = z.object({
   expiryDate: isoDate,
   issuedDate: isoDate,
   visibility: z.enum(["family", "private"]).optional().default("family"),
+  calendarReminderEnabled: z.boolean().optional().default(false),
 });
 
 const updateDocumentSchema = z.object({
@@ -55,6 +57,7 @@ const updateDocumentSchema = z.object({
   expiryDate: isoDate,
   issuedDate: isoDate,
   visibility: z.enum(["family", "private"]).optional(),
+  calendarReminderEnabled: z.boolean().optional(),
 });
 
 const recordFileSchema = z.object({
@@ -260,6 +263,7 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
     expiryDate: data.expiryDate,
     issuedDate: data.issuedDate,
     visibility: data.visibility,
+    calendarReminderEnabled: data.calendarReminderEnabled,
     status: "active",
     updatedAt: now,
   });
@@ -273,11 +277,20 @@ documentRoutes.post("/", requireSession, zv(createDocumentSchema), async (c) => 
     meta: { title: data.title, visibility: data.visibility },
   });
 
-  const document = await db
+  let document = await db
     .select()
     .from(schema.documents)
     .where(eq(schema.documents.id, docId))
     .get();
+
+  if (document) {
+    await syncExpiryCalendarReminder(db, document, userId);
+    document = await db
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, docId))
+      .get();
+  }
 
   return c.json({ document }, 201);
 });
@@ -377,14 +390,26 @@ documentRoutes.patch("/:id", requireSession, zv(updateDocumentSchema), async (c)
   if (updates.expiryDate !== undefined) set.expiryDate = updates.expiryDate;
   if (updates.issuedDate !== undefined) set.issuedDate = updates.issuedDate;
   if (updates.visibility !== undefined) set.visibility = updates.visibility;
+  if (updates.calendarReminderEnabled !== undefined) {
+    set.calendarReminderEnabled = updates.calendarReminderEnabled;
+  }
 
   await db.update(schema.documents).set(set).where(eq(schema.documents.id, docId));
 
-  const document = await db
+  let document = await db
     .select()
     .from(schema.documents)
     .where(eq(schema.documents.id, docId))
     .get();
+
+  if (document) {
+    await syncExpiryCalendarReminder(db, document, userId);
+    document = await db
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, docId))
+      .get();
+  }
 
   return c.json({ document });
 });
@@ -421,6 +446,13 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
     .update(schema.documents)
     .set({ status: "trashed", trashedAt: now })
     .where(eq(schema.documents.id, docId));
+
+  const trashed = await db
+    .select()
+    .from(schema.documents)
+    .where(eq(schema.documents.id, docId))
+    .get();
+  if (trashed) await syncExpiryCalendarReminder(db, trashed, userId);
 
   await insertAuditEvent(db, {
     familyId: doc.familyId,

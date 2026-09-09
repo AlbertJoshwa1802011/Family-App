@@ -12,6 +12,7 @@ import {
   expiryReminderText,
   parseWindows,
   taskReminderText,
+  withDayOfWindow,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
 import { sendEmail } from "./lib/email";
@@ -120,9 +121,11 @@ interface RunStats {
  *     in-app notification + (when enabled) a Resend email.
  *  3. Record reminders_log rows per channel for idempotent dedupe.
  *  4. Same for upcoming events via event_reminders_log.
- *  5. Open tasks with a due date: dedicated windows [7, 2, 1] via
+ *  5. Open tasks with a due date: dedicated windows [7, 2, 0] via
  *     task_reminders_log. Assigned tasks notify the assignee (when they have
  *     an account); unassigned / dependent-assigned tasks notify the family.
+ *  6. Document reminders always include day-of (window 0) so an "expires
+ *     today" email still fires when the user never opens the app.
  *
  * Every subject is wrapped in try/catch so one bad row can't abort the run.
  */
@@ -176,7 +179,9 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           : all;
 
       for (const r of recipients) {
-        const window = dueReminderWindow(daysUntil, r.windows);
+        // Day-of is mandatory for documents — lead-time prefs must not suppress
+        // the "expires today" email when the user is offline.
+        const window = dueReminderWindow(daysUntil, withDayOfWindow(r.windows));
         if (window === null) continue;
         const text = expiryReminderText(doc.title, daysUntil);
         const link = `/documents/${doc.id}`;
@@ -248,6 +253,9 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     try {
       const daysUntil = daysUntilUnix(ev.startAt, nowMs);
       if (daysUntil < 0) continue; // past events don't remind
+      // System renew markers are driven by the document-expiry pipeline —
+      // skipping here avoids a duplicate "Today: Renew: …" email.
+      if (ev.source === "document_expiry") continue;
 
       // Attendee-scoped: an event with a named guest list concerns those people,
       // not the whole household — mirrors how private documents only remind

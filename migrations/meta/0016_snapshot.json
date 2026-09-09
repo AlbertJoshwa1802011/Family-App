@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "17efc671-e99b-4a2d-aff6-c1b01f2a8004",
-  "prevId": "268abc1a-a62d-4b9c-8227-6704d683d5ef",
+  "id": "fabab255-eb3f-4fe3-8ba9-c5d1b1b6b40a",
+  "prevId": "17efc671-e99b-4a2d-aff6-c1b01f2a8004",
   "tables": {
     "access_grants": {
       "name": "access_grants",
@@ -1268,6 +1268,103 @@
           "name": "event_documents_event_id_document_id_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "event_google_sync": {
+      "name": "event_google_sync",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "google_event_id": {
+          "name": "google_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "calendar_id": {
+          "name": "calendar_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'primary'"
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_event_google_sync_event": {
+          "name": "idx_event_google_sync_event",
+          "columns": [
+            "event_id"
+          ],
+          "isUnique": false
+        },
+        "uq_event_google_sync_user": {
+          "name": "uq_event_google_sync_user",
+          "columns": [
+            "event_id",
+            "user_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "event_google_sync_event_id_events_id_fk": {
+          "name": "event_google_sync_event_id_events_id_fk",
+          "tableFrom": "event_google_sync",
+          "tableTo": "events",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "event_google_sync_user_id_users_id_fk": {
+          "name": "event_google_sync_user_id_users_id_fk",
+          "tableFrom": "event_google_sync",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

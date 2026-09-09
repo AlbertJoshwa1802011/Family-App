@@ -258,13 +258,14 @@ export function seedDocument(
     visibility?: "family" | "private";
     expiryDate?: string | null;
     status?: string;
+    calendarReminderEnabled?: boolean;
   },
 ): { id: string } {
   const id = crypto.randomUUID();
   sqlite
     .prepare(
-      `INSERT INTO documents (id, family_id, owner_user_id, title, category, visibility, status, expiry_date, updated_at)
-       VALUES (?, ?, ?, ?, 'other', ?, ?, ?, unixepoch())`,
+      `INSERT INTO documents (id, family_id, owner_user_id, title, category, visibility, status, expiry_date, calendar_reminder_enabled, updated_at)
+       VALUES (?, ?, ?, ?, 'other', ?, ?, ?, ?, unixepoch())`,
     )
     .run(
       id,
@@ -274,6 +275,7 @@ export function seedDocument(
       opts.visibility ?? "family",
       opts.status ?? "active",
       opts.expiryDate ?? null,
+      opts.calendarReminderEnabled ? 1 : 0,
     );
   return { id };
 }

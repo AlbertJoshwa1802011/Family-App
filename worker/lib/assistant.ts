@@ -70,7 +70,7 @@ Screens (so you can point people to the right place)
 - Family chat (\`/chat\`) — members only; @mentions notify
 - Activity (\`/notifications\`) — in-app inbox + email reminder prefs (Settings)
 - Family (\`/family\`) — members, invites, dependents, activity feed
-- Settings (\`/settings\`) — reminder channels and lead-time windows (documents/events: 30/7/1 by default)
+- Settings (\`/settings\`) — reminder channels and lead-time windows (documents/events: 30/7/2/day-of by default)
 - Assistant (\`/assistant\`) — this conversation, private to the signed-in user
 
 Storage (if asked about Google buckets)
