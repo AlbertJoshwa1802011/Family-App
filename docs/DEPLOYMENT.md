@@ -96,9 +96,11 @@ expiry date, upload a file, and download it.
 On every **push to `claude/family-vault-pwa-plan-TrvxG`** (including merges), the
 `deploy` job:
 
-1. Applies pending D1 migrations remotely (`wrangler d1 migrations apply … --remote`)
-2. Deploys the Worker + assets (`wrangler deploy`)
-3. Smokes `GET /api/health`
+1. Reconciles remote `d1_migrations` if schema objects already exist
+   (`scripts/reconcile_remote_migrations.mjs`) — fixes drift after partial applies
+2. Applies pending D1 migrations remotely (`wrangler d1 migrations apply … --remote`)
+3. Deploys the Worker + assets (`wrangler deploy`)
+4. Smokes `GET /api/health` and checks new API surfaces respond (not HTML 404)
 
 Requires repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + D1:Edit)
 and optionally `CLOUDFLARE_ACCOUNT_ID`.
