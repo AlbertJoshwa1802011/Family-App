@@ -70,10 +70,16 @@ const concurrencySchema = z.object({
   expectedVersion: z.number().int().positive().optional(),
 });
 
-const createEventSchema = eventBaseSchema.refine(
-  (d) => !d.endAt || d.endAt >= d.startAt,
-  { message: "endAt must be >= startAt", path: ["endAt"] },
-);
+const createEventSchema = eventBaseSchema
+  .extend({
+    // Defaults ON — Family Vault pushes unless the creator opts out.
+    syncGoogleCalendar: z.boolean().optional().default(true),
+    syncAppleCalendar: z.boolean().optional().default(true),
+  })
+  .refine((d) => !d.endAt || d.endAt >= d.startAt, {
+    message: "endAt must be >= startAt",
+    path: ["endAt"],
+  });
 
 // partial() must be called on ZodObject before refine() — and on the
 // default-free field set, so an omitted key stays omitted.
@@ -312,18 +318,23 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   }
 
   // Creator is excluded from invite mail — send them an .ics so Apple Calendar
-  // (via Mail) can add the event immediately without waiting on a subscribe poll.
-  await emailEventIcsToActor(
-    db,
-    c.env,
-    summarize(event!),
-    userId,
-    `Saved “${event!.title}” to Family Vault`,
-  );
+  // (via Mail) can add the event immediately. Opt-out via syncAppleCalendar.
+  if (data.syncAppleCalendar) {
+    await emailEventIcsToActor(
+      db,
+      c.env,
+      summarize(event!),
+      userId,
+      `Saved “${event!.title}” to Family Vault`,
+    );
+  }
 
-  // Push into Google Calendar for creator + attendees (best-effort; app is source of truth).
-  const gcal = await syncEventToGoogleCalendars(db, c.env, eventId);
-  const calendarSynced = gcal.syncedUserIds.includes(userId);
+  // Push into Google Calendar (default on; opt-out via syncGoogleCalendar).
+  let calendarSynced = false;
+  if (data.syncGoogleCalendar) {
+    const gcal = await syncEventToGoogleCalendars(db, c.env, eventId);
+    calendarSynced = gcal.syncedUserIds.includes(userId);
+  }
 
   // Advisory double-booking check — reported, never blocking.
   const conflicts = await findConflicts(
@@ -334,7 +345,15 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     eventId,
   );
 
-  return c.json({ event, conflicts, calendarSynced }, 201);
+  return c.json(
+    {
+      event,
+      conflicts,
+      calendarSynced,
+      appleCalendar: data.syncAppleCalendar,
+    },
+    201,
+  );
 });
 
 // GET /events/availability?familyId=&from=&to= — free/busy per member.

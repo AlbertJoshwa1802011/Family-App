@@ -37,6 +37,10 @@ interface FormState {
   location: string;
   description: string;
   attendeeMemberIds: string[];
+  /** Default on — push to Google Calendar on save. */
+  syncGoogleCalendar: boolean;
+  /** Default on — email .ics + open Add-to-Calendar for Apple. */
+  syncAppleCalendar: boolean;
 }
 
 function toUnixSeconds(date: string, time: string): number {
@@ -60,6 +64,8 @@ export function EventForm() {
     location: "",
     description: "",
     attendeeMemberIds: [],
+    syncGoogleCalendar: true,
+    syncAppleCalendar: true,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
@@ -97,6 +103,8 @@ export function EventForm() {
           location: ev.location ?? "",
           description: ev.description ?? "",
           attendeeMemberIds: res.attendees.map((a) => a.memberId),
+          syncGoogleCalendar: true,
+          syncAppleCalendar: true,
         });
         setHydrated(true);
       }
@@ -125,8 +133,17 @@ export function EventForm() {
         : api("/events", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: (data: unknown) => {
       void qc.invalidateQueries({ queryKey: ["events"] });
-      const ev = (data as { event?: { id?: string } })?.event;
-      navigate(ev?.id ? `/calendar/events/${ev.id}` : "/calendar", {
+      const res = data as {
+        event?: { id?: string };
+        appleCalendar?: boolean;
+      };
+      const evId = res.event?.id;
+      // On iOS, opening the .ics triggers the system "Add to Calendar" sheet.
+      if (!isEdit && res.appleCalendar && evId) {
+        window.location.assign(`/api/events/${evId}/ics`);
+        return;
+      }
+      navigate(evId ? `/calendar/events/${evId}` : "/calendar", {
         replace: true,
       });
     },
@@ -163,6 +180,12 @@ export function EventForm() {
       location: form.location.trim() || undefined,
       description: form.description.trim() || undefined,
       attendeeMemberIds: form.attendeeMemberIds,
+      ...(!isEdit
+        ? {
+            syncGoogleCalendar: form.syncGoogleCalendar,
+            syncAppleCalendar: form.syncAppleCalendar,
+          }
+        : {}),
     });
   }
 
@@ -346,6 +369,43 @@ export function EventForm() {
                 Tagged members are notified as soon as you save, and again if
                 you move or cancel the event.
               </p>
+            </Card>
+          )}
+
+          {/* Calendars — default checked; no separate “connect” buttons. */}
+          {!isEdit && (
+            <Card className="space-y-3 p-4">
+              <p className="text-xs font-semibold text-fg-muted">
+                Add to my calendars
+              </p>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncGoogleCalendar}
+                  onChange={(e) => set("syncGoogleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Google Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Pushed automatically when you save
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncAppleCalendar}
+                  onChange={(e) => set("syncAppleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Apple Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Opens Add to Calendar on iPhone after save
+                  </span>
+                </span>
+              </label>
             </Card>
           )}
 

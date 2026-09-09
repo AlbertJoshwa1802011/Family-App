@@ -197,6 +197,28 @@ describe("POST /events → Google Calendar push", () => {
     ).toBe(true);
   });
 
+  it("skips Google push when syncGoogleCalendar is false", async () => {
+    const calls = stubGoogleCalendar();
+    await putRefresh(owner.userId);
+
+    const startAt = Math.floor(Date.UTC(2026, 9, 8, 11, 0) / 1000);
+    const res = await req("POST", "/api/events", owner.cookie, {
+      familyId,
+      title: "Vault only",
+      startAt,
+      syncGoogleCalendar: false,
+      syncAppleCalendar: false,
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      calendarSynced: boolean;
+      appleCalendar: boolean;
+    };
+    expect(body.calendarSynced).toBe(false);
+    expect(body.appleCalendar).toBe(false);
+    expect(calls.filter((c) => c.url.includes("/calendar/v3/"))).toHaveLength(0);
+  });
+
   it("pushes to creator and invited attendees with tokens", async () => {
     const calls = stubGoogleCalendar();
     await putRefresh(owner.userId);

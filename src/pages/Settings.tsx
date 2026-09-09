@@ -114,7 +114,6 @@ function ReminderPrefsCard() {
 
 function CalendarFeedCard() {
   const [feedUrl, setFeedUrl] = useState("");
-  const [webcalUrl, setWebcalUrl] = useState("");
   const [copied, setCopied] = useState(false);
 
   const mint = useMutation({
@@ -124,10 +123,6 @@ function CalendarFeedCard() {
       }),
     onSuccess: (res) => {
       setFeedUrl(res.url);
-      setWebcalUrl(
-        res.webcalUrl ??
-          res.url.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:"),
-      );
       setCopied(false);
     },
   });
@@ -137,35 +132,24 @@ function CalendarFeedCard() {
       <div className="flex items-start gap-3">
         <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
         <div>
-          <div className="text-sm font-medium text-fg">Your calendars</div>
+          <div className="text-sm font-medium text-fg">Calendar sync</div>
           <p className="mt-0.5 text-xs text-fg-muted">
-            Saving an event pushes it to Google Calendar automatically (after
-            you grant calendar access on Google sign-in). For Apple Calendar on
-            iPhone, subscribe once below — new events appear on the next refresh
-            (about 15 minutes), and invite emails include an .ics you can tap to
-            add immediately.
+            New events default to Google Calendar and Apple Calendar (checkboxes
+            on the create form — both on). No separate connect button.
           </p>
         </div>
       </div>
 
       <div className="border-t border-white/10 pt-3">
-        <div className="text-xs font-medium text-fg">Apple Calendar subscribe</div>
+        <div className="text-xs font-medium text-fg">Optional feed URL</div>
         <p className="mt-0.5 text-xs text-fg-subtle">
-          One-time setup. On iPhone, prefer the webcal link so Calendar opens
-          the subscribe sheet.
+          Advanced: subscribe Apple Calendar / Outlook to a live feed of family
+          events. Most people can ignore this.
         </p>
       </div>
 
       {feedUrl ? (
         <>
-          {webcalUrl && (
-            <a
-              href={webcalUrl}
-              className="lq lq-press lq-primary flex min-h-11 w-full items-center justify-center rounded-full px-5 text-sm font-semibold text-white"
-            >
-              Open in Apple Calendar
-            </a>
-          )}
           <div className="flex items-center gap-2">
             <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
               {feedUrl}
@@ -196,7 +180,7 @@ function CalendarFeedCard() {
           loading={mint.isPending}
           onClick={() => mint.mutate()}
         >
-          Set up Apple Calendar
+          Show feed URL
         </Button>
       )}
       {mint.isError && (
