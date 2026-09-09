@@ -103,6 +103,10 @@ On every **push to `claude/family-vault-pwa-plan-TrvxG`** (including merges), th
 Requires repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + D1:Edit)
 and optionally `CLOUDFLARE_ACCOUNT_ID`.
 
+If remote D1 drifts (tables exist but are missing from `d1_migrations`), the
+deploy job first runs `scripts/sync_remote_migrations.py` to stamp already-
+present migrations, then applies the rest.
+
 ## 5. Operations
 
 | Concern | What to do |
