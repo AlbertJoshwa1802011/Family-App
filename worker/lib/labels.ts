@@ -69,6 +69,7 @@ export const BUILTIN_LABELS: Record<LabelDomain, readonly LabelDef[]> = {
     { slug: "general", label: "General", emoji: "📝" },
     { slug: "bible", label: "Bible", emoji: "📖" },
     { slug: "journal", label: "Journal", emoji: "📔" },
+    { slug: "meeting", label: "Meeting", emoji: "🗓️" },
     { slug: "other", label: "Other", emoji: "✏️" },
   ],
   contact_relationship: [

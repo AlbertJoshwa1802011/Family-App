@@ -103,7 +103,8 @@ export const BUILTIN_LABELS: Record<LabelDomain, FamilyLabel[]> = {
     { id: null, slug: "general", label: "General", emoji: "📝", sortOrder: 0, builtin: true, custom: false },
     { id: null, slug: "bible", label: "Bible", emoji: "📖", sortOrder: 1, builtin: true, custom: false },
     { id: null, slug: "journal", label: "Journal", emoji: "📔", sortOrder: 2, builtin: true, custom: false },
-    { id: null, slug: "other", label: "Other", emoji: "✏️", sortOrder: 3, builtin: true, custom: false },
+    { id: null, slug: "meeting", label: "Meeting", emoji: "🗓️", sortOrder: 3, builtin: true, custom: false },
+    { id: null, slug: "other", label: "Other", emoji: "✏️", sortOrder: 4, builtin: true, custom: false },
   ],
   contact_relationship: [
     { id: null, slug: "doctor", label: "Doctor", emoji: "🩺", sortOrder: 0, builtin: true, custom: false },

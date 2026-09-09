@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   BellRing,
   Download,
@@ -245,11 +245,51 @@ export function DocumentDetail() {
 
         <RemindSomeone doc={doc} />
 
+        <RelatedDocuments docId={doc.id} />
+
         <FileVersions docId={doc.id} />
 
         <Comments docId={doc.id} />
       </Page>
     </>
+  );
+}
+
+function RelatedDocuments({ docId }: { docId: string }) {
+  const { data } = useQuery({
+    queryKey: ["documents", docId, "related"],
+    queryFn: () =>
+      api<{
+        related: {
+          id: string;
+          title: string;
+          category: string;
+          score: number;
+          reasons: string[];
+        }[];
+      }>(`/documents/${docId}/related`),
+  });
+  const related = data?.related ?? [];
+  if (related.length === 0) return null;
+
+  return (
+    <section className="space-y-2">
+      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+        Related documents
+      </h3>
+      <Card className="divide-y divide-white/5 p-1">
+        {related.map((r) => (
+          <Link
+            key={r.id}
+            to={`/documents/${r.id}`}
+            className="lq-press flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-fg"
+          >
+            <span className="flex-1 truncate">{r.title}</span>
+            <Badge tone="neutral">{r.category}</Badge>
+          </Link>
+        ))}
+      </Card>
+    </section>
   );
 }
 

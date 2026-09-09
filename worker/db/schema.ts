@@ -287,6 +287,9 @@ export const events = sqliteTable(
     endAt: integer("end_at"), // null = single-instant / all-day
     allDay: integer("all_day", { mode: "boolean" }).notNull().default(false),
     location: text("location"),
+    // Advisory travel buffer (minutes before start). UI can show "leave by";
+    // no Maps API required — members set this themselves.
+    travelBufferMins: integer("travel_buffer_mins"),
     // type = what kind of event. Built-ins: gathering|appointment|milestone|other.
     // Families may add custom slugs via `family_labels` (domain=event_type).
     type: text("type").notNull().default("other"),
@@ -457,7 +460,7 @@ export const contacts = sqliteTable(
 
 // Built-in note kinds (defaults). Families may add custom slugs via
 // `family_labels` (domain=note_kind); the column itself is free text.
-export const NOTE_KINDS = ["general", "bible", "journal", "other"] as const;
+export const NOTE_KINDS = ["general", "bible", "journal", "meeting", "other"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
 
 /** Domains that support family-defined labels (type/category chips + emoji). */
@@ -500,6 +503,12 @@ export const familyLabels = sqliteTable(
   ],
 );
 
+/** Attachable external refs (YouTube, web URL) or Drive photo docs. */
+export const RESOURCE_LINK_KINDS = ["youtube", "url", "photo"] as const;
+export type ResourceLinkKind = (typeof RESOURCE_LINK_KINDS)[number];
+export const RESOURCE_LINK_TARGETS = ["event", "task", "note", "document"] as const;
+export type ResourceLinkTarget = (typeof RESOURCE_LINK_TARGETS)[number];
+
 export const notebooks = sqliteTable(
   "notebooks",
   {
@@ -531,6 +540,10 @@ export const notes = sqliteTable(
     notebookId: text("notebook_id").references(() => notebooks.id, {
       onDelete: "set null",
     }),
+    // Optional link to a calendar event (meeting notes). SET NULL on event delete.
+    eventId: text("event_id").references(() => events.id, {
+      onDelete: "set null",
+    }),
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -552,6 +565,34 @@ export const notes = sqliteTable(
     index("idx_note_notebook").on(t.notebookId),
     index("idx_note_family_owner").on(t.familyId, t.ownerUserId),
     index("idx_note_family_kind").on(t.familyId, t.kind),
+    index("idx_note_event").on(t.eventId),
+  ],
+);
+
+// External / media references attachable to family resources (YouTube, URL, photo doc).
+export const resourceLinks = sqliteTable(
+  "resource_links",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: RESOURCE_LINK_KINDS }).notNull(),
+    targetType: text("target_type", { enum: RESOURCE_LINK_TARGETS }).notNull(),
+    targetId: text("target_id").notNull(),
+    url: text("url"), // required for youtube|url; optional for photo
+    title: text("title"),
+    documentId: text("document_id").references(() => documents.id, {
+      onDelete: "cascade",
+    }), // photo → vault document
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_resource_link_target").on(t.targetType, t.targetId),
+    index("idx_resource_link_family").on(t.familyId, t.createdAt),
   ],
 );
 

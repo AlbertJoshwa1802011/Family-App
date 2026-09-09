@@ -27,8 +27,24 @@ interface FormState {
   startTime: string; // HH:mm
   endTime: string; // HH:mm
   location: string;
+  travelBufferMins: string; // minutes as string for input; empty = unset
   description: string;
   attendeeMemberIds: string[];
+  documentIds: string[];
+}
+
+interface ScheduleConflict {
+  eventId: string;
+  title: string;
+  startAt: number;
+  endAt: number | null;
+  allDay: boolean;
+  memberIds: string[];
+}
+
+interface DocOption {
+  id: string;
+  title: string;
 }
 
 function toUnixSeconds(date: string, time: string): number {
@@ -50,11 +66,14 @@ export function EventForm() {
     startTime: "09:00",
     endTime: "10:00",
     location: "",
+    travelBufferMins: "",
     description: "",
     attendeeMemberIds: [],
+    documentIds: [],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
+  const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
 
   // Edit mode: hydrate the form once from the existing event.
   useQuery({
@@ -68,9 +87,11 @@ export function EventForm() {
           endAt: number | null;
           allDay: boolean;
           location: string | null;
+          travelBufferMins: number | null;
           description: string | null;
         };
         attendees: { memberId: string }[];
+        documents: DocOption[];
       }>(`/events/${id}`);
       if (!hydrated) {
         const ev = res.event;
@@ -87,8 +108,11 @@ export function EventForm() {
             ? `${pad(end.getHours())}:${pad(end.getMinutes())}`
             : "10:00",
           location: ev.location ?? "",
+          travelBufferMins:
+            ev.travelBufferMins != null ? String(ev.travelBufferMins) : "",
           description: ev.description ?? "",
           attendeeMemberIds: res.attendees.map((a) => a.memberId),
+          documentIds: (res.documents ?? []).map((d) => d.id),
         });
         setHydrated(true);
       }
@@ -110,15 +134,42 @@ export function EventForm() {
   });
   const members = membersData?.members ?? [];
 
+  const { data: docsData } = useQuery({
+    queryKey: ["documents", activeFamily?.id, "event-form"],
+    queryFn: () =>
+      api<{ documents: DocOption[] }>(
+        `/documents?familyId=${activeFamily!.id}`,
+      ),
+    enabled: Boolean(activeFamily),
+  });
+  const documents = docsData?.documents ?? [];
+
   const mutation = useMutation({
     mutationFn: (payload: object) =>
       isEdit
-        ? api(`/events/${id}`, { method: "PATCH", body: JSON.stringify(payload) })
-        : api("/events", { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: (data: unknown) => {
+        ? api<{ event: { id: string }; conflicts: ScheduleConflict[] }>(
+            `/events/${id}`,
+            { method: "PATCH", body: JSON.stringify(payload) },
+          )
+        : api<{ event: { id: string }; conflicts: ScheduleConflict[] }>(
+            "/events",
+            { method: "POST", body: JSON.stringify(payload) },
+          ),
+    onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ["events"] });
-      const ev = (data as { event?: { id?: string } })?.event;
-      navigate(ev?.id ? `/calendar/events/${ev.id}` : "/calendar", {
+      const list = data.conflicts ?? [];
+      if (list.length > 0) {
+        setConflicts(list);
+        // Stay on the form briefly so the advisory banner is visible, then go.
+        window.setTimeout(() => {
+          navigate(
+            data.event?.id ? `/calendar/events/${data.event.id}` : "/calendar",
+            { replace: true },
+          );
+        }, 1200);
+        return;
+      }
+      navigate(data.event?.id ? `/calendar/events/${data.event.id}` : "/calendar", {
         replace: true,
       });
     },
@@ -144,6 +195,14 @@ export function EventForm() {
       ? undefined
       : toUnixSeconds(form.date, form.endTime);
 
+    const bufferRaw = form.travelBufferMins.trim();
+    const travelBufferMins =
+      bufferRaw === ""
+        ? isEdit
+          ? null
+          : undefined
+        : Math.max(0, Math.min(24 * 60, Number.parseInt(bufferRaw, 10) || 0));
+
     mutation.mutate({
       // POST /events requires familyId (server-side membership check).
       ...(isEdit ? {} : { familyId: activeFamily!.id }),
@@ -153,8 +212,10 @@ export function EventForm() {
       endAt,
       allDay: form.allDay,
       location: form.location.trim() || undefined,
+      travelBufferMins,
       description: form.description.trim() || undefined,
       attendeeMemberIds: form.attendeeMemberIds,
+      documentIds: form.documentIds,
     });
   }
 
@@ -169,6 +230,15 @@ export function EventForm() {
       form.attendeeMemberIds.includes(memberId)
         ? form.attendeeMemberIds.filter((id) => id !== memberId)
         : [...form.attendeeMemberIds, memberId],
+    );
+  }
+
+  function toggleDocument(docId: string) {
+    set(
+      "documentIds",
+      form.documentIds.includes(docId)
+        ? form.documentIds.filter((id) => id !== docId)
+        : [...form.documentIds, docId],
     );
   }
 
@@ -267,17 +337,37 @@ export function EventForm() {
           </Card>
 
           {/* Location */}
-          <Card className="p-4">
-            <label className="block text-xs font-semibold text-fg-muted mb-1.5">
-              Location (optional)
-            </label>
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => set("location", e.target.value)}
-              placeholder="e.g. City Hospital, Room 4"
-              className={inputCls}
-            />
+          <Card className="p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                Location (optional)
+              </label>
+              <input
+                type="text"
+                value={form.location}
+                onChange={(e) => set("location", e.target.value)}
+                placeholder="e.g. City Hospital, Room 4"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                Travel buffer (minutes)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1440}
+                inputMode="numeric"
+                value={form.travelBufferMins}
+                onChange={(e) => set("travelBufferMins", e.target.value)}
+                placeholder="e.g. 30"
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-fg-subtle">
+                Advisory leave-by reminder — no Maps routing yet.
+              </p>
+            </div>
           </Card>
 
           {/* Description */}
@@ -293,6 +383,31 @@ export function EventForm() {
               className={`${inputCls} resize-none`}
             />
           </Card>
+
+          {/* Linked documents */}
+          {documents.length > 0 && (
+            <Card className="p-4">
+              <p className="text-xs font-semibold text-fg-muted mb-3">
+                Related documents
+              </p>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {documents.map((d) => (
+                  <label
+                    key={d.id}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.documentIds.includes(d.id)}
+                      onChange={() => toggleDocument(d.id)}
+                      className="size-4 rounded accent-vault-500"
+                    />
+                    <span className="text-sm text-fg truncate">{d.title}</span>
+                  </label>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Attendees */}
           {members.length > 0 && (
@@ -328,6 +443,21 @@ export function EventForm() {
                 Tagged members are notified as soon as you save, and again if
                 you move or cancel the event.
               </p>
+            </Card>
+          )}
+
+          {conflicts.length > 0 && (
+            <Card className="border border-warning/40 p-4">
+              <p className="text-sm font-semibold text-warning">
+                Scheduling conflict (advisory)
+              </p>
+              <ul className="mt-2 space-y-1 text-xs text-fg-muted">
+                {conflicts.map((c) => (
+                  <li key={c.eventId}>
+                    Overlaps “{c.title}” for a shared attendee
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
 

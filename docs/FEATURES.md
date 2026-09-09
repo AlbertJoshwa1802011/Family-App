@@ -21,20 +21,21 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 | Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
 | Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+| Workspace intelligence | ✅ Complete | Meeting loop (notes/action-items/follow-ups), related docs + tags, travel buffer, resource links (YouTube/URL), conflict UI |
 
 See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
 the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (29 tables, 14 migrations)
+## 2. Database Schema (30 tables, 15 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
 `0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
 `0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
 `0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
-`0011` (notebooks + notes), `0012` (member module access), `0013` (family_labels — custom types/categories with emoji).
+`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -71,7 +72,8 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `money_movements` | Fund ledger: received into pot / settled to a destination | 0010 |
 | `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
 | `assistant_messages` | Per-user assistant thread | 0006 |
-| `family_labels` | Family-scoped custom type/category chips + emoji | 0013 |
+| `resource_links` | YouTube / URL / photo refs on events/tasks/notes/docs | 0013 |
+| `family_labels` | Family-scoped custom type/category chips + emoji | 0014 |
 
 ### Key Design Decisions
 
@@ -82,7 +84,7 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
 - **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
-- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|other`; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
+- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|meeting|other`; optional `event_id` for meeting notes; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
 
 ---
 
@@ -124,13 +126,18 @@ enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 | GET/POST | `/documents/:id/files` | version list / record after Drive upload |
 | GET | `/documents/:id/files/:fid/download` | streaming proxy, `attachment` + nosniff, CSRF-checked GET |
 | GET/POST | `/documents/:id/comments` · DELETE `.../:cid` | comments (soft-delete; author or admin+) |
+| GET | `/documents/:id/related` | advisory related-doc ranking (visibility filtered) |
+| GET/POST | `/tags?familyId` · PUT `/tags/documents/:docId` | family tags + replace document tag set |
+| GET/POST/DELETE | `/links` (+`/:id`) | YouTube/URL/photo resource links on event/task/note/document |
 | GET/POST | `/labels?familyId&domain` · PATCH/DELETE `/labels/:id` | family type/category chips + emoji (builtins merged with customs) · RL 30/min on create |
 | GET | `/notifications?unreadOnly` | inbox + unread count |
 | POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
 | GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
-| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated) |
-| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees / update / trash |
+| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated; optional `travelBufferMins`) |
+| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees + linked `documents` / update (incl. `documentIds` replace + travel buffer) / trash |
 | POST | `/events/:id/cancel` | cancelled stays visible |
+| POST | `/events/:id/action-items` | create tasks linked via `relatedEventId` |
+| POST | `/events/:id/follow-up` | in-app `meeting_followup` to attendees (not actor) |
 | GET | `/events/:id/ics` | "Add to calendar" download |
 | POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
 | GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
