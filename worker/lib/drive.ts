@@ -15,8 +15,8 @@
  */
 
 import type { Env } from "../types";
+import { getGoogleAccessToken, GoogleAuthError, isGoogleOAuthConfigured } from "./googleAuth";
 
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 
@@ -25,42 +25,14 @@ const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
  * cached token is expired or absent.
  */
 export async function getDriveAccessToken(env: Env, ownerId: string): Promise<string> {
-  const cacheKey = `user:access_token:${ownerId}`;
-  const cached = await env.KV.get(cacheKey);
-  if (cached) return cached;
-
-  const refreshToken = await env.KV.get(`user:refresh_token:${ownerId}`);
-  if (!refreshToken) {
-    throw new DriveError("No refresh token — owner must re-authenticate", 503);
+  try {
+    return await getGoogleAccessToken(env, ownerId);
+  } catch (e) {
+    if (e instanceof GoogleAuthError) {
+      throw new DriveError(e.message, e.statusCode);
+    }
+    throw e;
   }
-
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: env.GOOGLE_CLIENT_ID!,
-      client_secret: env.GOOGLE_CLIENT_SECRET!,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new DriveError(`Token refresh failed: ${body}`, 502);
-  }
-
-  const { access_token, expires_in } = (await res.json()) as {
-    access_token: string;
-    expires_in: number;
-  };
-
-  // Cache with a 5-minute buffer so we don't use a nearly-expired token
-  await env.KV.put(cacheKey, access_token, {
-    expirationTtl: Math.max(expires_in - 300, 60),
-  });
-
-  return access_token;
 }
 
 /**
@@ -164,5 +136,5 @@ export class DriveError extends Error {
 
 /** Returns true if Drive is usable (required secrets are present). */
 export function isDriveConfigured(env: Env): boolean {
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  return isGoogleOAuthConfigured(env);
 }

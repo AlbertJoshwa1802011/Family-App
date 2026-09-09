@@ -180,6 +180,7 @@ export async function runAssistantTurn(opts: {
   const complete = opts.complete ?? ((args) => defaultComplete(opts.env, args));
   const toolCtx: ToolContext = {
     db: opts.db,
+    env: opts.env,
     familyId: opts.familyId,
     userId: opts.userId,
     role: opts.role,

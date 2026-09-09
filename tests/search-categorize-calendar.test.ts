@@ -177,6 +177,9 @@ describe("ICS generation", () => {
     expect(ics).toContain("SUMMARY:Dinner\\; with\\, commas\\nand newline");
     expect(ics).toMatch(/DTSTART:\d{8}T\d{6}Z/);
     expect(ics).toContain("DTSTART;VALUE=DATE:20260901");
+    expect(ics).toContain("DTEND;VALUE=DATE:20260902");
+    expect(ics).toContain("REFRESH-INTERVAL;VALUE=DURATION:PT15M");
+    expect(ics).toContain("X-PUBLISHED-TTL:PT15M");
     // CRLF line endings per RFC 5545
     expect(ics).toContain("\r\n");
   });
@@ -212,7 +215,7 @@ describe("GET /events/:id/ics", () => {
     const res = await req("GET", `/api/events/${event.id}/ics`, member.cookie);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/calendar");
-    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(res.headers.get("content-disposition")).toContain("inline");
     const body = await res.text();
     expect(body).toContain("SUMMARY:Dentist");
   });

@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
-  CalendarPlus,
   CheckSquare,
   FileText,
   Link2,
@@ -516,14 +515,7 @@ export function EventDetailPage() {
           </Card>
         </section>
 
-        {/* Actions */}
-        <a
-          href={`/api/events/${ev.id}/ics`}
-          className="lq lq-press flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-fg"
-        >
-          <CalendarPlus className="size-4" />
-          Add to my calendar
-        </a>
+        {/* Actions — calendars are opted in on create (default-checked). */}
 
         <Button
           variant="ghost"

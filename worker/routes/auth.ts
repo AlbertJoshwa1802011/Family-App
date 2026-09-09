@@ -76,7 +76,10 @@ async function beginGoogleOAuth(
       "openid",
       "email",
       "profile",
+      // Drive: document files created by this app only (non-sensitive).
       "https://www.googleapis.com/auth/drive.file",
+      // Calendar: push Family Vault events into the user's primary calendar.
+      "https://www.googleapis.com/auth/calendar.events",
     ].join(" "),
     access_type: "offline",
     prompt: "consent",
@@ -304,9 +307,18 @@ authRoutes.get("/google/callback", async (c) => {
 
   await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
-  // Cache owner refresh token in KV (Drive upload/download needs it in Phase 2)
+  // Cache refresh token in KV (Drive + Google Calendar push need it).
+  // Drop any cached access token so the next API call picks up newly granted
+  // scopes (e.g. calendar.events after a re-consent).
   if (tokens.refresh_token) {
     await c.env.KV.put(`user:refresh_token:${user.id}`, tokens.refresh_token);
+  }
+  if (tokens.access_token) {
+    await c.env.KV.put(`user:access_token:${user.id}`, tokens.access_token, {
+      expirationTtl: 3300,
+    });
+  } else {
+    await c.env.KV.delete(`user:access_token:${user.id}`);
   }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));

@@ -391,6 +391,31 @@ export const eventRemindersLog = sqliteTable(
   ],
 );
 
+/**
+ * Maps a Family Vault event → each user's Google Calendar event.
+ * The app is the source of truth: create/update/cancel in D1 pushes here
+ * via the Calendar API (best-effort; missing refresh tokens / scopes skip).
+ */
+export const eventGoogleSync = sqliteTable(
+  "event_google_sync",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    googleEventId: text("google_event_id").notNull(),
+    calendarId: text("calendar_id").notNull().default("primary"),
+    syncedAt: integer("synced_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_event_google_sync_user").on(t.eventId, t.userId),
+    index("idx_event_google_sync_event").on(t.eventId),
+  ],
+);
+
 // ── Tasks ────────────────────────────────────────────────────────────────────
 
 export const tasks = sqliteTable(
