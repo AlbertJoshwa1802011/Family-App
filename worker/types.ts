@@ -23,6 +23,8 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   /** Gemini API key for the in-app family assistant (preferred when set). */
   GEMINI_API_KEY?: string;
+  /** Optional Gemini model id override (falls through flash ids on 404). */
+  GEMINI_MODEL?: string;
   /** Secret used to sign/derive session + invite token hashes. */
   SESSION_SECRET?: string;
   /**

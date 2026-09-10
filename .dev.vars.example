@@ -18,9 +18,12 @@ SESSION_SECRET=""
 # Gemini API key for the in-app family assistant (preferred). Optional: without
 # Gemini or Anthropic, the assistant returns 503. Paste from Google AI Studio.
 GEMINI_API_KEY=""
+# Optional model override (default gemini-2.5-flash; falls through flash ids on 404).
+# GEMINI_MODEL="gemini-2.5-flash"
 
 # Claude API key for document category suggestions + assistant fallback.
-# Optional: without it, category heuristics still work.
+# Optional: without it, category heuristics still work. Also used when Gemini
+# fails mid-turn so the UI doesn't show a blank "hiccup".
 ANTHROPIC_API_KEY=""
 
 # Comma-separated emails that become platform super_admins on login (closed signup).

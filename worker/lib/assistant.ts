@@ -88,25 +88,59 @@ How to help
 - Be concise, warm, and specific. Use the family's currency symbol when talking money.
 - Today (UTC) is in the snapshot. Dates in the app are ISO yyyy-mm-dd.`;
 
+async function completeWithAnthropic(
+  env: Env,
+  args: { system: string; tools: typeof ASSISTANT_TOOLS; messages: MessageParam[] },
+): Promise<Message> {
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  return client.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: MAX_TOKENS,
+    system: args.system,
+    tools: args.tools,
+    messages: args.messages,
+  });
+}
+
+/** Provider selection + Gemini→Anthropic fallback. Exported for unit tests. */
+export async function completeAssistantProviders(
+  env: Env,
+  args: { system: string; tools: typeof ASSISTANT_TOOLS; messages: MessageParam[] },
+  deps: {
+    gemini?: typeof geminiComplete;
+    anthropic?: typeof completeWithAnthropic;
+  } = {},
+): Promise<Message> {
+  const geminiFn = deps.gemini ?? geminiComplete;
+  const anthropicFn = deps.anthropic ?? completeWithAnthropic;
+  const provider = assistantProvider(env);
+  if (provider === "gemini") {
+    try {
+      return await geminiFn(env.GEMINI_API_KEY!, args, env.GEMINI_MODEL);
+    } catch (err) {
+      // Prefer Gemini, but don't leave the user with a blank "hiccup" when
+      // Anthropic is configured and Gemini hiccups (quota, retired model, etc.).
+      if (env.ANTHROPIC_API_KEY?.trim()) {
+        console.warn(
+          "[assistant] Gemini failed; falling back to Anthropic:",
+          err instanceof Error ? err.message : err,
+        );
+        return anthropicFn(env, args);
+      }
+      throw err;
+    }
+  }
+  if (provider === "anthropic") {
+    return anthropicFn(env, args);
+  }
+  throw new Error("ai_not_configured");
+}
+
 async function defaultComplete(
   env: Env,
   args: { system: string; tools: typeof ASSISTANT_TOOLS; messages: MessageParam[] },
 ): Promise<Message> {
-  const provider = assistantProvider(env);
-  if (provider === "gemini") {
-    return geminiComplete(env.GEMINI_API_KEY!, args);
-  }
-  if (provider === "anthropic") {
-    const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-    return client.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: args.system,
-      tools: args.tools,
-      messages: args.messages,
-    });
-  }
-  throw new Error("ai_not_configured");
+  return completeAssistantProviders(env, args);
 }
 
 function textOf(message: Message): string {

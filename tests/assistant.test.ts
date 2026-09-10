@@ -8,7 +8,7 @@ import { app } from "../worker/index";
 import { getDb } from "../worker/db/client";
 import { loadFamilySnapshot } from "../worker/lib/assistantContext";
 import { executeAssistantTool } from "../worker/lib/assistantTools";
-import { runAssistantTurn, type CompleteFn } from "../worker/lib/assistant";
+import { runAssistantTurn, completeAssistantProviders, type CompleteFn } from "../worker/lib/assistant";
 import { TASK_WINDOWS, dueReminderWindow, taskReminderText } from "../worker/lib/reminders";
 import { runExpiryReminders } from "../worker/cron";
 import {
@@ -437,6 +437,41 @@ describe("assistant Claude loop (injected complete)", () => {
     const tasks = await req("GET", `/api/tasks?familyId=${familyId}`, member.cookie);
     const taskBody = (await tasks.json()) as { tasks: { title: string }[] };
     expect(taskBody.tasks.some((tk) => tk.title === "Buy more milk")).toBe(true);
+  });
+});
+
+describe("assistant provider fallback", () => {
+  it("falls back to Anthropic when Gemini throws and both keys are set", async () => {
+    const anthropic = async () =>
+      fakeMessage([{ type: "text", text: "Hello from Claude fallback." }], "end_turn");
+    const msg = await completeAssistantProviders(
+      { GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" } as never,
+      { system: "s", tools: [], messages: [{ role: "user", content: "hi" }] },
+      {
+        gemini: async () => {
+          throw new Error("gemini_http_500:boom");
+        },
+        anthropic,
+      },
+    );
+    expect(msg.content[0]).toMatchObject({
+      type: "text",
+      text: "Hello from Claude fallback.",
+    });
+  });
+
+  it("rethrows Gemini errors when Anthropic is not configured", async () => {
+    await expect(
+      completeAssistantProviders(
+        { GEMINI_API_KEY: "g" } as never,
+        { system: "s", tools: [], messages: [{ role: "user", content: "hi" }] },
+        {
+          gemini: async () => {
+            throw new Error("gemini_http_500:boom");
+          },
+        },
+      ),
+    ).rejects.toThrow(/gemini_http_500/);
   });
 });
 
