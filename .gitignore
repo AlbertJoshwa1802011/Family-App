@@ -28,3 +28,14 @@ npm-debug.log*
 coverage/
 screenshots/
 recordings/
+
+# iOS / Xcode
+ios/**/xcuserdata/
+ios/**/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+

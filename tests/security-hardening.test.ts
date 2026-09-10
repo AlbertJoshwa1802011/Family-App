@@ -6,7 +6,7 @@
  * header are non-browser clients and pass. Applied to all /api mutations and
  * the download proxy GET.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { app } from "../worker/index";
 import {
   createTestEnv,
@@ -148,6 +148,16 @@ describe("CSRF protection on mutations", () => {
 });
 
 describe("rate limiting (KV fixed window)", () => {
+  // Fixed-window keys use `now % windowSecs`. Without a frozen clock, a slow
+  // suite can straddle the minute boundary and the 31st upload looks unlimited.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T12:00:30.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("POST /auth/google/start returns 429 after 10 requests/min from one IP", async () => {
     const env = { ...t.env, GOOGLE_CLIENT_ID: "test-client-id" };
     const headers = { "cf-connecting-ip": "203.0.113.9" };

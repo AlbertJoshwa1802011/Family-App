@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { setCookie, deleteCookie } from "hono/cookie";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
 import type { HonoEnv, AppContext } from "../types";
@@ -12,6 +14,7 @@ import {
   COOKIE_NAME,
   SESSION_COOKIE_OPTIONS,
 } from "../lib/session";
+import { sessionIdFromRequest } from "../lib/sessionAuth";
 import { generateRandom, sha256Base64url } from "../lib/crypto";
 import { checkRateLimit, clientIp } from "../lib/rateLimit";
 import {
@@ -30,6 +33,11 @@ const GOOGLE_JWKS = createRemoteJWKSet(
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const PKCE_TTL_SECS = 600; // 10 minutes
+const MOBILE_CODE_TTL_SECS = 60;
+/** Custom URL scheme for the Albert iOS companion (ASWebAuthenticationSession). */
+export const IOS_OAUTH_CALLBACK_SCHEME = "albert://oauth-callback";
+
+type OAuthClient = "web" | "ios";
 
 function oauthRedirectUri(origin: string): string {
   return `${origin.replace(/\/$/, "")}/api/auth/google/callback`;
@@ -38,6 +46,10 @@ function oauthRedirectUri(origin: string): string {
 /** Post-login path from ?next= — same-origin relative only. */
 function returnPathFromRequest(c: AppContext): string {
   return safeAppPath(c.req.query("next") ?? "/");
+}
+
+function oauthClientFromRequest(c: AppContext): OAuthClient {
+  return c.req.query("client") === "ios" ? "ios" : "web";
 }
 
 async function beginGoogleOAuth(
@@ -61,10 +73,11 @@ async function beginGoogleOAuth(
   const state = generateRandom(16);
   const redirectUri = oauthRedirectUri(origin);
   const returnTo = returnPathFromRequest(c);
+  const client = oauthClientFromRequest(c);
 
   await c.env.KV.put(
     `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier, redirectUri, returnTo }),
+    JSON.stringify({ codeVerifier, redirectUri, returnTo, client }),
     { expirationTtl: PKCE_TTL_SECS },
   );
 
@@ -111,8 +124,9 @@ authRoutes.get("/google/start", async (c) => {
 
 // GET /auth/me — return authenticated user + their families (or nulls).
 // Not protected by requireSession; we gracefully return null if no valid session.
+// Accepts cookie `sid` (web) or Authorization Bearer (Albert iOS).
 authRoutes.get("/me", async (c) => {
-  const sessionId = getCookie(c, COOKIE_NAME);
+  const sessionId = sessionIdFromRequest(c);
   if (!sessionId) return c.json({ user: null, families: [] });
 
   const db = getDb(c.env);
@@ -214,13 +228,21 @@ authRoutes.get("/google/callback", async (c) => {
     codeVerifier: string;
     redirectUri?: string;
     returnTo?: string;
+    client?: OAuthClient;
   } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
 
   const redirectUri = stored.redirectUri ?? oauthRedirectUri(origin);
   const returnTo = safeAppPath(stored.returnTo ?? "/");
+  const oauthClient: OAuthClient = stored.client === "ios" ? "ios" : "web";
   const loginError = (code: string) => {
+    if (oauthClient === "ios") {
+      // ASWebAuthenticationSession receives errors on the same custom scheme.
+      return c.redirect(
+        `${IOS_OAUTH_CALLBACK_SCHEME}?error=${encodeURIComponent(code)}`,
+      );
+    }
     const q = new URLSearchParams({ error: code });
     if (returnTo !== "/") q.set("next", returnTo);
     return redirect(`/login?${q.toString()}`);
@@ -328,15 +350,169 @@ authRoutes.get("/google/callback", async (c) => {
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
+  // Albert iOS: hand off via one-time code on the custom URL scheme.
+  // Never put the session id in the redirect URL (referrer / history risk).
+  if (oauthClient === "ios") {
+    const mobileCode = generateRandom(24);
+    await c.env.KV.put(
+      `oauth:mobile:${mobileCode}`,
+      JSON.stringify({ sessionId }),
+      { expirationTtl: MOBILE_CODE_TTL_SECS },
+    );
+    return c.redirect(
+      `${IOS_OAUTH_CALLBACK_SCHEME}?code=${encodeURIComponent(mobileCode)}`,
+    );
+  }
+
   // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
   // follows Google's cross-site redirect, which looks like a failed phone login.
   // returnTo restores deep links (e.g. /invite/:token) after sign-in.
   return c.html(loginBounceHtml(returnTo), 200);
 });
 
+const mobileExchangeSchema = z.object({
+  code: z.string().min(8).max(128),
+});
+
+// POST /auth/mobile/exchange — Albert iOS trades a one-time OAuth code for a
+// Bearer session token (same D1 session row the cookie would have used).
+authRoutes.post(
+  "/mobile/exchange",
+  zValidator("json", mobileExchangeSchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: "validation_error", issues: result.error.issues },
+        400,
+      );
+    }
+  }),
+  async (c) => {
+    const limited = await checkRateLimit(c, `auth-mobile:${clientIp(c)}`, {
+      limit: 20,
+      windowSecs: 60,
+    });
+    if (limited) return limited;
+
+    const { code } = c.req.valid("json");
+    const kvKey = `oauth:mobile:${code}`;
+    const stored = (await c.env.KV.get(kvKey, "json")) as {
+      sessionId?: string;
+    } | null;
+    if (!stored?.sessionId) {
+      return c.json({ error: "invalid_code" }, 401);
+    }
+    await c.env.KV.delete(kvKey);
+
+    const db = getDb(c.env);
+    const session = await db
+      .select({
+        userId: schema.sessions.userId,
+        expiresAt: schema.sessions.expiresAt,
+      })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, stored.sessionId))
+      .get();
+
+    if (!session) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    // Slide idle window via the shared validator.
+    const valid = await validateSession(db, stored.sessionId);
+    if (!valid) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const user = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, session.userId))
+      .get();
+    if (!user) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
+    const appRoles = await listAppRoles(db, user.id);
+
+    const memberships = await db
+      .select({
+        familyId: schema.familyMembers.familyId,
+        role: schema.familyMembers.role,
+        modulesJson: schema.familyMembers.modulesJson,
+        familyName: schema.families.name,
+        driveFolderId: schema.families.driveFolderId,
+        familyCreatedAt: schema.families.createdAt,
+      })
+      .from(schema.familyMembers)
+      .innerJoin(
+        schema.families,
+        eq(schema.familyMembers.familyId, schema.families.id),
+      )
+      .where(
+        and(
+          eq(schema.familyMembers.userId, user.id),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      );
+
+    const families = memberships.map((m) => ({
+      id: m.familyId,
+      name: m.familyName,
+      role: m.role,
+      modules:
+        m.role === "owner"
+          ? [...FAMILY_MODULES]
+          : parseModulesJson(m.modulesJson),
+      driveFolderId: m.driveFolderId,
+      createdAt: m.familyCreatedAt,
+    }));
+
+    return c.json({
+      sessionToken: stored.sessionId,
+      expiresAt: session.expiresAt,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+        appRoles,
+      },
+      families,
+    });
+  },
+);
+
+const mobileDeviceSchema = z.object({
+  platform: z.literal("ios"),
+  deviceToken: z.string().min(8).max(4096).optional(),
+});
+
+// POST /auth/mobile/device — stub for future APNs registration (v1 local notifs).
+authRoutes.post(
+  "/mobile/device",
+  zValidator("json", mobileDeviceSchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: "validation_error", issues: result.error.issues },
+        400,
+      );
+    }
+  }),
+  async (c) => {
+    const sessionId = sessionIdFromRequest(c);
+    if (!sessionId) return c.json({ error: "unauthorized" }, 401);
+    const db = getDb(c.env);
+    const result = await validateSession(db, sessionId);
+    if (!result) return c.json({ error: "unauthorized" }, 401);
+    // Intentionally no-op storage in v1 — keeps the native client contract stable.
+    return c.json({ ok: true });
+  },
+);
+
 // POST /auth/logout — revoke session in D1 and clear the cookie.
 authRoutes.post("/logout", async (c) => {
-  const sessionId = getCookie(c, COOKIE_NAME);
+  const sessionId = sessionIdFromRequest(c);
   if (sessionId) {
     try {
       const db = getDb(c.env);

@@ -1,0 +1,560 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		31E741404F0846968123F546 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E906B0C0CB428A86C6D2C2 /* AppConfig.swift */; };
+		9526B56EA53845A597B15874 /* ImportantItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 757009D278D44F3F90CB0B87 /* ImportantItem.swift */; };
+		9861A5D5BB7A40109D9C8D61 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7BB306B8A94B639A65460F /* KeychainStore.swift */; };
+		DD590F740E8E49E9950C63B5 /* AlbertAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0557EE479448439DB2EE0C9E /* AlbertAPIClient.swift */; };
+		22A2616F794A4BDBB30FF9CE /* LocalCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B62ADE8C3A641808E06DCC8 /* LocalCache.swift */; };
+		FEE628168E7D4CCAB2BCAC77 /* SyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8991CDD01B2487F932B2152 /* SyncManager.swift */; };
+		17125EC8D309422195D87832 /* CompleteImportantItemIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0888907C01448DC956DADB3 /* CompleteImportantItemIntent.swift */; };
+		EC6EEF3ACEBB471894F00E37 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5AC0E1D25B24CF1A6CAF5E0 /* NotificationScheduler.swift */; };
+		F97F7562162C45B1A3CA075A /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BA417DFBD24F8D83449A22 /* DeepLinkRouter.swift */; };
+		EDA40FCFD2E849F5A7D24BA1 /* AlbertApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8777DEF4084E34AD48E0CE /* AlbertApp.swift */; };
+		9F2DE64C3CA740C6B269A747 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD66A01F444482CBC2895EE /* SignInView.swift */; };
+		E77449E4B0F74F20B51701DF /* ImportantItemsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF5D448548E4797832EFEED /* ImportantItemsView.swift */; };
+		8B90BA00FB184C40BB80FF71 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E906B0C0CB428A86C6D2C2 /* AppConfig.swift */; };
+		0784CA0FB51C47B0B2E7FA84 /* ImportantItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 757009D278D44F3F90CB0B87 /* ImportantItem.swift */; };
+		2A51C4E6EB36429497F6E4E5 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7BB306B8A94B639A65460F /* KeychainStore.swift */; };
+		160FCAAD022F4187A8E54C35 /* AlbertAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0557EE479448439DB2EE0C9E /* AlbertAPIClient.swift */; };
+		40D8C1815C0544B0B71A5992 /* LocalCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B62ADE8C3A641808E06DCC8 /* LocalCache.swift */; };
+		5B3ECC5A8A00404C8E5FDB12 /* SyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8991CDD01B2487F932B2152 /* SyncManager.swift */; };
+		A0F8E69A3DB244C6A9DA8CA9 /* CompleteImportantItemIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0888907C01448DC956DADB3 /* CompleteImportantItemIntent.swift */; };
+		F0B85510EB944CB9ADD119D9 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5AC0E1D25B24CF1A6CAF5E0 /* NotificationScheduler.swift */; };
+		F8CEFACED3774E6F8203D598 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BA417DFBD24F8D83449A22 /* DeepLinkRouter.swift */; };
+		7BC6428022714F32A68F5307 /* AlbertWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 661DE656ADAC445AB70BAFF1 /* AlbertWidgetBundle.swift */; };
+		4EDC93205B0D4ACF91D40426 /* ImportantItemSortingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81373CDF6FA4DBD9734746F /* ImportantItemSortingTests.swift */; };
+		BFF19250660D4CCC8D96ABCF /* WidgetTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550BBC79B2834A3AA8310354 /* WidgetTimelineTests.swift */; };
+		D2FBC8AD0E284ED8894E09E0 /* AlbertAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64132FD5B8094CF5BD8C7205 /* AlbertAPIClientTests.swift */; };
+		EC7F94D3851B40A88FC0EBFE /* AuthAndIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A451988F0C433FAE16C834 /* AuthAndIntentTests.swift */; };
+		298EC69B7BE5428189353920 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90325B0C180D4A0CA2A07708 /* Assets.xcassets */; };
+		B55BD3E8A4C64700B55A241E /* AlbertWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 532C0A32D3D749BDBA7B712D /* AlbertWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		4061C7763C4844E6B246402A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B55BD3E8A4C64700B55A241E /* AlbertWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		862977E0C0BC455B930FBC35 /* Albert.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = Albert.entitlements; path = Albert/Albert.entitlements; sourceTree = "<group>"; };
+		5C8777DEF4084E34AD48E0CE /* AlbertApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlbertApp.swift; path = Albert/AlbertApp.swift; sourceTree = "<group>"; };
+		90325B0C180D4A0CA2A07708 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Albert/Assets.xcassets; sourceTree = "<group>"; };
+		38442C6729BE4E8681D273F4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = Albert/Info.plist; sourceTree = "<group>"; };
+		DEF5D448548E4797832EFEED /* ImportantItemsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ImportantItemsView.swift; path = Albert/Views/ImportantItemsView.swift; sourceTree = "<group>"; };
+		ADD66A01F444482CBC2895EE /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SignInView.swift; path = Albert/Views/SignInView.swift; sourceTree = "<group>"; };
+		019913FC29FB4601824A0DFB /* AlbertWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = AlbertWidget.entitlements; path = AlbertWidget/AlbertWidget.entitlements; sourceTree = "<group>"; };
+		661DE656ADAC445AB70BAFF1 /* AlbertWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlbertWidgetBundle.swift; path = AlbertWidget/AlbertWidgetBundle.swift; sourceTree = "<group>"; };
+		B8929874663C4B5CB45546C2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = AlbertWidget/Info.plist; sourceTree = "<group>"; };
+		0557EE479448439DB2EE0C9E /* AlbertAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlbertAPIClient.swift; path = Shared/API/AlbertAPIClient.swift; sourceTree = "<group>"; };
+		7B7BB306B8A94B639A65460F /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KeychainStore.swift; path = Shared/Auth/KeychainStore.swift; sourceTree = "<group>"; };
+		D2E906B0C0CB428A86C6D2C2 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppConfig.swift; path = Shared/Config/AppConfig.swift; sourceTree = "<group>"; };
+		A0BA417DFBD24F8D83449A22 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DeepLinkRouter.swift; path = Shared/DeepLink/DeepLinkRouter.swift; sourceTree = "<group>"; };
+		A0888907C01448DC956DADB3 /* CompleteImportantItemIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompleteImportantItemIntent.swift; path = Shared/Intents/CompleteImportantItemIntent.swift; sourceTree = "<group>"; };
+		757009D278D44F3F90CB0B87 /* ImportantItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ImportantItem.swift; path = Shared/Models/ImportantItem.swift; sourceTree = "<group>"; };
+		B5AC0E1D25B24CF1A6CAF5E0 /* NotificationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NotificationScheduler.swift; path = Shared/Notifications/NotificationScheduler.swift; sourceTree = "<group>"; };
+		1B62ADE8C3A641808E06DCC8 /* LocalCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalCache.swift; path = Shared/Storage/LocalCache.swift; sourceTree = "<group>"; };
+		F8991CDD01B2487F932B2152 /* SyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SyncManager.swift; path = Shared/Sync/SyncManager.swift; sourceTree = "<group>"; };
+		64132FD5B8094CF5BD8C7205 /* AlbertAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlbertAPIClientTests.swift; path = Tests/AlbertAPIClientTests.swift; sourceTree = "<group>"; };
+		30A451988F0C433FAE16C834 /* AuthAndIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AuthAndIntentTests.swift; path = Tests/AuthAndIntentTests.swift; sourceTree = "<group>"; };
+		B81373CDF6FA4DBD9734746F /* ImportantItemSortingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ImportantItemSortingTests.swift; path = Tests/ImportantItemSortingTests.swift; sourceTree = "<group>"; };
+		550BBC79B2834A3AA8310354 /* WidgetTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WidgetTimelineTests.swift; path = Tests/WidgetTimelineTests.swift; sourceTree = "<group>"; };
+		02E9D4D46E3348DD8B741136 /* Albert.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Albert.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		532C0A32D3D749BDBA7B712D /* AlbertWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AlbertWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B06A65F4FEF4F119C05FC77 /* AlbertTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AlbertTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		0687C447B01C4A0D8FCD2812 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAFA26B5B06D4DB28901F77D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		38DA8E0D7F1247BBBED81004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A6B2A07A9F814DE1A275D548 = {
+			isa = PBXGroup;
+			children = (
+				7FABFC5994CB42E9888CC99E /* Albert */,
+				C6EDCC9F9F4B4A839C91C165 /* AlbertWidget */,
+				639D7AD606D94C7FBCE5EF91 /* Shared */,
+				23F219AFFB234805A4B04E5B /* Tests */,
+				CFFC35149EE749639B66A79E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CFFC35149EE749639B66A79E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				02E9D4D46E3348DD8B741136 /* Albert.app */,
+				532C0A32D3D749BDBA7B712D /* AlbertWidget.appex */,
+				9B06A65F4FEF4F119C05FC77 /* AlbertTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7FABFC5994CB42E9888CC99E /* Albert */ = {
+			isa = PBXGroup;
+			children = (
+
+				5C8777DEF4084E34AD48E0CE /* AlbertApp.swift */,
+				ADD66A01F444482CBC2895EE /* SignInView.swift */,
+				DEF5D448548E4797832EFEED /* ImportantItemsView.swift */,
+				90325B0C180D4A0CA2A07708 /* Assets.xcassets */,
+				862977E0C0BC455B930FBC35 /* Albert.entitlements */,
+				38442C6729BE4E8681D273F4 /* Info.plist */,
+			);
+			name = Albert;
+			sourceTree = "<group>";
+		};
+		C6EDCC9F9F4B4A839C91C165 /* AlbertWidget */ = {
+			isa = PBXGroup;
+			children = (
+
+				661DE656ADAC445AB70BAFF1 /* AlbertWidgetBundle.swift */,
+				019913FC29FB4601824A0DFB /* AlbertWidget.entitlements */,
+				B8929874663C4B5CB45546C2 /* Info.plist */,
+			);
+			name = AlbertWidget;
+			sourceTree = "<group>";
+		};
+		639D7AD606D94C7FBCE5EF91 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+
+				D2E906B0C0CB428A86C6D2C2 /* AppConfig.swift */,
+				757009D278D44F3F90CB0B87 /* ImportantItem.swift */,
+				7B7BB306B8A94B639A65460F /* KeychainStore.swift */,
+				0557EE479448439DB2EE0C9E /* AlbertAPIClient.swift */,
+				1B62ADE8C3A641808E06DCC8 /* LocalCache.swift */,
+				F8991CDD01B2487F932B2152 /* SyncManager.swift */,
+				A0888907C01448DC956DADB3 /* CompleteImportantItemIntent.swift */,
+				B5AC0E1D25B24CF1A6CAF5E0 /* NotificationScheduler.swift */,
+				A0BA417DFBD24F8D83449A22 /* DeepLinkRouter.swift */,
+			);
+			name = Shared;
+			sourceTree = "<group>";
+		};
+		23F219AFFB234805A4B04E5B /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+
+				B81373CDF6FA4DBD9734746F /* ImportantItemSortingTests.swift */,
+				550BBC79B2834A3AA8310354 /* WidgetTimelineTests.swift */,
+				64132FD5B8094CF5BD8C7205 /* AlbertAPIClientTests.swift */,
+				30A451988F0C433FAE16C834 /* AuthAndIntentTests.swift */,
+			);
+			name = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0CC6E27D57BD4EF4ADB5BE15 /* Albert */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 580A4B69B1214DFFBD8555FD /* Build configuration list for PBXNativeTarget "Albert" */;
+			buildPhases = (
+				4C8BFD753B8B4112AEAA9BB5 /* Sources */,
+				0687C447B01C4A0D8FCD2812 /* Frameworks */,
+				CE189DA5553B49E292EFC065 /* Resources */,
+				4061C7763C4844E6B246402A /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Albert;
+			productName = Albert;
+			productReference = 02E9D4D46E3348DD8B741136 /* Albert.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7D3F1F9BEECE41E1AD64FC08 /* AlbertWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 41422149C4E942CF92DB40D7 /* Build configuration list for PBXNativeTarget "AlbertWidget" */;
+			buildPhases = (
+				9CDE224C16D047F6B3538044 /* Sources */,
+				BAFA26B5B06D4DB28901F77D /* Frameworks */,
+				A1535C4A7AFE422D99C52BC8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AlbertWidget;
+			productName = AlbertWidget;
+			productReference = 532C0A32D3D749BDBA7B712D /* AlbertWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		DCBFB64DA63A4FD9B5F19A6D /* AlbertTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 268D79092A68448EBC64B9CF /* Build configuration list for PBXNativeTarget "AlbertTests" */;
+			buildPhases = (
+				227BEAC566F0490DBD495E10 /* Sources */,
+				38DA8E0D7F1247BBBED81004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AlbertTests;
+			productName = AlbertTests;
+			productReference = 9B06A65F4FEF4F119C05FC77 /* AlbertTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EDF78805128A4FB6B2037548 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					0CC6E27D57BD4EF4ADB5BE15 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					7D3F1F9BEECE41E1AD64FC08 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					DCBFB64DA63A4FD9B5F19A6D = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 0CC6E27D57BD4EF4ADB5BE15;
+					};
+				};
+			};
+			buildConfigurationList = 0D34A0325D9949D0B946F8A8 /* Build configuration list for PBXProject "Albert" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A6B2A07A9F814DE1A275D548;
+			productRefGroup = CFFC35149EE749639B66A79E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0CC6E27D57BD4EF4ADB5BE15 /* Albert */,
+				7D3F1F9BEECE41E1AD64FC08 /* AlbertWidget */,
+				DCBFB64DA63A4FD9B5F19A6D /* AlbertTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CE189DA5553B49E292EFC065 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				298EC69B7BE5428189353920 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1535C4A7AFE422D99C52BC8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4C8BFD753B8B4112AEAA9BB5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				31E741404F0846968123F546 /* AppConfig.swift in Sources */,
+				9526B56EA53845A597B15874 /* ImportantItem.swift in Sources */,
+				9861A5D5BB7A40109D9C8D61 /* KeychainStore.swift in Sources */,
+				DD590F740E8E49E9950C63B5 /* AlbertAPIClient.swift in Sources */,
+				22A2616F794A4BDBB30FF9CE /* LocalCache.swift in Sources */,
+				FEE628168E7D4CCAB2BCAC77 /* SyncManager.swift in Sources */,
+				17125EC8D309422195D87832 /* CompleteImportantItemIntent.swift in Sources */,
+				EC6EEF3ACEBB471894F00E37 /* NotificationScheduler.swift in Sources */,
+				F97F7562162C45B1A3CA075A /* DeepLinkRouter.swift in Sources */,
+				EDA40FCFD2E849F5A7D24BA1 /* AlbertApp.swift in Sources */,
+				9F2DE64C3CA740C6B269A747 /* SignInView.swift in Sources */,
+				E77449E4B0F74F20B51701DF /* ImportantItemsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9CDE224C16D047F6B3538044 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B90BA00FB184C40BB80FF71 /* AppConfig.swift in Sources */,
+				0784CA0FB51C47B0B2E7FA84 /* ImportantItem.swift in Sources */,
+				2A51C4E6EB36429497F6E4E5 /* KeychainStore.swift in Sources */,
+				160FCAAD022F4187A8E54C35 /* AlbertAPIClient.swift in Sources */,
+				40D8C1815C0544B0B71A5992 /* LocalCache.swift in Sources */,
+				5B3ECC5A8A00404C8E5FDB12 /* SyncManager.swift in Sources */,
+				A0F8E69A3DB244C6A9DA8CA9 /* CompleteImportantItemIntent.swift in Sources */,
+				F0B85510EB944CB9ADD119D9 /* NotificationScheduler.swift in Sources */,
+				F8CEFACED3774E6F8203D598 /* DeepLinkRouter.swift in Sources */,
+				7BC6428022714F32A68F5307 /* AlbertWidgetBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		227BEAC566F0490DBD495E10 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4EDC93205B0D4ACF91D40426 /* ImportantItemSortingTests.swift in Sources */,
+				BFF19250660D4CCC8D96ABCF /* WidgetTimelineTests.swift in Sources */,
+				D2FBC8AD0E284ED8894E09E0 /* AlbertAPIClientTests.swift in Sources */,
+				EC7F94D3851B40A88FC0EBFE /* AuthAndIntentTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		FC774CF6EA7749BE9560C066 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		DCFC6BA7298D4AD08345C06F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		6BE86D9DEFA94056A00201A7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Albert/Albert.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Albert/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Albert;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E1C7D339C1634C5384A32FCF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Albert/Albert.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Albert/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Albert;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3A43877B95CF45B18E15C6CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AlbertWidget/AlbertWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AlbertWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5E37C5E7751D4F66AD937D6A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AlbertWidget/AlbertWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AlbertWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B24BB3024D7A4DF68AC4A16D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Albert.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Albert";
+			};
+			name = Debug;
+		};
+		60C334056BF7496C8DD0D102 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.albert.familyvault.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Albert.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Albert";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0D34A0325D9949D0B946F8A8 /* Build configuration list for PBXProject "Albert" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FC774CF6EA7749BE9560C066 /* Debug */,
+				DCFC6BA7298D4AD08345C06F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		580A4B69B1214DFFBD8555FD /* Build configuration list for PBXNativeTarget "Albert" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6BE86D9DEFA94056A00201A7 /* Debug */,
+				E1C7D339C1634C5384A32FCF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		41422149C4E942CF92DB40D7 /* Build configuration list for PBXNativeTarget "AlbertWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A43877B95CF45B18E15C6CD /* Debug */,
+				5E37C5E7751D4F66AD937D6A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		268D79092A68448EBC64B9CF /* Build configuration list for PBXNativeTarget "AlbertTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B24BB3024D7A4DF68AC4A16D /* Debug */,
+				60C334056BF7496C8DD0D102 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = EDF78805128A4FB6B2037548 /* Project object */;
+}
