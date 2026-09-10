@@ -102,3 +102,13 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+
+/** Main-compatible wrapper — same as sendEmail, returns a structured result. */
+export async function sendEmailDetailed(
+  env: Env,
+  msg: EmailMessage,
+): Promise<{ ok: boolean; error?: string }> {
+  const ok = await sendEmail(env, msg);
+  return ok ? { ok: true } : { ok: false, error: "send_failed" };
+}

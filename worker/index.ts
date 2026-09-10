@@ -17,6 +17,14 @@ import { calendarRoutes } from "./routes/calendar";
 import { chatRoutes } from "./routes/chat";
 import { expenseRoutes } from "./routes/expenses";
 import { moneyRoutes } from "./routes/money";
+import { settlementRoutes } from "./routes/settlements";
+import { deviceLockRoutes } from "./routes/deviceLock";
+import { vaultRoutes } from "./routes/vault";
+import { fundRoutes } from "./routes/funds";
+import { wishlistRoutes } from "./routes/wishlist";
+import { financeRoutes } from "./routes/finance";
+import { churchRoutes } from "./routes/church";
+import { runCommitmentReminders } from "./lib/finance/commitmentCron";
 import { assistantRoutes } from "./routes/assistant";
 import { accessRoutes } from "./routes/access";
 import { labelRoutes } from "./routes/labels";
@@ -72,6 +80,13 @@ api.route("/calendar", calendarRoutes);
 api.route("/chat", chatRoutes);
 api.route("/expenses", expenseRoutes);
 api.route("/money", moneyRoutes);
+api.route("/settlements", settlementRoutes);
+api.route("/device-lock", deviceLockRoutes);
+api.route("/vault", vaultRoutes);
+api.route("/funds", fundRoutes);
+api.route("/wishlist", wishlistRoutes);
+api.route("/finance", financeRoutes);
+api.route("/church", churchRoutes);
 api.route("/assistant", assistantRoutes);
 api.route("/access", accessRoutes);
 api.route("/labels", labelRoutes);
@@ -112,5 +127,6 @@ export default {
     ctx.waitUntil(runExpiryReminders(env));
     ctx.waitUntil(runWeeklyDigest(env)); // Mondays only; per-week dedupe inside
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
+    ctx.waitUntil(runCommitmentReminders(env));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;

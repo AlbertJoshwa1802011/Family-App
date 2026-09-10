@@ -301,12 +301,12 @@ describe("gemini HTTP (stubbed generateContent)", () => {
     expect(JSON.stringify(geminiBodies[0].systemInstruction)).toContain("Family Vault");
 
     const list = await req("GET", `/api/expenses?familyId=${familyId}`, member.cookie);
-    const { total, expenses } = (await list.json()) as {
-      total: number;
-      expenses: { note: string }[];
+    const { totalMinor, expenses } = (await list.json()) as {
+      totalMinor: number;
+      expenses: { description: string | null }[];
     };
-    expect(total).toBe(100);
-    expect(expenses[0].note).toBe("outside snacks");
+    expect(totalMinor).toBe(10000);
+    expect(expenses[0].description).toBe("outside snacks");
 
     const history = await req("GET", `/api/assistant?familyId=${familyId}`, member.cookie);
     const hist = (await history.json()) as {

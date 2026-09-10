@@ -34,6 +34,10 @@ export interface Env {
   SUPER_ADMIN_EMAILS?: string;
   /** Inbox for new demo-request notifications (defaults to first SUPER_ADMIN_EMAILS). */
   ACCESS_NOTIFY_EMAIL?: string;
+  /** Optional church contributions app origin (Funds → Church tab). */
+  CONTRIBUTIONS_API_URL?: string;
+  /** Optional machine token for the contributions app admin API. */
+  CONTRIBUTIONS_API_TOKEN?: string;
 }
 
 /** Per-request variables set by middleware (e.g. the authenticated user). */

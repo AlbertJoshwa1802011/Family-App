@@ -361,7 +361,7 @@ export function Dashboard() {
                 { icon: ListTodo, label: "Tasks", to: "/tasks", tone: "info" as const, module: "tasks" as FamilyModule },
                 { icon: NotebookPen, label: "Notes", to: "/notes", tone: "success" as const, module: "notes" as FamilyModule },
                 { icon: Contact, label: "Contacts", to: "/contacts", tone: "danger" as const, module: "contacts" as FamilyModule },
-                { icon: Wallet, label: "Money", to: "/expenses", tone: "warning" as const, module: "expenses" as FamilyModule },
+                { icon: Wallet, label: "Money", to: "/money", tone: "warning" as const, module: "expenses" as FamilyModule },
                 { icon: MapPinned, label: "Location", to: "/locations", tone: "info" as const, module: "location" as FamilyModule },
                 { icon: Sparkles, label: "Assistant", to: "/assistant", tone: "success" as const, module: "assistant" as FamilyModule },
               ] as const

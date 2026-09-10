@@ -35,6 +35,8 @@ export const families = sqliteTable("families", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   driveFolderId: text("drive_folder_id"),
+  // ISO 4217; one currency per family. Additive and default-safe.
+  defaultCurrency: text("default_currency").notNull().default("USD"),
   createdAt: integer("created_at").notNull().default(now),
 });
 
@@ -708,9 +710,258 @@ export const digestLog = sqliteTable(
   (t) => [uniqueIndex("uq_digest_user_period").on(t.userId, t.periodKey)],
 );
 
+// Platform authenticator (Face ID / fingerprint / Windows Hello) per user.
+export const deviceCredentials = sqliteTable(
+  "device_credentials",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Base64url credential id from the authenticator. */
+    credentialId: text("credential_id").notNull().unique(),
+    /** JWK JSON of the ES256 public key. */
+    publicKeyJwk: text("public_key_jwk").notNull(),
+    counter: integer("counter").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_device_cred_user").on(t.userId)],
+);
+
+// Fallback 6-digit PIN when WebAuthn is unavailable (desktop without biometrics).
+export const devicePins = sqliteTable("device_pins", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  pinHash: text("pin_hash").notNull(),
+  salt: text("salt").notNull(),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// ── Secrets Vault (client-side encrypted; the Worker never sees plaintext) ─────
+//
+// Encryption model: HYBRID. A per-family Vault Data Key (VDK) encrypts every
+// item client-side; the VDK is wrapped per member (KEK from passkey-PRF or
+// passphrase) plus an owner escrow copy for recovery. Every `*_cipher` /
+// `wrapped_*` column holds base64url ciphertext the server stores opaquely.
+
+// One logical vault per family. Holds the crypto scheme version + KDF defaults.
+export const vaults = sqliteTable("vaults", {
+  id: text("id").primaryKey(),
+  familyId: text("family_id")
+    .notNull()
+    .references(() => families.id, { onDelete: "cascade" })
+    .unique(),
+  // Bump when algorithms change → enables re-wrap/forward-compat without a schema change.
+  schemeVersion: integer("scheme_version").notNull().default(1),
+  // KDF defaults for the passphrase path (Web Crypto has PBKDF2, not Argon2).
+  kdfParams: text("kdf_params")
+    .notNull()
+    .default('{"alg":"PBKDF2-SHA256","iter":600000}'),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// Wrapped copies of the family VDK — one per member, plus escrow rows
+// (memberId NULL + isEscrow=1 → owner-recovery wrap).
+export const vaultKeys = sqliteTable(
+  "vault_keys",
+  {
+    id: text("id").primaryKey(),
+    vaultId: text("vault_id")
+      .notNull()
+      .references(() => vaults.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => familyMembers.id, {
+      onDelete: "cascade",
+    }),
+    isEscrow: integer("is_escrow", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    wrapMethod: text("wrap_method", {
+      enum: ["passkey", "passphrase", "recovery_code", "ecdh_grant"],
+    }).notNull(),
+    wrappedDek: text("wrapped_dek").notNull(), // base64url(wrap(VDK))
+    wrapIv: text("wrap_iv"), // base64url IV when GCM-wrapped
+    kdfSalt: text("kdf_salt"), // base64url salt (passphrase/recovery paths)
+    kdfParams: text("kdf_params"), // JSON override of vaults.kdfParams
+    // For ecdh_grant: ephemeral pubkey the grantee uses to derive the unwrap key.
+    grantEphemeralPubkey: text("grant_ephemeral_pubkey"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_vaultkey_vault").on(t.vaultId),
+    index("idx_vaultkey_member").on(t.memberId),
+    unique("uq_vaultkey_member_method").on(
+      t.vaultId,
+      t.memberId,
+      t.wrapMethod,
+    ),
+  ],
+);
+
+// Per-member long-lived ECDH public key for receiving VDK grants/re-wraps.
+export const vaultMemberKeys = sqliteTable("vault_member_keys", {
+  memberId: text("member_id")
+    .primaryKey()
+    .references(() => familyMembers.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull(), // base64url SPKI P-256 pubkey (cleartext OK)
+  wrappedPrivkey: text("wrapped_privkey").notNull(), // privkey wrapped by member KEK
+  privkeyIv: text("privkey_iv").notNull(),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+// Registered WebAuthn credentials (passkey PRF unlock + step-up assertions).
+export const vaultPasskeys = sqliteTable(
+  "vault_passkeys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull().unique(), // base64url
+    publicKey: text("public_key").notNull(), // COSE pubkey for assertion verify
+    signCount: integer("sign_count").notNull().default(0),
+    transports: text("transports"), // JSON ["internal","hybrid"]
+    label: text("label"), // "Mom's iPhone"
+    prfSalt: text("prf_salt").notNull(), // fixed per-credential PRF input salt
+    createdAt: integer("created_at").notNull().default(now),
+    lastUsedAt: integer("last_used_at"),
+  },
+  (t) => [index("idx_passkey_user").on(t.userId)],
+);
+
+// A secret. Sensitive fields are ciphertext; only blind tags + metadata are queryable.
+// `cipher` holds the metadata blob (title/username/url/notes); `secret_cipher` holds the
+// high-sensitivity value separately so list views decrypt metadata without the secret.
+export const vaultItems = sqliteTable(
+  "vault_items",
+  {
+    id: text("id").primaryKey(),
+    vaultId: text("vault_id")
+      .notNull()
+      .references(() => vaults.id, { onDelete: "cascade" }),
+    // Denormalized for fast family scoping (matches the app's family_id-heavy queries).
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerMemberId: text("owner_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    type: text("type", {
+      enum: ["login", "wifi", "bank", "card", "pin", "note", "totp_seed", "other"],
+    })
+      .notNull()
+      .default("other"),
+    // Same semantics as documents.visibility. 'private' = only owner can see/decrypt.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("family"),
+    // private + escrowExcluded → sealed under a per-item subkey (vault_item_keys), no escrow.
+    escrowExcluded: integer("escrow_excluded", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    voiceReadable: integer("voice_readable", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    cipher: text("cipher").notNull(), // base64url ciphertext (metadata blob)
+    iv: text("iv").notNull(), // base64url 12-byte IV
+    secretCipher: text("secret_cipher"), // separate blob for the high-sensitivity value
+    secretIv: text("secret_iv"),
+    // Blind indexes (HMAC-SHA256 under a separate blind-index key) for server-side filtering.
+    blindTitle: text("blind_title"),
+    blindAccount: text("blind_account"),
+    blindIssuer: text("blind_issuer"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_vitem_family_status").on(t.familyId, t.status),
+    index("idx_vitem_blind_title").on(t.blindTitle),
+    index("idx_vitem_blind_account").on(t.blindAccount),
+  ],
+);
+
+// Trigram blind tags for prefix/substring search (parallel to document_tags join pattern).
+export const vaultBlindTags = sqliteTable(
+  "vault_blind_tags",
+  {
+    itemId: text("item_id")
+      .notNull()
+      .references(() => vaultItems.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(), // HMAC(BIK, trigram), base64url
+  },
+  (t) => [
+    primaryKey({ columns: [t.itemId, t.tag] }),
+    index("idx_vbtag_tag").on(t.tag), // the search index
+  ],
+);
+
+// Per-item subkey, ONLY for private + escrowExcluded items (sealed under member KEK).
+export const vaultItemKeys = sqliteTable("vault_item_keys", {
+  itemId: text("item_id")
+    .primaryKey()
+    .references(() => vaultItems.id, { onDelete: "cascade" }),
+  memberId: text("member_id")
+    .notNull()
+    .references(() => familyMembers.id, { onDelete: "cascade" }),
+  wrappedKey: text("wrapped_key").notNull(), // item subkey wrapped by member KEK
+  wrapIv: text("wrap_iv").notNull(),
+});
+
+// Version history (undo/audit) — parallels files versioning + soft-delete style.
+export const vaultItemVersions = sqliteTable(
+  "vault_item_versions",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => vaultItems.id, { onDelete: "cascade" }),
+    cipher: text("cipher").notNull(),
+    iv: text("iv").notNull(),
+    editedByMemberId: text("edited_by_member_id").references(
+      () => familyMembers.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("idx_vitemver_item").on(t.itemId, t.createdAt)],
+);
+
 // ── Expenses ─────────────────────────────────────────────────────────────────
-// Family spending log. Amount is stored in integer cents so we never do
-// floating-point money math. "Add 100 for snacks" → 10000 cents of `currency`.
+// Personal expense tracking. Every expense belongs to the member who recorded
+// it and is `private` by default: only its creator can read it. Marking one
+// `family` opts it in to the shared household view. See worker/lib/expenses/.
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    // NULL = global built-in category shared across families.
+    familyId: text("family_id").references(() => families.id, {
+      onDelete: "cascade",
+    }),
+    // One level of nesting only: a child's parent must itself be a root.
+    // Enforced in app code (SQLite can't express it as a constraint).
+    parentCategoryId: text("parent_category_id").references(
+      (): AnySQLiteColumn => expenseCategories.id,
+      { onDelete: "cascade" },
+    ),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    color: text("color"),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_expense_category_name").on(t.familyId, t.parentCategoryId, t.name),
+    index("idx_expense_category_family_archived").on(t.familyId, t.archived),
+  ],
+);
 
 export const expenses = sqliteTable(
   "expenses",
@@ -719,25 +970,473 @@ export const expenses = sqliteTable(
     familyId: text("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    createdBy: text("created_by")
+    // memberType='user' enforced in app code — never a dependent.
+    paidByMemberId: text("paid_by_member_id")
+      .notNull()
+      .references(() => familyMembers.id),
+    // Attribution only (any member type); no effect on who can see the row.
+    subjectMemberId: text("subject_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    // Nested expenses: Google Pay (root) → individual spends (children).
+    // Depths 0 (root), 1 (child), 2 (grandchild). Enforced in app code —
+    // parent.nestDepth must be < 2 when attaching. Cascade delete removes
+    // the whole subtree when a parent is hard-deleted (soft-trash is app-level).
+    parentExpenseId: text("parent_expense_id").references(
+      (): AnySQLiteColumn => expenses.id,
+      { onDelete: "cascade" },
+    ),
+    nestDepth: integer("nest_depth").notNull().default(0),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    expenseDate: text("expense_date").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    paymentMethod: text("payment_method"),
+    // Reserved for shared splits; personal expenses are always "none".
+    splitType: text("split_type", {
+      enum: ["none", "equal", "exact", "percentage"],
+    })
+      .notNull()
+      .default("none"),
+    // Private by default — the privacy guarantee the feature is built on.
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    status: text("status", { enum: ["active", "trashed"] })
+      .notNull()
+      .default("active"),
+    trashedAt: integer("trashed_at"),
+    createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    amountCents: integer("amount_cents").notNull(),
-    currency: text("currency").notNull().default("INR"),
-    category: text("category").notNull().default("other"),
-    note: text("note"),
-    spentOn: text("spent_on").notNull(), // ISO yyyy-mm-dd
+    clientRequestId: text("client_request_id"),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
   },
-  (t) => [index("idx_expense_family_spent").on(t.familyId, t.spentOn)],
+  (t) => [
+    unique("uq_expense_client_request").on(
+      t.familyId,
+      t.createdByUserId,
+      t.clientRequestId,
+    ),
+    index("idx_expense_family_date").on(t.familyId, t.expenseDate),
+    index("idx_expense_family_status").on(t.familyId, t.status),
+    index("idx_expense_created_by").on(t.createdByUserId),
+    index("idx_expense_paid_by").on(t.paidByMemberId),
+    index("idx_expense_category").on(t.categoryId),
+    index("idx_expense_parent").on(t.parentExpenseId),
+  ],
 );
 
-// ── Money settlements ────────────────────────────────────────────────────────
-// Generic ledger for "fund in hand → settled to a destination".
-// Destinations are family-scoped tracks (Mom, Church, landlord, …) — not
-// separate pages. Balances are computed:
-//   available = sum(received), settled = sum(settled), inHand = available − settled.
+// ── Financial plan ───────────────────────────────────────────────────────────
+// The money model behind the overview: what comes in (incomes), what is already
+// committed every period (commitments — EMIs, insurance, SIPs, giving), what is
+// being saved for (wishlist), and the targets that turn those into a spendable
+// allowance. Everything here follows the same privacy rule as expenses: owned by
+// the member who created it, private unless explicitly shared, no role bypass.
+
+export const incomes = sqliteTable(
+  "incomes",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    cadence: text("cadence", {
+      enum: ["monthly", "weekly", "biweekly", "yearly", "one_off"],
+    })
+      .notNull()
+      .default("monthly"),
+    // Which day the money lands — drives the "since payday" window.
+    dayOfMonth: integer("day_of_month"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_income_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_income_active").on(t.familyId, t.active),
+  ],
+);
+
+export const commitments = sqliteTable(
+  "commitments",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: [
+        "emi",
+        "loan",
+        "insurance",
+        "investment",
+        "subscription",
+        "giving",
+        "rent",
+        "utility",
+        "other",
+      ],
+    }).notNull(),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    // Giving (tithe, sponsorship) is usually a share of income rather than a
+    // fixed sum, so the amount can be expressed either way.
+    amountKind: text("amount_kind", { enum: ["fixed", "percent_of_income"] })
+      .notNull()
+      .default("fixed"),
+    amountMinor: integer("amount_minor"),
+    percentBp: integer("percent_bp"),
+    currency: text("currency").notNull(),
+    cadence: text("cadence", {
+      enum: ["weekly", "monthly", "quarterly", "yearly"],
+    })
+      .notNull()
+      .default("monthly"),
+    dayOfMonth: integer("day_of_month"),
+    dayOfWeek: integer("day_of_week"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    // For EMIs / fixed-term policies: the term length. Remaining installments
+    // are derived from this plus startDate, never stored (it can't drift).
+    totalInstallments: integer("total_installments"),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    // When true the cron records the expense automatically on the due date.
+    autoLog: integer("auto_log", { mode: "boolean" }).notNull().default(false),
+    remindDaysBefore: integer("remind_days_before").notNull().default(3),
+    status: text("status", { enum: ["active", "paused", "completed"] })
+      .notNull()
+      .default("active"),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_commitment_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_commitment_status").on(t.familyId, t.status),
+    index("idx_commitment_kind").on(t.familyId, t.kind),
+  ],
+);
+
+// One row per commitment per period. Doubles as the cron's dedupe key (so a
+// re-run can't double-log) and as the paid/unpaid ledger the UI reads.
+export const commitmentPayments = sqliteTable(
+  "commitment_payments",
+  {
+    id: text("id").primaryKey(),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    // yyyy-mm for monthly, yyyy-Www for weekly, yyyy-Qn / yyyy for the rest.
+    periodKey: text("period_key").notNull(),
+    dueDate: text("due_date").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    paid: integer("paid", { mode: "boolean" }).notNull().default(false),
+    paidAt: integer("paid_at"),
+    // Set when the due-date reminder went out. Doubles as the cron's dedupe
+    // flag, so a re-run on the same day can't re-notify.
+    remindedAt: integer("reminded_at"),
+    expenseId: text("expense_id").references(() => expenses.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_commitment_period").on(t.commitmentId, t.periodKey),
+    index("idx_commitment_payment_due").on(t.dueDate, t.paid),
+  ],
+);
+
+// Per-user planning knobs. Composite key: settings are per member per family.
+export const financialSettings = sqliteTable(
+  "financial_settings",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // How the savings goal is expressed.
+    savingsTargetKind: text("savings_target_kind", {
+      enum: ["none", "amount", "percent"],
+    })
+      .notNull()
+      .default("none"),
+    savingsTargetMinor: integer("savings_target_minor"),
+    savingsTargetPercentBp: integer("savings_target_percent_bp"),
+    // The day the monthly cycle restarts — usually payday, not the 1st.
+    paydayDayOfMonth: integer("payday_day_of_month").notNull().default(1),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.familyId] })],
+);
+
+export const categoryBudgets = sqliteTable(
+  "category_budgets",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => expenseCategories.id, { onDelete: "cascade" }),
+    monthlyLimitMinor: integer("monthly_limit_minor").notNull(),
+    currency: text("currency").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [unique("uq_category_budget").on(t.userId, t.categoryId)],
+);
+
+export const wishlistItems = sqliteTable(
+  "wishlist_items",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    url: text("url"),
+    estimatedCostMinor: integer("estimated_cost_minor").notNull(),
+    currency: text("currency").notNull(),
+    // 1 = highest. A small fixed scale keeps sorting meaningful.
+    priority: integer("priority").notNull().default(3),
+    targetDate: text("target_date"),
+    categoryId: text("category_id").references(() => expenseCategories.id, {
+      onDelete: "set null",
+    }),
+    status: text("status", {
+      enum: ["wanted", "saving", "purchased", "dropped"],
+    })
+      .notNull()
+      .default("wanted"),
+    purchasedExpenseId: text("purchased_expense_id").references(
+      () => expenses.id,
+      { onDelete: "set null" },
+    ),
+    purchasedAt: integer("purchased_at"),
+    visibility: text("visibility", { enum: ["family", "private"] })
+      .notNull()
+      .default("private"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_wishlist_family_owner").on(t.familyId, t.ownerUserId),
+    index("idx_wishlist_status_priority").on(t.familyId, t.status, t.priority),
+  ],
+);
+
+// ── Church / collection funds (manual audit ledger) ──────────────────────────
+// Sensitive shared pots (e.g. Razorpay offerings): contributions land in a
+// member's bank; spends happen during the month; month-start settle reconciles.
+// All amounts are amountMinor; payer names are free-text for now (optional
+// member link). Settlements snapshot a period and refuse duplicates.
+
+export const fundAccounts = sqliteTable(
+  "fund_accounts",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    currency: text("currency").notNull(),
+    notes: text("notes"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_accounts_family_status").on(t.familyId, t.status),
+  ],
+);
+
+export const fundContributions = sqliteTable(
+  "fund_contributions",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // Free-text payer for church collections; optional member link when known.
+    payerName: text("payer_name").notNull(),
+    payerMemberId: text("payer_member_id").references(() => familyMembers.id, {
+      onDelete: "set null",
+    }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    paidAt: integer("paid_at").notNull(),
+    note: text("note"),
+    externalRef: text("external_ref"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_contrib_fund_paid").on(t.fundId, t.paidAt),
+    index("idx_fund_contrib_family").on(t.familyId),
+  ],
+);
+
+export const fundSpends = sqliteTable(
+  "fund_spends",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    spendDate: text("spend_date").notNull(),
+    merchant: text("merchant"),
+    description: text("description"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_spends_fund_date").on(t.fundId, t.spendDate),
+    index("idx_fund_spends_family").on(t.familyId),
+  ],
+);
+
+export const fundSettlements = sqliteTable(
+  "fund_settlements",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    // yyyy-mm — one settlement snapshot per fund per calendar month.
+    periodKey: text("period_key").notNull(),
+    contributionsMinor: integer("contributions_minor").notNull(),
+    spendsMinor: integer("spends_minor").notNull(),
+    remainingMinor: integer("remaining_minor").notNull(),
+    settledAt: integer("settled_at").notNull(),
+    settledByUserId: text("settled_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    unique("uq_fund_settlement_period").on(t.fundId, t.periodKey),
+    index("idx_fund_settlements_family").on(t.familyId),
+  ],
+);
+
+export const fundActivity = sqliteTable(
+  "fund_activity",
+  {
+    id: text("id").primaryKey(),
+    fundId: text("fund_id")
+      .notNull()
+      .references(() => fundAccounts.id, { onDelete: "cascade" }),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    metaJson: text("meta_json"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_fund_activity_fund_created").on(t.fundId, t.createdAt),
+  ],
+);
+
+// Settlements against live church-contribution funds (external source of truth
+// for collected + spent). Family Vault only records "I settled this month".
+export const churchSettlements = sqliteTable(
+  "church_settlements",
+  {
+    id: text("id").primaryKey(),
+    familyId: text("family_id")
+      .notNull()
+      .references(() => families.id, { onDelete: "cascade" }),
+    fundSlug: text("fund_slug").notNull(),
+    periodKey: text("period_key").notNull(), // yyyy-mm
+    collectedMinor: integer("collected_minor").notNull(),
+    spentMinor: integer("spent_minor").notNull(),
+    /** Amount that was due for this payment (e.g. ₹5320 → 532000). */
+    dueMinor: integer("due_minor").notNull(),
+    /** Amount actually paid now (e.g. ₹3000 → 300000). */
+    paidMinor: integer("paid_minor").notNull(),
+    /** Carry forward: dueMinor − paidMinor (0 when fully settled). */
+    remainingMinor: integer("remaining_minor").notNull(),
+    settledAt: integer("settled_at").notNull(),
+    settledByUserId: text("settled_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    // Multiple partial payments per fund/month are allowed (carry-forward).
+    index("idx_church_settlements_family").on(t.familyId, t.settledAt),
+    index("idx_church_settlements_fund").on(t.familyId, t.fundSlug, t.periodKey),
+  ],
+);
+
+// ── Hand settlements (Mom / Church / any destination) ────────────────────────
+// Generic ledger for "fund in hand → settled to a destination". Destinations
+// are family-scoped tracks on the Funds page — not separate pages.
+// Balances: available = Σ received, settled = Σ settled, inHand = available − settled.
 
 export const SETTLEMENT_DESTINATION_KINDS = [
   "person",
@@ -759,7 +1458,6 @@ export const settlementDestinations = sqliteTable(
       .notNull()
       .default("other"),
     sortOrder: integer("sort_order").notNull().default(0),
-    // Soft-archive keeps historical settlements readable under the old name.
     archivedAt: integer("archived_at"),
     createdBy: text("created_by")
       .notNull()
@@ -777,7 +1475,6 @@ export const moneyMovements = sqliteTable(
     familyId: text("family_id")
       .notNull()
       .references(() => families.id, { onDelete: "cascade" }),
-    // received → into the pot; settled → out to a destination.
     type: text("type", { enum: MONEY_MOVEMENT_TYPES }).notNull(),
     destinationId: text("destination_id").references(
       () => settlementDestinations.id,
@@ -798,6 +1495,7 @@ export const moneyMovements = sqliteTable(
     index("idx_money_movements_dest").on(t.destinationId, t.movedOn),
   ],
 );
+
 
 // ── Task reminder dedupe ─────────────────────────────────────────────────────
 // Parallel to reminders_log / event_reminders_log. Daily cron fires at the

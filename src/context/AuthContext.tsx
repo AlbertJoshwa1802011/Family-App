@@ -15,6 +15,8 @@ export interface User {
   picture?: string | null;
   /** Platform roles (e.g. super_admin). Orthogonal to family role. */
   appRoles?: string[];
+  /** Convenience: true when appRoles includes super_admin / platform admin. */
+  isPlatformAdmin?: boolean;
 }
 
 export interface Family {
@@ -40,6 +42,8 @@ interface AuthValue {
    * their selection across sessions.
    */
   activeFamily: Family | null;
+  /** Convenience alias for activeFamily?.id — Money UI from main uses this. */
+  activeFamilyId: string | null;
   setActiveFamilyId: (id: string) => void;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -107,13 +111,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const activeFamily =
     families.find((f) => f.id === storedFamilyId) ?? families[0] ?? null;
 
+  const rawUser = data?.user ?? null;
+  const user = rawUser
+    ? {
+        ...rawUser,
+        isPlatformAdmin:
+          rawUser.isPlatformAdmin ??
+          rawUser.appRoles?.includes("super_admin") ??
+          false,
+      }
+    : null;
+
   const value: AuthValue = {
-    user: data?.user ?? null,
+    user,
     families,
     activeFamily,
+    activeFamilyId: activeFamily?.id ?? null,
     setActiveFamilyId,
     isLoading,
-    isAuthenticated: Boolean(data?.user),
+    isAuthenticated: Boolean(user),
     signOut,
   };
 

@@ -125,7 +125,15 @@ describe("cross-family isolation matrix", () => {
     ).json() as { contact: { id: string } };
     await req("POST", "/api/chat", alice.cookie, { familyId: famA, body: "A-secret" });
     const expense = await (
-      await req("POST", "/api/expenses", alice.cookie, { familyId: famA, amount: 12, note: "A-spend" })
+      await req("POST", "/api/expenses", alice.cookie, {
+        familyId: famA,
+        paidByMemberId: alice.memberId,
+        amountMinor: 1200,
+        currency: "USD",
+        expenseDate: "2026-09-05",
+        description: "A-spend",
+        visibility: "family",
+      })
     ).json() as { expense: { id: string } };
 
     const denied: [string, string][] = [
@@ -174,7 +182,13 @@ describe("cross-family isolation matrix", () => {
       ["/api/tasks", { familyId: famA, title: "sneak" }],
       ["/api/contacts", { familyId: famA, name: "sneak" }],
       ["/api/chat", { familyId: famA, body: "sneak" }],
-      ["/api/expenses", { familyId: famA, amount: 1 }],
+      ["/api/expenses", {
+        familyId: famA,
+        paidByMemberId: bob.memberId,
+        amountMinor: 100,
+        currency: "USD",
+        expenseDate: "2026-09-05",
+      }],
       ["/api/assistant", { familyId: famA, message: "sneak" }],
     ] as const) {
       const res = await req("POST", path, bob.cookie, body);

@@ -127,6 +127,13 @@
       "when": 1788983690552,
       "tag": "0017_fantastic_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1789069069207,
+      "tag": "0018_restore_money_manager",
+      "breakpoints": true
     }
   ]
 }

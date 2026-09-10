@@ -26,6 +26,20 @@ import { NoteDetailPage } from "./pages/NoteDetail";
 import { Chat } from "./pages/Chat";
 import { Assistant } from "./pages/Assistant";
 import { Expenses } from "./pages/Expenses";
+import { ExpenseForm } from "./pages/ExpenseForm";
+import { ExpenseDetail } from "./pages/ExpenseDetail";
+import { MoneyOverview } from "./pages/money/Overview";
+import { Commitments } from "./pages/money/Commitments";
+import { CommitmentForm } from "./pages/money/CommitmentForm";
+import { Wishlist } from "./pages/money/Wishlist";
+import { MoneySettings } from "./pages/money/MoneySettings";
+import { Funds } from "./pages/money/Funds";
+import { FundDetail } from "./pages/money/FundDetail";
+import { Vault } from "./pages/Vault";
+import { VaultItemForm } from "./pages/VaultItemForm";
+import { VaultItemDetail } from "./pages/VaultItemDetail";
+import { DeviceLockGate } from "./components/DeviceLockGate";
+import { VaultProvider } from "./context/VaultContext";
 import { Locations } from "./pages/Locations";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
@@ -130,7 +144,9 @@ export default function App() {
           element={
             <Protected>
               <ModuleGate>
-                <Layout />
+                <VaultProvider>
+                  <Layout />
+                </VaultProvider>
               </ModuleGate>
             </Protected>
           }
@@ -151,7 +167,35 @@ export default function App() {
           <Route path="/notes/:id" element={<NoteDetailPage />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/assistant" element={<Assistant />} />
-          <Route path="/expenses" element={<Expenses />} />
+
+          {/* Vault (secrets) — Face ID / PIN every visit */}
+          <Route element={<DeviceLockGate section="vault" title="Vault" />}>
+            <Route path="/vault" element={<Vault />} />
+            <Route path="/vault/new" element={<VaultItemForm />} />
+            <Route path="/vault/:id" element={<VaultItemDetail />} />
+            <Route path="/vault/:id/edit" element={<VaultItemForm />} />
+          </Route>
+
+          {/* Money — Face ID / PIN every visit */}
+          <Route element={<DeviceLockGate section="money" title="Money" />}>
+            <Route path="/money" element={<MoneyOverview />} />
+            <Route path="/money/settings" element={<MoneySettings />} />
+            <Route path="/money/expenses" element={<Expenses />} />
+            <Route path="/money/expenses/new" element={<ExpenseForm />} />
+            <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
+            <Route path="/money/expenses/:id/edit" element={<ExpenseForm />} />
+            <Route path="/money/funds" element={<Funds />} />
+            <Route path="/money/funds/:id" element={<FundDetail />} />
+            <Route path="/money/commitments" element={<Commitments />} />
+            <Route path="/money/commitments/new" element={<CommitmentForm />} />
+            <Route path="/money/commitments/:id/edit" element={<CommitmentForm />} />
+            <Route path="/money/wishlist" element={<Wishlist />} />
+          </Route>
+
+          {/* Legacy expense paths */}
+          <Route path="/expenses" element={<Navigate to="/money/expenses" replace />} />
+          <Route path="/expenses/new" element={<Navigate to="/money/expenses/new" replace />} />
+
           <Route path="/locations" element={<Locations />} />
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/family/access" element={<FamilyAccessPage />} />

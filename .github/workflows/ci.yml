@@ -47,6 +47,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Ensure rich Money schema (no data loss)
+        run: node scripts/ensure_money_schema.mjs --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy Worker + assets
         run: npx wrangler deploy
         env:
@@ -71,3 +76,8 @@ jobs:
           code=$(curl -s -o /tmp/links.json -w "%{http_code}" https://fam.connect-cloud.workers.dev/api/links)
           echo "GET /api/links → $code $(cat /tmp/links.json)"
           echo "$code" | grep -Eq '^(401|400)$'
+          for path in /api/device-lock/status /api/funds /api/settlements/summary /api/vault/status /api/wishlist /api/finance; do
+            code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "https://fam.connect-cloud.workers.dev$path")
+            echo "GET $path → $code $(head -c 120 /tmp/probe.json)"
+            echo "$code" | grep -Eq '^(401|400)$'
+          done

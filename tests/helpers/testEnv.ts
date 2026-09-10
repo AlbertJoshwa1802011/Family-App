@@ -65,6 +65,85 @@ function makeStatement(sqlite: DatabaseSync, sql: string, params: unknown[] = []
   return stmt;
 }
 
+
+function ensureRichExpensesSchema(sqlite: DatabaseSync) {
+  const famCols = sqlite.prepare("PRAGMA table_info(families)").all() as { name: string }[];
+  if (!famCols.some((c) => c.name === "default_currency")) {
+    sqlite.exec("ALTER TABLE families ADD COLUMN default_currency text NOT NULL DEFAULT 'USD'");
+  }
+
+  const cols = sqlite.prepare("PRAGMA table_info(expenses)").all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  if (names.has("amount_minor") && names.has("expense_date")) return;
+  if (!names.has("amount_cents")) {
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS expenses (
+      id text PRIMARY KEY NOT NULL,
+      family_id text NOT NULL,
+      paid_by_member_id text NOT NULL,
+      subject_member_id text,
+      category_id text,
+      parent_expense_id text,
+      nest_depth integer DEFAULT 0 NOT NULL,
+      amount_minor integer NOT NULL,
+      currency text NOT NULL,
+      expense_date text NOT NULL,
+      merchant text,
+      description text,
+      payment_method text,
+      split_type text DEFAULT 'none' NOT NULL,
+      visibility text DEFAULT 'private' NOT NULL,
+      status text DEFAULT 'active' NOT NULL,
+      trashed_at integer,
+      created_by_user_id text NOT NULL,
+      client_request_id text,
+      created_at integer DEFAULT (unixepoch()) NOT NULL,
+      updated_at integer DEFAULT (unixepoch()) NOT NULL
+    )`);
+    return;
+  }
+
+  const bak = "expenses_legacy_simple";
+  sqlite.exec(`ALTER TABLE expenses RENAME TO ${bak}`);
+  sqlite.exec(`CREATE TABLE expenses (
+    id text PRIMARY KEY NOT NULL,
+    family_id text NOT NULL,
+    paid_by_member_id text NOT NULL,
+    subject_member_id text,
+    category_id text,
+    parent_expense_id text,
+    nest_depth integer DEFAULT 0 NOT NULL,
+    amount_minor integer NOT NULL,
+    currency text NOT NULL,
+    expense_date text NOT NULL,
+    merchant text,
+    description text,
+    payment_method text,
+    split_type text DEFAULT 'none' NOT NULL,
+    visibility text DEFAULT 'family' NOT NULL,
+    status text DEFAULT 'active' NOT NULL,
+    trashed_at integer,
+    created_by_user_id text NOT NULL,
+    client_request_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    updated_at integer DEFAULT (unixepoch()) NOT NULL
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_family_date ON expenses (family_id, expense_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_family_status ON expenses (family_id, status)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_created_by ON expenses (created_by_user_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_paid_by ON expenses (paid_by_member_id)`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_client_request ON expenses (family_id, created_by_user_id, client_request_id)`);
+  sqlite.exec(`INSERT INTO expenses (
+    id, family_id, paid_by_member_id, amount_minor, currency, expense_date,
+    description, visibility, status, created_by_user_id, created_at, updated_at, nest_depth, split_type
+  )
+  SELECT
+    e.id, e.family_id, fm.id, e.amount_cents, e.currency, e.spent_on,
+    e.note, 'family', 'active', e.created_by, e.created_at, e.updated_at, 0, 'none'
+  FROM ${bak} e
+  JOIN family_members fm
+    ON fm.family_id = e.family_id AND fm.user_id = e.created_by`);
+}
+
 export function createTestD1(): { d1: D1Database; sqlite: DatabaseSync } {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
@@ -75,6 +154,10 @@ export function createTestD1(): { d1: D1Database; sqlite: DatabaseSync } {
   for (const file of files) {
     sqlite.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
   }
+
+  // Reconcile feature-branch simple expenses → Money Manager rich shape without
+  // dropping rows (mirrors scripts/ensure_money_schema.mjs).
+  ensureRichExpensesSchema(sqlite);
 
   const d1 = {
     prepare: (sql: string) => makeStatement(sqlite, sql),

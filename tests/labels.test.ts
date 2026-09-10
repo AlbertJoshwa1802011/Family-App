@@ -259,14 +259,7 @@ describe("custom types on entities", () => {
     expect(body.event.type).toBe("reunion");
   });
 
-  it("expenses + notes accept custom category/kind", async () => {
-    const exp = await req("POST", "/api/expenses", owner.cookie, {
-      familyId,
-      amount: 50,
-      category: "tithe",
-    });
-    expect(exp.status).toBe(201);
-
+  it("notes accept custom kind", async () => {
     const note = await req("POST", "/api/notes", owner.cookie, {
       familyId,
       title: "Sunday",
@@ -285,15 +278,6 @@ describe("custom types on entities", () => {
           title: "Bad",
           type: "has spaces",
           startAt: Math.floor(Date.now() / 1000) + 3600,
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await req("POST", "/api/expenses", owner.cookie, {
-          familyId,
-          amount: 10,
-          category: "",
         })
       ).status,
     ).toBe(400);

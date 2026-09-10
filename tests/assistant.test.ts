@@ -135,12 +135,12 @@ describe("assistant tools (no LLM)", () => {
     expect(result.action?.summary.toLowerCase()).toContain("snacks");
 
     const list = await req("GET", `/api/expenses?familyId=${familyId}`, member.cookie);
-    const { expenses, total } = (await list.json()) as {
-      expenses: { note: string; amount: number }[];
-      total: number;
+    const { expenses, totalMinor } = (await list.json()) as {
+      expenses: { description: string | null; amountMinor: number }[];
+      totalMinor: number;
     };
-    expect(total).toBe(100);
-    expect(expenses[0].note).toBe("outside snacks");
+    expect(totalMinor).toBe(10000);
+    expect(expenses[0].description).toBe("outside snacks");
   });
 
   it("add_task with dueDate and complete_task roundtrip", async () => {
@@ -192,7 +192,7 @@ describe("assistant tools (no LLM)", () => {
     expect(listed.expenses).toHaveLength(2);
 
     const food = await executeAssistantTool("list_expenses", { category: "food" }, ctx());
-    const foodRows = (food.data as { expenses: { note: string }[] }).expenses;
+    const foodRows = (food.data as { expenses: { note: string | null }[] }).expenses;
     expect(foodRows.map((r) => r.note)).toEqual(["chai"]);
   });
 
@@ -364,8 +364,8 @@ describe("assistant Claude loop (injected complete)", () => {
     expect(turn.reply).toContain("₹100");
 
     const list = await req("GET", `/api/expenses?familyId=${familyId}`, member.cookie);
-    const { total } = (await list.json()) as { total: number };
-    expect(total).toBe(100);
+    const { totalMinor } = (await list.json()) as { totalMinor: number };
+    expect(totalMinor).toBe(10000);
   });
 
   it("answers without tools when the model just talks", async () => {

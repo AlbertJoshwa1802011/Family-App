@@ -54,7 +54,7 @@ export interface FamilySnapshot {
     id: string;
     amount: number;
     currency: string;
-    category: string;
+    category?: string;
     note: string | null;
     spentOn: string;
   }[];
@@ -200,28 +200,34 @@ export async function loadFamilySnapshot(
   const recentExpenses = await db
     .select({
       id: schema.expenses.id,
-      amountCents: schema.expenses.amountCents,
+      amountMinor: schema.expenses.amountMinor,
       currency: schema.expenses.currency,
-      category: schema.expenses.category,
-      note: schema.expenses.note,
-      spentOn: schema.expenses.spentOn,
-    })
-    .from(schema.expenses)
-    .where(eq(schema.expenses.familyId, familyId))
-    .orderBy(desc(schema.expenses.spentOn), desc(sql`"expenses".rowid`))
-    .limit(EXPENSE_LIMIT);
-
-  const monthStart = monthStartIso(nowMs);
-  const monthRows = await db
-    .select({
-      amountCents: schema.expenses.amountCents,
+      description: schema.expenses.description,
+      merchant: schema.expenses.merchant,
+      expenseDate: schema.expenses.expenseDate,
     })
     .from(schema.expenses)
     .where(
       and(
         eq(schema.expenses.familyId, familyId),
-        gte(schema.expenses.spentOn, monthStart),
-        lte(schema.expenses.spentOn, today),
+        eq(schema.expenses.status, "active"),
+      ),
+    )
+    .orderBy(desc(schema.expenses.expenseDate), desc(sql`"expenses".rowid`))
+    .limit(EXPENSE_LIMIT);
+
+  const monthStart = monthStartIso(nowMs);
+  const monthRows = await db
+    .select({
+      amountMinor: schema.expenses.amountMinor,
+    })
+    .from(schema.expenses)
+    .where(
+      and(
+        eq(schema.expenses.familyId, familyId),
+        eq(schema.expenses.status, "active"),
+        gte(schema.expenses.expenseDate, monthStart),
+        lte(schema.expenses.expenseDate, today),
       ),
     );
 
@@ -243,11 +249,10 @@ export async function loadFamilySnapshot(
     upcomingEvents,
     recentExpenses: recentExpenses.map((e) => ({
       id: e.id,
-      amount: fromCents(e.amountCents),
+      amount: fromCents(e.amountMinor),
       currency: e.currency,
-      category: e.category,
-      note: e.note,
-      spentOn: e.spentOn,
+      note: e.description ?? e.merchant,
+      spentOn: e.expenseDate,
     })),
     stats: {
       documentCount: documents.length,
@@ -256,7 +261,7 @@ export async function loadFamilySnapshot(
       overdueTaskCount,
       upcomingEventCount: upcomingEvents.length,
       expenseTotalThisMonth: fromCents(
-        monthRows.reduce((s, r) => s + r.amountCents, 0),
+        monthRows.reduce((s, r) => s + r.amountMinor, 0),
       ),
       expenseCountThisMonth: monthRows.length,
     },

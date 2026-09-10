@@ -1,799 +1,705 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  Church,
-  HandCoins,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Lock,
   Plus,
-  Receipt,
-  UserRound,
+  Search,
+  Users,
   Wallet,
+  X,
 } from "lucide-react";
-import { useState } from "react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
-import { Badge } from "../components/ui/Badge";
-import { Skeleton } from "../components/ui/Skeleton";
-import { EmptyState } from "../components/ui/EmptyState";
-import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
-import { Chip } from "../components/ui/Chip";
-import { SegmentedControl } from "../components/ui/SegmentedControl";
-import { Sheet } from "../components/ui/Sheet";
-import { TypePicker } from "../components/ui/TypePicker";
-import { inputCls } from "../lib/fieldCls";
-import { api } from "../lib/api";
+import { EmptyState } from "../components/ui/EmptyState";
+import { MoneySubNav } from "../components/money/MoneySubNav";
+import { LiquidPillTabs } from "../components/ui/LiquidPillTabs";
+import { SpendCalendar } from "../components/money/SpendCalendar";
+import { CategoryDonut } from "../components/money/CategoryDonut";
+import { Skeleton } from "../components/ui/Skeleton";
 import { useAuth } from "../context/AuthContext";
-import { useLabels } from "../lib/useLabels";
+import { api } from "../lib/api";
+import { formatMoney, monthRange, todayIsoDate } from "../lib/money";
+import { categoryQueryValue, type DaySpend } from "../lib/spendClarity";
+import type { Overview as OverviewData } from "../lib/finance";
+import { cn } from "../lib/cn";
+import { haptic } from "../lib/haptics";
 
-type MoneyTab = "expenses" | "settlements";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-interface ExpenseSummary {
-  id: string;
-  amount: number;
-  amountCents: number;
+interface SummaryResponse {
+  view: "mine" | "family";
   currency: string;
-  category: string;
-  note: string | null;
-  spentOn: string;
+  totalMinor: number;
+  count: number;
+  privateMinor: number;
+  sharedMinor: number;
+  byCategory: {
+    categoryId: string | null;
+    name: string;
+    icon: string | null;
+    color: string | null;
+    totalMinor: number;
+    count: number;
+  }[];
+  byMonth: { month: string; totalMinor: number }[];
+  byDay: DaySpend[];
 }
 
-interface Destination {
+interface ExpenseListItem {
   id: string;
-  name: string;
-  kind: "person" | "organization" | "other";
-  settled: number;
-  settledCents: number;
-  archivedAt: number | null;
-}
-
-interface Movement {
-  id: string;
-  type: "received" | "settled";
-  destinationId: string | null;
-  destinationName: string | null;
-  amount: number;
-  amountCents: number;
+  amountMinor: number;
   currency: string;
-  note: string | null;
-  movedOn: string;
-  createdByName: string | null;
+  expenseDate: string;
+  merchant: string | null;
+  description: string | null;
+  visibility: "family" | "private";
+  childCount: number;
+  childrenTotalMinor: number;
+  nestDepth?: number;
+  category: { id: string; name: string; color: string | null } | null;
 }
 
-interface MoneySummary {
-  currency: string;
-  available: number;
-  settled: number;
-  inHand: number;
-  availableCents: number;
-  settledCents: number;
-  inHandCents: number;
-  destinations: Destination[];
-  movements: Movement[];
+type View = "mine" | "family";
+
+// ---------------------------------------------------------------------------
+// Month helpers
+// ---------------------------------------------------------------------------
+
+function shiftMonth(iso: string, delta: number): string {
+  const [y, m] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
-function formatMoney(amount: number, currency: string): string {
-  const formatted = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
-  if (currency === "INR") return `₹${formatted}`;
-  if (currency === "USD") return `$${formatted}`;
-  if (currency === "EUR") return `€${formatted}`;
-  if (currency === "GBP") return `£${formatted}`;
-  return `${formatted} ${currency}`;
+function monthLabel(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(Date.UTC(y, m - 1, 1)));
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+function dayLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
-export function Expenses() {
-  const { activeFamily } = useAuth();
-  const [tab, setTab] = useState<MoneyTab>("settlements");
+// ---------------------------------------------------------------------------
+// Category breakdown — tappable, so the donut and the ledger stay in sync.
+// ---------------------------------------------------------------------------
 
-  return (
-    <>
-      <AppBar title="Money" back />
-      <Page className="space-y-4">
-        <SegmentedControl
-          label="Money section"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "settlements", label: "Settlements" },
-            { value: "expenses", label: "Expenses" },
-          ]}
-        />
-        {tab === "settlements" ? (
-          <SettlementsPanel familyId={activeFamily?.id} />
-        ) : (
-          <ExpensesPanel familyId={activeFamily?.id} />
-        )}
-      </Page>
-    </>
-  );
-}
-
-function ExpensesPanel({ familyId }: { familyId: string | undefined }) {
-  const [composerOpen, setComposerOpen] = useState(false);
-  const { format: formatCategory, find: findCategory } = useLabels(
-    familyId,
-    "expense_category",
-  );
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["expenses", familyId],
-    queryFn: () =>
-      api<{ expenses: ExpenseSummary[]; total: number }>(
-        `/expenses?familyId=${familyId}`,
-      ),
-    enabled: Boolean(familyId),
-  });
-
-  const expenses = data?.expenses ?? [];
-  const total = data?.total ?? 0;
-  const currency = expenses[0]?.currency ?? "INR";
-
-  return (
-    <>
-      {isLoading ? (
-        <ListSkeleton />
-      ) : expenses.length === 0 && !composerOpen ? (
-        <EmptyState
-          icon={Wallet}
-          title="No expenses yet"
-          description="Log snacks, groceries, and bills — or just tell the assistant “add 100 for outside snacks”."
-          action={
-            <Button
-              leadingIcon={<Plus className="size-4" />}
-              onClick={() => setComposerOpen(true)}
-            >
-              Add expense
-            </Button>
-          }
-        />
-      ) : (
-        <>
-          <Card className="p-4">
-            <div className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-              All time
-            </div>
-            <div className="mt-1 text-2xl font-bold tabular-nums text-white">
-              {formatMoney(total, currency)}
-            </div>
-            <div className="mt-0.5 text-xs text-fg-muted">
-              {expenses.length} {expenses.length === 1 ? "entry" : "entries"}
-            </div>
-          </Card>
-          <Card className="divide-y divide-white/8 overflow-hidden">
-            {expenses.map((e) => {
-              const cat = findCategory(e.category);
-              return (
-              <div key={e.id} className="flex min-h-14 items-center gap-3 px-4 py-3">
-                <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
-                  {cat ? (
-                    <span className="text-lg" aria-hidden="true">{cat.emoji}</span>
-                  ) : (
-                    <Receipt className="size-5" aria-hidden="true" />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-fg">
-                    {e.note?.trim() || formatCategory(e.category)}
-                  </div>
-                  <div className="mt-0.5 text-xs text-fg-muted">
-                    {e.spentOn} · {formatCategory(e.category)}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold tabular-nums text-fg">
-                    {formatMoney(e.amount, e.currency)}
-                  </div>
-                  <Badge tone="neutral">{formatCategory(e.category)}</Badge>
-                </div>
-              </div>
-              );
-            })}
-          </Card>
-        </>
-      )}
-
-      {composerOpen && familyId && (
-        <ExpenseComposer familyId={familyId} onClose={() => setComposerOpen(false)} />
-      )}
-      <Fab icon={Plus} label="Add expense" onClick={() => setComposerOpen(true)} />
-    </>
-  );
-}
-
-function SettlementsPanel({ familyId }: { familyId: string | undefined }) {
-  const [destFilter, setDestFilter] = useState<string>("all");
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [sheetMode, setSheetMode] = useState<"received" | "settled">("settled");
-  const [sheetKey, setSheetKey] = useState(0);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["money-summary", familyId],
-    queryFn: () =>
-      api<MoneySummary>(`/money/summary?familyId=${familyId}`),
-    enabled: Boolean(familyId),
-  });
-
-  const currency = data?.currency ?? "INR";
-  const destinations = data?.destinations ?? [];
-  const movements = (data?.movements ?? []).filter((m) => {
-    if (destFilter === "all") return true;
-    if (destFilter === "received") return m.type === "received";
-    return m.destinationId === destFilter;
-  });
-
-  const empty =
-    !isLoading &&
-    (data?.movements.length ?? 0) === 0 &&
-    destinations.length === 0;
-
-  function openSheet(mode: "received" | "settled") {
-    setSheetMode(mode);
-    setSheetKey((k) => k + 1);
-    setSheetOpen(true);
-  }
-
-  return (
-    <>
-      {isLoading ? (
-        <ListSkeleton />
-      ) : empty ? (
-        <EmptyState
-          icon={HandCoins}
-          title="Track settlements here"
-          description="Record fund you received, then log what you settled to Mom, Church, or any destination — all on this page."
-          action={
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button
-                leadingIcon={<ArrowDownLeft className="size-4" />}
-                onClick={() => openSheet("received")}
-              >
-                Add received
-              </Button>
-              <Button
-                variant="secondary"
-                leadingIcon={<ArrowUpRight className="size-4" />}
-                onClick={() => openSheet("settled")}
-              >
-                Add settlement
-              </Button>
-            </div>
-          }
-        />
-      ) : (
-        <>
-          <Card className="lq-raised space-y-3 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                  In hand
-                </div>
-                <div
-                  className={`mt-1 text-3xl font-bold tabular-nums ${
-                    (data?.inHandCents ?? 0) < 0 ? "text-danger" : "text-white"
-                  }`}
-                >
-                  {formatMoney(data?.inHand ?? 0, currency)}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                leadingIcon={<ArrowDownLeft className="size-3.5" />}
-                onClick={() => openSheet("received")}
-              >
-                Received
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
-                  Received
-                </div>
-                <div className="mt-0.5 text-base font-semibold tabular-nums text-fg">
-                  {formatMoney(data?.available ?? 0, currency)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
-                  Settled
-                </div>
-                <div className="mt-0.5 text-base font-semibold tabular-nums text-fg">
-                  {formatMoney(data?.settled ?? 0, currency)}
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-fg-muted">
-              Received is the full fund logged here. Settlements reduce what you still hold in hand.
-            </p>
-          </Card>
-
-          <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <Chip
-              selected={destFilter === "all"}
-              onClick={() => setDestFilter("all")}
-            >
-              All
-            </Chip>
-            <Chip
-              selected={destFilter === "received"}
-              onClick={() => setDestFilter("received")}
-            >
-              Received
-            </Chip>
-            {destinations.map((d) => (
-              <Chip
-                key={d.id}
-                selected={destFilter === d.id}
-                onClick={() => setDestFilter(d.id)}
-              >
-                {d.name} · {formatMoney(d.settled, currency)}
-              </Chip>
-            ))}
-          </div>
-
-          {movements.length === 0 ? (
-            <EmptyState
-              icon={HandCoins}
-              title="Nothing in this track yet"
-              description="Add a settlement or switch back to All."
-            />
-          ) : (
-            <Card className="divide-y divide-white/8 overflow-hidden">
-              {movements.map((m) => (
-                <MovementRow key={m.id} movement={m} currency={currency} />
-              ))}
-            </Card>
-          )}
-        </>
-      )}
-
-      {familyId && (
-        <SettlementSheet
-          open={sheetOpen}
-          onClose={() => setSheetOpen(false)}
-          familyId={familyId}
-          initialMode={sheetMode}
-          destinations={destinations}
-          formKey={sheetKey}
-        />
-      )}
-
-      <Fab
-        icon={Plus}
-        label="Add settlement"
-        onClick={() => openSheet("settled")}
-      />
-    </>
-  );
-}
-
-function MovementRow({
-  movement,
+function CategoryBreakdown({
+  rows,
   currency,
+  totalMinor,
+  selectedKey,
+  onSelect,
 }: {
-  movement: Movement;
+  rows: SummaryResponse["byCategory"];
   currency: string;
+  totalMinor: number;
+  selectedKey: string | null;
+  onSelect: (key: string | null) => void;
 }) {
-  const isReceived = movement.type === "received";
-  const Icon = isReceived
-    ? ArrowDownLeft
-    : movement.destinationName?.toLowerCase().includes("church")
-      ? Church
-      : UserRound;
+  if (rows.length === 0) return null;
+  const max = Math.max(...rows.map((r) => r.totalMinor), 1);
 
   return (
-    <div className="flex min-h-14 items-center gap-3 px-4 py-3">
-      <span
-        className={`lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full ${
-          isReceived
-            ? "text-success [--lq-tint:var(--color-success)]"
-            : "text-vault-300 [--lq-tint:var(--color-vault-400)]"
-        }`}
-      >
-        <Icon className="size-5" aria-hidden="true" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-fg">
-          {isReceived
-            ? movement.note?.trim() || "Received into fund"
-            : `Settled to ${movement.destinationName ?? "destination"}`}
-        </div>
-        <div className="mt-0.5 text-xs text-fg-muted">
-          {movement.movedOn}
-          {!isReceived && movement.note?.trim()
-            ? ` · ${movement.note.trim()}`
-            : ""}
-          {movement.createdByName ? ` · ${movement.createdByName}` : ""}
-        </div>
-      </div>
-      <div className="text-right">
-        <div
-          className={`text-sm font-semibold tabular-nums ${
-            isReceived ? "text-success" : "text-fg"
-          }`}
-        >
-          {isReceived ? "+" : "−"}
-          {formatMoney(movement.amount, currency)}
-        </div>
-        <Badge tone={isReceived ? "success" : "neutral"}>
-          {isReceived ? "received" : "settled"}
-        </Badge>
-      </div>
-    </div>
-  );
-}
-
-function SettlementSheet({
-  open,
-  onClose,
-  familyId,
-  initialMode,
-  destinations,
-  formKey,
-}: {
-  open: boolean;
-  onClose: () => void;
-  familyId: string;
-  initialMode: "received" | "settled";
-  destinations: Destination[];
-  formKey: number;
-}) {
-  return (
-    <Sheet open={open} onClose={onClose} title="Log money">
-      {open ? (
-        <SettlementForm
-          key={formKey}
-          familyId={familyId}
-          initialMode={initialMode}
-          destinations={destinations}
-          onClose={onClose}
-        />
-      ) : null}
-    </Sheet>
-  );
-}
-
-function SettlementForm({
-  familyId,
-  initialMode,
-  destinations,
-  onClose,
-}: {
-  familyId: string;
-  initialMode: "received" | "settled";
-  destinations: Destination[];
-  onClose: () => void;
-}) {
-  const qc = useQueryClient();
-  const [mode, setMode] = useState<"received" | "settled">(initialMode);
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-  const [movedOn, setMovedOn] = useState(todayIso);
-  const [destinationId, setDestinationId] = useState(
-    () => destinations[0]?.id ?? "",
-  );
-  const [newDestName, setNewDestName] = useState("");
-  const [addingDest, setAddingDest] = useState(
-    () => destinations.length === 0 && initialMode === "settled",
-  );
-  const [error, setError] = useState("");
-
-  const createMovement = useMutation({
-    mutationFn: async () => {
-      let destId = destinationId;
-      if (mode === "settled" && addingDest) {
-        const name = newDestName.trim();
-        if (!name) throw new Error("Enter a destination name.");
-        const created = await api<{ destination: Destination }>(
-          "/money/destinations",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              familyId,
-              name,
-              kind: inferKind(name),
-            }),
-          },
-        );
-        destId = created.destination.id;
-      }
-
-      return api("/money/movements", {
-        method: "POST",
-        body: JSON.stringify({
-          familyId,
-          type: mode,
-          amount: Number(amount),
-          note: note.trim() || undefined,
-          movedOn,
-          ...(mode === "settled" ? { destinationId: destId } : {}),
-        }),
-      });
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["money-summary"] });
-      onClose();
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const n = Number(amount);
-    if (!Number.isFinite(n) || n <= 0) {
-      setError("Enter an amount greater than zero.");
-      return;
-    }
-    if (mode === "settled") {
-      if (addingDest) {
-        if (!newDestName.trim()) {
-          setError("Enter a destination name.");
-          return;
-        }
-      } else if (!destinationId) {
-        setError("Pick or add who you settled to.");
-        return;
-      }
-    }
-    setError("");
-    createMovement.mutate();
-  }
-
-  return (
-    <form onSubmit={submit} noValidate className="space-y-3 pb-2">
-      <SegmentedControl
-        label="Entry type"
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: "settled", label: "Settled" },
-          { value: "received", label: "Received" },
-        ]}
-      />
-
-      <div>
-        <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-          Amount <span className="text-danger">*</span>
-        </label>
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step="0.01"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="15000"
-          autoFocus
-          className={inputCls}
-        />
-      </div>
-
-      {mode === "settled" && (
-        <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <label className="text-xs font-semibold text-fg-muted">
-              Settled to <span className="text-danger">*</span>
-            </label>
+    <ul className="mt-3 space-y-2">
+      {rows.map((r) => {
+        const key = categoryQueryValue(r.categoryId);
+        const share = totalMinor > 0 ? (r.totalMinor / totalMinor) * 100 : 0;
+        const active = selectedKey === key;
+        return (
+          <li key={key}>
             <button
               type="button"
-              className="text-xs font-semibold text-vault-300"
               onClick={() => {
-                setAddingDest((v) => !v);
-                setError("");
+                haptic("selection");
+                onSelect(active ? null : key);
               }}
+              aria-pressed={active}
+              className={cn(
+                "w-full rounded-xl px-1 py-1.5 text-left transition-colors",
+                "hover:bg-white/5 active:scale-[0.99]",
+                active && "bg-white/8",
+              )}
             >
-              {addingDest ? "Pick existing" : "New destination"}
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: r.color ?? "var(--color-fg-subtle)" }}
+                  />
+                  <span className="truncate text-sm text-fg">{r.name}</span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-fg">
+                  {formatMoney(r.totalMinor, currency)}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
+                  <div
+                    className="h-full rounded-full bg-vault-500"
+                    style={{ width: `${Math.max((r.totalMinor / max) * 100, 2)}%` }}
+                  />
+                </div>
+                <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-fg-subtle">
+                  {share.toFixed(0)}%
+                </span>
+              </div>
             </button>
-          </div>
-          {addingDest ? (
-            <input
-              type="text"
-              value={newDestName}
-              onChange={(e) => setNewDestName(e.target.value)}
-              placeholder="e.g. Mom, Church, Pastor"
-              className={inputCls}
-            />
-          ) : destinations.length === 0 ? (
-            <p className="text-xs text-fg-muted">
-              No destinations yet — tap “New destination” to add Mom, Church, or anyone else.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {destinations.map((d) => (
-                <Chip
-                  key={d.id}
-                  selected={destinationId === d.id}
-                  onClick={() => setDestinationId(d.id)}
-                >
-                  {d.name}
-                </Chip>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div>
-        <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-          Date
-        </label>
-        <input
-          type="date"
-          value={movedOn}
-          onChange={(e) => setMovedOn(e.target.value)}
-          className={inputCls}
-        />
-      </div>
-
-      <div>
-        <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-          Note
-        </label>
-        <input
-          type="text"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder={
-            mode === "received"
-              ? "e.g. August fund from site"
-              : "e.g. August support"
-          }
-          className={inputCls}
-        />
-      </div>
-
-      {error && <p className="text-xs text-danger">{error}</p>}
-
-      <div className="flex gap-2 pt-1">
-        <Button
-          type="submit"
-          variant="primary"
-          loading={createMovement.isPending}
-          className="flex-1"
-        >
-          {mode === "received" ? "Save received" : "Save settlement"}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </form>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function inferKind(name: string): "person" | "organization" | "other" {
-  const n = name.trim().toLowerCase();
-  if (
-    n.includes("church") ||
-    n.includes("temple") ||
-    n.includes("mosque") ||
-    n.includes("org")
-  ) {
-    return "organization";
-  }
-  if (
-    n.includes("mom") ||
-    n.includes("dad") ||
-    n.includes("pastor") ||
-    n.includes("amma") ||
-    n.includes("appa")
-  ) {
-    return "person";
-  }
-  return "other";
-}
+// ---------------------------------------------------------------------------
+// Six-month trend — change over time, one hue, only the selected bar labelled.
+// ---------------------------------------------------------------------------
 
-function ListSkeleton() {
+function TrendStrip({
+  byMonth,
+  currency,
+  selectedMonth,
+  onSelect,
+}: {
+  byMonth: SummaryResponse["byMonth"];
+  currency: string;
+  selectedMonth: string;
+  onSelect: (monthStart: string) => void;
+}) {
+  if (byMonth.length < 2) return null;
+  const max = Math.max(...byMonth.map((m) => m.totalMinor), 1);
+  const selectedKey = selectedMonth.slice(0, 7);
+
   return (
-    <Card className="divide-y divide-white/8" aria-busy="true">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex min-h-14 items-center gap-3 px-4 py-3">
-          <Skeleton className="size-10 rounded-full" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-1/2" />
-            <Skeleton className="h-3 w-1/3" />
-          </div>
-        </div>
-      ))}
+    <Card className="p-4">
+      <h2 className="text-sm font-semibold text-fg">Last 6 months</h2>
+      <div className="mt-3 flex items-end justify-between gap-2">
+        {byMonth.map((m) => {
+          const active = m.month === selectedKey;
+          const heightPct = Math.max((m.totalMinor / max) * 100, 3);
+          return (
+            <button
+              key={m.month}
+              type="button"
+              onClick={() => onSelect(`${m.month}-01`)}
+              className="group flex flex-1 flex-col items-center gap-1.5"
+              aria-label={`${m.month}: ${formatMoney(m.totalMinor, currency)}`}
+              aria-pressed={active}
+            >
+              <span className="flex h-20 w-full items-end justify-center">
+                <span
+                  className={cn(
+                    "w-full max-w-8 rounded-t-[4px] transition-colors",
+                    active ? "bg-vault-400" : "bg-vault-500/35 group-hover:bg-vault-500/60",
+                  )}
+                  style={{ height: `${heightPct}%` }}
+                />
+              </span>
+              <span
+                className={cn(
+                  "text-[10px] tabular-nums",
+                  active ? "font-semibold text-fg" : "text-fg-subtle",
+                )}
+              >
+                {m.month.slice(5)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </Card>
   );
 }
 
-function ExpenseComposer({
-  familyId,
-  onClose,
+function FilterChip({
+  label,
+  onClear,
 }: {
-  familyId: string;
-  onClose: () => void;
+  label: string;
+  onClear: () => void;
 }) {
-  const qc = useQueryClient();
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-  const [category, setCategory] = useState("food");
-  const [error, setError] = useState("");
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      className="liquid-pill-track inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs text-fg"
+    >
+      {label}
+      <X className="size-3" aria-hidden="true" />
+    </button>
+  );
+}
 
-  const create = useMutation({
-    mutationFn: () =>
-      api("/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          familyId,
-          amount: Number(amount),
-          category,
-          note: note.trim() || undefined,
-        }),
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["expenses"] });
-      onClose();
-    },
-    onError: (e: Error) => setError(e.message),
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function Expenses() {
+  const { activeFamilyId } = useAuth();
+  const navigate = useNavigate();
+
+  const [today] = useState(() => todayIsoDate());
+  const [monthStart, setMonthStart] = useState(() => `${today.slice(0, 7)}-01`);
+  const [view, setView] = useState<View>("mine");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const [categoryKey, setCategoryKey] = useState<string | null>(null);
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setQ(search.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { from, to } = useMemo(() => monthRange(monthStart), [monthStart]);
+  const trendFrom = useMemo(() => shiftMonth(monthStart, -5), [monthStart]);
+  const listFrom = dayFilter ?? from;
+  const listTo = dayFilter ?? to;
+
+  const summaryQ = useQuery({
+    queryKey: ["expenses", "summary", activeFamilyId, from, to, view],
+    queryFn: () =>
+      api<SummaryResponse>(
+        `/expenses/summary?familyId=${activeFamilyId}&from=${from}&to=${to}&view=${view}`,
+      ),
+    enabled: Boolean(activeFamilyId),
   });
 
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const n = Number(amount);
-    if (!Number.isFinite(n) || n <= 0) {
-      setError("Enter an amount greater than zero.");
-      return;
+  const trendQ = useQuery({
+    queryKey: ["expenses", "trend", activeFamilyId, trendFrom, to, view],
+    queryFn: () =>
+      api<SummaryResponse>(
+        `/expenses/summary?familyId=${activeFamilyId}&from=${trendFrom}&to=${to}&view=${view}`,
+      ),
+    enabled: Boolean(activeFamilyId),
+  });
+
+  const overviewQ = useQuery({
+    queryKey: ["finance", "overview", activeFamilyId, from],
+    queryFn: () =>
+      api<OverviewData>(
+        `/finance/overview?familyId=${activeFamilyId}&date=${from}&months=1`,
+      ),
+    enabled: Boolean(activeFamilyId),
+  });
+
+  const listQ = useQuery({
+    queryKey: [
+      "expenses",
+      "list",
+      activeFamilyId,
+      listFrom,
+      listTo,
+      view,
+      q,
+      categoryKey,
+    ],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        familyId: activeFamilyId!,
+        from: listFrom,
+        to: listTo,
+        view,
+      });
+      if (q) params.set("q", q);
+      if (categoryKey) params.set("categoryId", categoryKey);
+      return api<{ expenses: ExpenseListItem[]; totalMinor: number }>(
+        `/expenses?${params.toString()}`,
+      );
+    },
+    enabled: Boolean(activeFamilyId),
+  });
+
+  const expandedIds = [...expanded];
+  const childrenQueries = useQueries({
+    queries: expandedIds.map((expenseId) => ({
+      queryKey: ["expenses", "detail", expenseId],
+      queryFn: () =>
+        api<{
+          expense: ExpenseListItem;
+          children: ExpenseListItem[];
+        }>(`/expenses/${expenseId}`),
+      enabled: Boolean(activeFamilyId),
+    })),
+  });
+
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, ExpenseListItem[]>();
+    expandedIds.forEach((expenseId, i) => {
+      const kids = childrenQueries[i]?.data?.children;
+      if (kids) map.set(expenseId, kids);
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by expanded set + query data
+  }, [expanded, childrenQueries]);
+
+  const currency = summaryQ.data?.currency ?? "USD";
+  const incomeMinor = overviewQ.data?.plan.incomeMinor ?? 0;
+  const spentMinor = summaryQ.data?.totalMinor ?? 0;
+  const netMinor = incomeMinor - spentMinor;
+  const selectedCategory = summaryQ.data?.byCategory.find(
+    (r) => categoryQueryValue(r.categoryId) === categoryKey,
+  );
+
+  const byDay = useMemo(() => {
+    const groups = new Map<string, ExpenseListItem[]>();
+    for (const e of listQ.data?.expenses ?? []) {
+      const arr = groups.get(e.expenseDate) ?? [];
+      arr.push(e);
+      groups.set(e.expenseDate, arr);
     }
-    setError("");
-    create.mutate();
+    return [...groups.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [listQ.data]);
+
+  const filtered = Boolean(q || categoryKey || dayFilter);
+
+  function changeMonth(next: string) {
+    setMonthStart(next);
+    setDayFilter(null);
+  }
+
+  function toggleExpand(expenseId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(expenseId)) next.delete(expenseId);
+      else next.add(expenseId);
+      return next;
+    });
+  }
+
+  function rowAmount(e: ExpenseListItem): string {
+    const minor = e.childCount > 0 ? e.childrenTotalMinor : e.amountMinor;
+    return formatMoney(minor, e.currency);
+  }
+
+  if (!activeFamilyId) {
+    return (
+      <>
+        <AppBar title="Expenses" />
+        <Page   width="list">
+          <EmptyState
+            icon={Wallet}
+            title="No family yet"
+            description="You need a family before you can track expenses."
+          />
+        </Page>
+      </>
+    );
   }
 
   return (
-    <form onSubmit={submit} noValidate className="mt-4">
-      <Card className="space-y-3 p-4">
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-            Amount <span className="text-danger">*</span>
-          </label>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="100"
-            autoFocus
-            className={inputCls}
-          />
+    <>
+      <AppBar title="Spending" />
+      <Page   width="list" className="space-y-4 pb-24 md:pb-10">
+        <MoneySubNav />
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => changeMonth(shiftMonth(monthStart, -1))}
+            aria-label="Previous month"
+            className="flex size-10 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5 active:scale-95"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+          <span className="text-sm font-semibold text-fg">{monthLabel(monthStart)}</span>
+          <button
+            type="button"
+            onClick={() => changeMonth(shiftMonth(monthStart, 1))}
+            aria-label="Next month"
+            className="flex size-10 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5 active:scale-95"
+          >
+            <ChevronRight className="size-5" />
+          </button>
         </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
-            What for
-          </label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. outside snacks"
-            className={inputCls}
-          />
-        </div>
-        <TypePicker
-          domain="expense_category"
-          familyId={familyId}
-          value={category}
-          onChange={setCategory}
-          title="Category"
+
+        <LiquidPillTabs
+          ariaLabel="Whose expenses"
+          value={view}
+          onChange={setView}
+          items={[
+            { id: "mine", label: "Mine", icon: Lock },
+            { id: "family", label: "Shared", icon: Users },
+          ]}
         />
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex gap-2">
-          <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
-            Add expense
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
+
+        <Card className="p-5">
+          {summaryQ.isLoading ? (
+            <>
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="mt-3 h-9 w-40" />
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                    Expense
+                  </p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-fg">
+                    {formatMoney(spentMinor, currency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                    Income
+                  </p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-success">
+                    {formatMoney(incomeMinor, currency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                    Balance
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-1 text-lg font-bold tabular-nums",
+                      netMinor < 0 ? "text-danger" : "text-fg",
+                    )}
+                  >
+                    {formatMoney(netMinor, currency)}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-fg-muted">
+                {summaryQ.data?.count ?? 0} expense
+                {(summaryQ.data?.count ?? 0) === 1 ? "" : "s"} in {monthLabel(monthStart)}
+                {incomeMinor > 0 ? " · income is this payday cycle" : ""}
+              </p>
+              {view === "family" && (summaryQ.data?.sharedMinor ?? 0) > 0 && (
+                <p className="mt-1 text-xs text-fg-subtle">
+                  {formatMoney(summaryQ.data?.privateMinor ?? 0, currency)} yours ·{" "}
+                  {formatMoney(summaryQ.data?.sharedMinor ?? 0, currency)} shared
+                </p>
+              )}
+            </>
+          )}
+        </Card>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 z-10 size-4 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search merchant or note…"
+            className="lq-field liquid-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+            aria-label="Search expenses"
+          />
         </div>
-      </Card>
-    </form>
+
+        {filtered && (
+          <div className="flex flex-wrap gap-2">
+            {q ? (
+              <FilterChip
+                label={`“${q}”`}
+                onClear={() => {
+                  setSearch("");
+                  setQ("");
+                }}
+              />
+            ) : null}
+            {selectedCategory ? (
+              <FilterChip
+                label={selectedCategory.name}
+                onClear={() => setCategoryKey(null)}
+              />
+            ) : null}
+            {dayFilter ? (
+              <FilterChip label={dayLabel(dayFilter)} onClear={() => setDayFilter(null)} />
+            ) : null}
+          </div>
+        )}
+
+        {trendQ.data && (
+          <TrendStrip
+            byMonth={trendQ.data.byMonth}
+            currency={currency}
+            selectedMonth={monthStart}
+            onSelect={changeMonth}
+          />
+        )}
+
+        {summaryQ.data && summaryQ.data.byCategory.length > 0 && (
+          <Card className="p-4">
+            <h2 className="text-sm font-semibold text-fg">Where it went</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">Tap a slice or row to filter the list</p>
+            <div className="mt-3">
+              <CategoryDonut
+                rows={summaryQ.data.byCategory}
+                totalMinor={summaryQ.data.totalMinor}
+                currency={currency}
+                selectedKey={categoryKey}
+                onSelect={setCategoryKey}
+              />
+            </div>
+            <CategoryBreakdown
+              rows={summaryQ.data.byCategory}
+              currency={currency}
+              totalMinor={summaryQ.data.totalMinor}
+              selectedKey={categoryKey}
+              onSelect={setCategoryKey}
+            />
+          </Card>
+        )}
+
+        {summaryQ.data && (
+          <Card className="p-4">
+            <h2 className="text-sm font-semibold text-fg">This month</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">Darker days spent more. Tap a day to zoom in.</p>
+            <div className="mt-3">
+              <SpendCalendar
+                monthStart={monthStart}
+                byDay={summaryQ.data.byDay ?? []}
+                selectedDate={dayFilter}
+                onSelect={setDayFilter}
+              />
+            </div>
+          </Card>
+        )}
+
+        {listQ.isLoading ? (
+          <Card className="divide-y divide-line overflow-hidden">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-3">
+                <Skeleton className="size-9 rounded-xl" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-1/2" />
+                  <Skeleton className="h-3 w-1/4" />
+                </div>
+              </div>
+            ))}
+          </Card>
+        ) : byDay.length === 0 ? (
+          <EmptyState
+            icon={Wallet}
+            title={filtered ? "Nothing matches" : "Nothing recorded yet"}
+            description={
+              filtered
+                ? "Clear a filter or search a different merchant."
+                : `No expenses in ${monthLabel(monthStart)}. Tap + to add your first one — it stays private to you unless you share it.`
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            {byDay.map(([date, items]) => (
+              <div key={date}>
+                <p className="px-1 pb-1.5 text-xs font-medium text-fg-subtle">
+                  {dayLabel(date)}
+                </p>
+                <Card className="divide-y divide-line overflow-hidden">
+                  {items.map((e) => {
+                    const isOpen = expanded.has(e.id);
+                    const kids = childrenMap.get(e.id) ?? [];
+                    return (
+                      <div key={e.id}>
+                        <div className="flex w-full min-h-14 items-center gap-1 px-2 py-1">
+                          {e.childCount > 0 ? (
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-label={isOpen ? "Collapse sub-expenses" : "Expand sub-expenses"}
+                              onClick={() => toggleExpand(e.id)}
+                              className="flex size-10 shrink-0 items-center justify-center rounded-full text-fg-subtle hover:bg-white/5"
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "size-4 transition-transform",
+                                  isOpen ? "rotate-0" : "-rotate-90",
+                                )}
+                              />
+                            </button>
+                          ) : (
+                            <span className="size-10 shrink-0" aria-hidden="true" />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/money/expenses/${e.id}`)}
+                            className="flex min-w-0 flex-1 items-center gap-3 py-2 pr-2 text-left transition-colors hover:bg-white/5 active:bg-white/[0.07]"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                              style={{
+                                backgroundColor: `${e.category?.color ?? "#64748b"}26`,
+                              }}
+                            >
+                              <Wallet
+                                className="size-4"
+                                style={{ color: e.category?.color ?? "var(--color-fg-muted)" }}
+                              />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-fg">
+                                {e.merchant || e.description || "Expense"}
+                              </span>
+                              <span className="mt-0.5 block truncate text-xs text-fg-muted">
+                                {e.category?.name ?? "Uncategorized"}
+                                {e.childCount > 0 ? ` · ${e.childCount} sub` : ""}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 items-center justify-end gap-1.5 pl-2">
+                              {e.visibility === "private" ? (
+                                <Lock className="size-3.5 shrink-0 text-fg-subtle" aria-label="Private" />
+                              ) : (
+                                <Users className="size-3.5 shrink-0 text-vault-300" aria-label="Shared" />
+                              )}
+                              <span className="max-w-[7.5rem] text-right text-sm font-semibold tabular-nums text-fg sm:max-w-none">
+                                {rowAmount(e)}
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                        {isOpen && kids.length > 0 && (
+                          <ul className="border-t border-white/10 bg-black/20">
+                            {kids.map((child) => (
+                              <li key={child.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/money/expenses/${child.id}`)}
+                                  className="flex w-full min-h-11 items-center gap-3 py-2 pr-4 pl-14 text-left hover:bg-white/5"
+                                >
+                                  <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">
+                                    {child.merchant || child.description || "Sub-expense"}
+                                  </span>
+                                  <span className="text-sm tabular-nums text-fg">
+                                    {rowAmount(child)}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </Card>
+              </div>
+            ))}
+          </div>
+        )}
+      </Page>
+
+      <Fab icon={Plus} label="Add expense" onClick={() => navigate("/money/expenses/new")} />
+    </>
   );
 }
