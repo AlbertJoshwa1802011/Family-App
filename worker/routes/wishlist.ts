@@ -81,7 +81,7 @@ wishlistRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return invalid(c, ["familyId"], "familyId is required");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const surplusRaw = Number(c.req.query("surplusMinor") ?? 0);
@@ -126,7 +126,7 @@ wishlistRoutes.post("/", requireSession, zv(createSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -177,7 +177,7 @@ wishlistRoutes.get("/:id", requireSession, async (c) => {
     .get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);
@@ -199,7 +199,7 @@ wishlistRoutes.patch("/:id", requireSession, zv(updateSchema), async (c) => {
     .get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);
@@ -247,7 +247,7 @@ wishlistRoutes.delete("/:id", requireSession, async (c) => {
     .get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);

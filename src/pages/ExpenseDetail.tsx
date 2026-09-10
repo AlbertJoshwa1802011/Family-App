@@ -156,7 +156,7 @@ export function ExpenseDetail() {
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {e.category && (
-              <span className="flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-fg-muted">
+              <span className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-xs text-fg-muted">
                 <span
                   aria-hidden="true"
                   className="size-2 rounded-full"
@@ -219,11 +219,11 @@ export function ExpenseDetail() {
               )}
             </div>
             {children.length === 0 ? (
-              <p className="border-t border-line px-4 py-3 text-xs text-fg-subtle">
+              <p className="border-t border-white/10 px-4 py-3 text-xs text-fg-subtle">
                 No sub-expenses yet. Add spends under this container for a clear rollup.
               </p>
             ) : (
-              <ul className="divide-y divide-line border-t border-line">
+              <ul className="divide-y divide-line border-t border-white/10">
                 {children.map((child) => (
                   <li key={child.id}>
                     <button

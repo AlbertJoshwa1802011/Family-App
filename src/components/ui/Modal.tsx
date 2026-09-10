@@ -78,7 +78,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
         <div className="max-h-[70vh] overflow-y-auto px-5 py-3">{children}</div>
 
         {footer && (
-          <div className="flex gap-2 border-t border-line px-5 py-4">{footer}</div>
+          <div className="flex gap-2 border-t border-white/10 px-5 py-4">{footer}</div>
         )}
       </div>
     </div>

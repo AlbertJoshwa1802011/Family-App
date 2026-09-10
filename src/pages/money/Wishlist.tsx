@@ -304,7 +304,7 @@ export function Wishlist() {
                     "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     priority === p
                       ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                      : "border-line text-fg-muted hover:bg-white/5",
+                      : "border-white/10 text-fg-muted hover:bg-white/5",
                   )}
                 >
                   {PRIORITY_LABEL[p]}

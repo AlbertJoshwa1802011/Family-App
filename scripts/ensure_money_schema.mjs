@@ -154,6 +154,7 @@ function main() {
   execute(`CREATE INDEX IF NOT EXISTS idx_expense_paid_by ON expenses (paid_by_member_id)`);
   execute(`CREATE INDEX IF NOT EXISTS idx_expense_category ON expenses (category_id)`);
   execute(`CREATE INDEX IF NOT EXISTS idx_expense_parent ON expenses (parent_expense_id)`);
+  execute(`CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_client_request ON expenses (family_id, created_by_user_id, client_request_id)`);
 
   // Copy convertible rows; skip orphans with no membership (keep them in legacy table).
   execute(`INSERT INTO expenses (

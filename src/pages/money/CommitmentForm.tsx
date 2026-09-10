@@ -175,7 +175,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                     "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     kind === k.value
                       ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                      : "border-line text-fg-muted hover:bg-white/5",
+                      : "border-white/10 text-fg-muted hover:bg-white/5",
                   )}
                 >
                   {k.label}
@@ -213,7 +213,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                     "rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
                     amountKind === "fixed"
                       ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-line text-fg-muted hover:bg-white/5",
+                      : "border-white/10 text-fg-muted hover:bg-white/5",
                   )}
                 >
                   Fixed amount
@@ -226,7 +226,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                     "rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
                     amountKind === "percent_of_income"
                       ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-line text-fg-muted hover:bg-white/5",
+                      : "border-white/10 text-fg-muted hover:bg-white/5",
                   )}
                 >
                   % of income
@@ -373,7 +373,7 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                     "flex items-center gap-1.5 rounded-xl border p-3 transition-colors",
                     visibility === key
                       ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-line text-fg hover:bg-white/5",
+                      : "border-white/10 text-fg hover:bg-white/5",
                   )}
                 >
                   <Icon className="size-4" aria-hidden="true" />

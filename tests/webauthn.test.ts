@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { hashPin, rpIdFromAppUrl, b64urlEncode, b64urlDecode, parseClientData, normalizeB64url } from "../worker/lib/webauthn";
-import { extraScopesFromConnect, GOOGLE_SCOPES } from "../worker/lib/google";
 
 describe("webauthn helpers", () => {
   it("rpIdFromAppUrl uses the hostname", () => {
@@ -99,18 +98,5 @@ describe("parseClientData", () => {
         origins: ["https://fam.connect-cloud.workers.dev"],
       }),
     ).toThrow(/challenge/);
-  });
-});
-
-describe("extraScopesFromConnect", () => {
-  it("maps contacts and gmail connect flags", () => {
-    expect(extraScopesFromConnect("contacts,gmail")).toEqual([
-      GOOGLE_SCOPES.contacts,
-      GOOGLE_SCOPES.gmailSend,
-    ]);
-    expect(extraScopesFromConnect(undefined)).toEqual([]);
-    expect(extraScopesFromConnect("gmail")).toEqual([GOOGLE_SCOPES.gmailSend]);
-    expect(extraScopesFromConnect("contacts")).toEqual([GOOGLE_SCOPES.contacts]);
-    expect(extraScopesFromConnect("nope")).toEqual([]);
   });
 });

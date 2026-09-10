@@ -287,8 +287,8 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     amountMinor,
     currency: data.currency,
     expenseDate,
-    description: data.note ?? data.category ?? null,
-    merchant: null,
+    description: data.note?.trim() || data.category || null,
+    merchant: data.category ?? null,
     visibility: "family",
     status: "active",
     nestDepth: 0,
@@ -593,8 +593,10 @@ async function listExpenses(raw: unknown, ctx: ToolContext): Promise<ToolResult>
   const category = parsed.data.category;
   const filtered =
     category && isExpenseCategory(category)
-      ? rows.filter((r) =>
-          (r.description ?? "").toLowerCase().includes(category.toLowerCase()),
+      ? rows.filter(
+          (r) =>
+            (r.merchant ?? "").toLowerCase() === category.toLowerCase() ||
+            (r.description ?? "").toLowerCase().includes(category.toLowerCase()),
         )
       : rows;
 

@@ -131,6 +131,7 @@ function ensureRichExpensesSchema(sqlite: DatabaseSync) {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_family_status ON expenses (family_id, status)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_created_by ON expenses (created_by_user_id)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_paid_by ON expenses (paid_by_member_id)`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_client_request ON expenses (family_id, created_by_user_id, client_request_id)`);
   sqlite.exec(`INSERT INTO expenses (
     id, family_id, paid_by_member_id, amount_minor, currency, expense_date,
     description, visibility, status, created_by_user_id, created_at, updated_at, nest_depth, split_type

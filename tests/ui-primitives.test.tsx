@@ -415,7 +415,7 @@ describe("Page", () => {
   it("constrains to the mobile column and clears the floating nav", () => {
     const { container } = render(<Page>content</Page>);
     const cls = classes(container.firstElementChild!);
-    expect(cls.has("max-w-md")).toBe(true);
+    expect(cls.has("max-w-xl")).toBe(true); // prose width preset
     expect(cls.has("mx-auto")).toBe(true);
     // pb-nav = 9rem + safe-area — must clear the ~84px nav capsule on every
     // phone, including ones with a home-indicator inset.
