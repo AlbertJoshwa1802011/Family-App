@@ -60,6 +60,18 @@ jobs:
       - name: Smoke health + new routes
         run: |
           set -e
+          # Worker publish can lag a few seconds behind wrangler deploy exit.
+          expect_auth() {
+            path="$1"
+            for i in 1 2 3 4 5 6 7 8; do
+              code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "https://fam.connect-cloud.workers.dev$path")
+              echo "GET $path → $code $(head -c 120 /tmp/probe.json)"
+              echo "$code" | grep -Eq '^(401|400)$' && return 0
+              sleep 3
+            done
+            echo "smoke failed for $path (wanted 401/400, not HTML/404)" >&2
+            return 1
+          }
           for i in 1 2 3 4 5; do
             body=$(curl -fsS https://fam.connect-cloud.workers.dev/api/health || true)
             echo "$body" | grep -q '"ok":true' && break
@@ -70,14 +82,8 @@ jobs:
             fi
           done
           # New surfaces must exist (401/400 without session is fine; HTML/404 is not).
-          code=$(curl -s -o /tmp/tags.json -w "%{http_code}" https://fam.connect-cloud.workers.dev/api/tags)
-          echo "GET /api/tags → $code $(cat /tmp/tags.json)"
-          echo "$code" | grep -Eq '^(401|400)$'
-          code=$(curl -s -o /tmp/links.json -w "%{http_code}" https://fam.connect-cloud.workers.dev/api/links)
-          echo "GET /api/links → $code $(cat /tmp/links.json)"
-          echo "$code" | grep -Eq '^(401|400)$'
-          for path in /api/device-lock/status /api/funds /api/settlements/summary /api/vault/status /api/wishlist /api/finance; do
-            code=$(curl -s -o /tmp/probe.json -w "%{http_code}" "https://fam.connect-cloud.workers.dev$path")
-            echo "GET $path → $code $(head -c 120 /tmp/probe.json)"
-            echo "$code" | grep -Eq '^(401|400)$'
+          expect_auth /api/tags
+          expect_auth /api/links
+          for path in /api/device-lock/status /api/funds /api/settlements/summary /api/vault/status /api/wishlist /api/finance/overview /api/money/summary; do
+            expect_auth "$path"
           done
