@@ -80,6 +80,10 @@ async function beginGoogleOAuth(
       "https://www.googleapis.com/auth/drive.file",
       // Calendar: push Family Vault events into the user's primary calendar.
       "https://www.googleapis.com/auth/calendar.events",
+      // Gmail: send family invites from the signed-in user's mailbox when
+      // Resend is not configured. Sensitive scope — existing users must
+      // sign out/in once after this was added so Google re-consents.
+      "https://www.googleapis.com/auth/gmail.send",
     ].join(" "),
     access_type: "offline",
     prompt: "consent",
@@ -307,9 +311,9 @@ authRoutes.get("/google/callback", async (c) => {
 
   await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
-  // Cache refresh token in KV (Drive + Google Calendar push need it).
+  // Cache refresh token in KV (Drive + Calendar + Gmail send need it).
   // Drop any cached access token so the next API call picks up newly granted
-  // scopes (e.g. calendar.events after a re-consent).
+  // scopes (e.g. gmail.send / calendar.events after a re-consent).
   if (tokens.refresh_token) {
     await c.env.KV.put(`user:refresh_token:${user.id}`, tokens.refresh_token);
   }

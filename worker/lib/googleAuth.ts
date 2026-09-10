@@ -1,5 +1,5 @@
 /**
- * Shared Google OAuth token refresh for Drive + Calendar.
+ * Shared Google OAuth token refresh for Drive + Calendar + Gmail send.
  *
  * Refresh tokens live in KV at `user:refresh_token:{userId}` (written on login).
  * Access tokens are cached at `user:access_token:{userId}` with a 5-minute
@@ -34,7 +34,7 @@ export async function clearGoogleAccessTokenCache(
 /**
  * Returns a valid Google access token for the user, refreshing if needed.
  * The token carries whatever scopes were granted at last consent (Drive +
- * Calendar after the calendar.events scope was added).
+ * Calendar + Gmail send after those scopes were added).
  */
 export async function getGoogleAccessToken(
   env: Env,

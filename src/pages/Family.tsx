@@ -346,6 +346,7 @@ function InviteCard({
   const [error, setError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
   const [emailSent, setEmailSent] = useState(false);
+  const [emailVia, setEmailVia] = useState<"resend" | "gmail" | null>(null);
   const [copied, setCopied] = useState(false);
 
   const create = useMutation({
@@ -355,6 +356,7 @@ function InviteCard({
           token: string;
           inviteUrl?: string;
           emailSent?: boolean;
+          emailVia?: "resend" | "gmail" | null;
           modules?: FamilyModule[];
         };
       }>(`/families/${familyId}/invites`, {
@@ -371,6 +373,7 @@ function InviteCard({
           `${window.location.origin}/invite/${res.invite.token}`,
       );
       setEmailSent(Boolean(res.invite.emailSent));
+      setEmailVia(res.invite.emailVia ?? null);
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -390,13 +393,15 @@ function InviteCard({
       <Card className="space-y-3 p-4">
         <p className="text-sm font-medium text-fg">
           {emailSent
-            ? `Invitation emailed to ${email}`
+            ? emailVia === "gmail"
+              ? `Invitation emailed to ${email} from your Gmail`
+              : `Invitation emailed to ${email}`
             : `Invite created for ${email}`}
         </p>
         <p className="text-xs text-fg-muted">
           {emailSent
             ? "They can join from the email link (same Google account). You can also share the link below."
-            : "Email couldn’t be sent from this server — share this link. It only works for that Google account and expires in 7 days."}
+            : "Email couldn’t be sent — share this link. It only works for that Google account and expires in 7 days. To send from your Gmail next time: sign out, sign back in (accept Gmail send), then invite again."}
         </p>
         <div className="flex items-center gap-2">
           <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">

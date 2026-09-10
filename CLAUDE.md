@@ -268,8 +268,10 @@ tests.
   GETs). Downloads always `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`.
 - Google OAuth: Auth Code + PKCE + `state`; ID token verified with `jose` against Google JWKS.
 - Drive scope is `drive.file` (non-sensitive). Calendar push uses
-`calendar.events`. Existing users must sign out/in once after the scope was
-added so Google re-consents and issues a refresh token that includes Calendar.
+`calendar.events`. Invite email fallback uses `gmail.send` (sends from the
+inviter's Gmail when `RESEND_API_KEY` is unset). Existing users must sign
+out/in once after a scope was added so Google re-consents and issues a
+refresh token that includes it.
 Drive durability across re-consent is **unproven** — a Phase 0.5 spike must
 validate create→revoke→re-consent→still-readable before Phase 2 UI breadth.
 - Audit log: write entries on upload/download/delete/role-change (Phase 2 write path is mandatory,
