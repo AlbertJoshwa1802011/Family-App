@@ -1,0 +1,485 @@
+/**
+ * Wishlist affordability, sub-categories, and the assistant's guard rails.
+ */
+import { describe, expect, it, vi } from "vitest";
+import { app } from "../worker/index";
+import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
+import type { Env } from "../worker/types";
+
+const ORIGIN = "http://localhost:5173";
+
+function req(env: Env, method: string, path: string, cookie: string, body?: unknown) {
+  return app.request(
+    path,
+    {
+      method,
+      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: ORIGIN },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    env,
+  );
+}
+
+function setup() {
+  const { env, sqlite } = createTestEnv();
+  const ownerUser = seedUser(sqlite);
+  const family = seedFamily(sqlite, ownerUser.id);
+  const alice = seedActor(sqlite, family.id, "member");
+  const bob = seedActor(sqlite, family.id, "member");
+  const admin = seedActor(sqlite, family.id, "owner");
+  return { env, sqlite, familyId: family.id, alice, bob, admin };
+}
+
+const item = (familyId: string, over: Record<string, unknown> = {}) => ({
+  familyId,
+  name: "Laptop",
+  estimatedCostMinor: 1200_00,
+  currency: "USD",
+  priority: 2,
+  ...over,
+});
+
+interface ListBody {
+  items: {
+    id: string;
+    name: string;
+    monthsToAfford: number | null;
+    affordableFrom: string | null;
+  }[];
+  totalWantedMinor: number;
+}
+
+describe("wishlist", () => {
+  it("creates an item, private by default", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { item: { visibility: string } };
+    expect(body.item.visibility).toBe("private");
+  });
+
+  it("rejects a mismatched currency", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId, { currency: "GBP" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an out-of-range priority", async () => {
+    const { env, familyId, alice } = setup();
+    expect((await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId, { priority: 9 }))).status).toBe(400);
+  });
+
+  it("hides a private item from other members, owner included", async () => {
+    const { env, familyId, alice, bob, admin } = setup();
+    await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId));
+    for (const actor of [bob, admin]) {
+      const body = (await (
+        await req(env, "GET", `/api/wishlist?familyId=${familyId}`, actor.cookie)
+      ).json()) as ListBody;
+      expect(body.items).toHaveLength(0);
+    }
+  });
+
+  it("computes months to afford from the monthly surplus", async () => {
+    const { env, familyId, alice } = setup();
+    await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId));
+
+    // 1200.00 at 300.00/month → 4 months.
+    const body = (await (
+      await req(env, "GET", `/api/wishlist?familyId=${familyId}&surplusMinor=30000`, alice.cookie)
+    ).json()) as ListBody;
+    expect(body.items[0].monthsToAfford).toBe(4);
+    expect(body.items[0].affordableFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("compounds affordability down the priority order", async () => {
+    const { env, familyId, alice } = setup();
+    await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId, { name: "Phone", estimatedCostMinor: 300_00, priority: 1 }));
+    await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId, { name: "Laptop", estimatedCostMinor: 600_00, priority: 2 }));
+
+    const body = (await (
+      await req(env, "GET", `/api/wishlist?familyId=${familyId}&surplusMinor=30000`, alice.cookie)
+    ).json()) as ListBody;
+
+    // Phone first (1 month), then the laptop only after the phone is paid for.
+    expect(body.items[0].name).toBe("Phone");
+    expect(body.items[0].monthsToAfford).toBe(1);
+    expect(body.items[1].name).toBe("Laptop");
+    expect(body.items[1].monthsToAfford).toBe(3); // (300+600)/300
+    expect(body.totalWantedMinor).toBe(90000);
+  });
+
+  it("says 'never at this rate' when nothing is being saved", async () => {
+    const { env, familyId, alice } = setup();
+    await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId));
+    const body = (await (
+      await req(env, "GET", `/api/wishlist?familyId=${familyId}&surplusMinor=0`, alice.cookie)
+    ).json()) as ListBody;
+    expect(body.items[0].monthsToAfford).toBeNull();
+    expect(body.items[0].affordableFrom).toBeNull();
+  });
+
+  it("drops purchased items out of the savings plan", async () => {
+    const { env, familyId, alice } = setup();
+    const created = (await (
+      await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId))
+    ).json()) as { item: { id: string } };
+    await req(env, "PATCH", `/api/wishlist/${created.item.id}`, alice.cookie, { status: "purchased" });
+
+    const body = (await (
+      await req(env, "GET", `/api/wishlist?familyId=${familyId}&surplusMinor=30000`, alice.cookie)
+    ).json()) as ListBody;
+    expect(body.items[0].monthsToAfford).toBeNull();
+    expect(body.totalWantedMinor).toBe(0);
+  });
+
+  it("lets only the owner edit", async () => {
+    const { env, familyId, alice, bob } = setup();
+    const created = (await (
+      await req(env, "POST", "/api/wishlist", alice.cookie, item(familyId, { visibility: "family" }))
+    ).json()) as { item: { id: string } };
+    expect((await req(env, "PATCH", `/api/wishlist/${created.item.id}`, bob.cookie, { priority: 1 })).status).toBe(403);
+  });
+});
+
+describe("expense sub-categories", () => {
+  async function rootId(env: Env, familyId: string, cookie: string): Promise<string> {
+    const body = (await (
+      await req(env, "GET", `/api/expenses/categories?familyId=${familyId}`, cookie)
+    ).json()) as { categories: { id: string; name: string }[] };
+    return body.categories.find((c) => c.name === "Groceries")!.id;
+  }
+
+  it("creates a child under a built-in category", async () => {
+    const { env, familyId, admin } = setup();
+    const parent = await rootId(env, familyId, admin.cookie);
+
+    const res = await req(env, "POST", "/api/expenses/categories", admin.cookie, {
+      familyId,
+      name: "Vegetables",
+      parentCategoryId: parent,
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("returns a two-level tree alongside the flat list", async () => {
+    const { env, familyId, admin } = setup();
+    const parent = await rootId(env, familyId, admin.cookie);
+    await req(env, "POST", "/api/expenses/categories", admin.cookie, {
+      familyId,
+      name: "Vegetables",
+      parentCategoryId: parent,
+    });
+
+    const body = (await (
+      await req(env, "GET", `/api/expenses/categories?familyId=${familyId}`, admin.cookie)
+    ).json()) as {
+      tree: { id: string; name: string; children: { name: string }[] }[];
+    };
+    const groceries = body.tree.find((t) => t.id === parent)!;
+    expect(groceries.children.map((c) => c.name)).toContain("Vegetables");
+  });
+
+  it("refuses a third level of nesting", async () => {
+    const { env, familyId, admin } = setup();
+    const parent = await rootId(env, familyId, admin.cookie);
+    const child = (await (
+      await req(env, "POST", "/api/expenses/categories", admin.cookie, {
+        familyId,
+        name: "Vegetables",
+        parentCategoryId: parent,
+      })
+    ).json()) as { category: { id: string } };
+
+    const res = await req(env, "POST", "/api/expenses/categories", admin.cookie, {
+      familyId,
+      name: "Root veg",
+      parentCategoryId: child.category.id,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses an unknown parent", async () => {
+    const { env, familyId, admin } = setup();
+    const res = await req(env, "POST", "/api/expenses/categories", admin.cookie, {
+      familyId,
+      name: "Orphan",
+      parentCategoryId: "does-not-exist",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("allows the same child name under different parents", async () => {
+    const { env, familyId, admin } = setup();
+    const body = (await (
+      await req(env, "GET", `/api/expenses/categories?familyId=${familyId}`, admin.cookie)
+    ).json()) as { categories: { id: string; name: string }[] };
+    const groceries = body.categories.find((c) => c.name === "Groceries")!.id;
+    const transport = body.categories.find((c) => c.name === "Transport")!.id;
+
+    expect((await req(env, "POST", "/api/expenses/categories", admin.cookie, { familyId, name: "Monthly", parentCategoryId: groceries })).status).toBe(201);
+    expect((await req(env, "POST", "/api/expenses/categories", admin.cookie, { familyId, name: "Monthly", parentCategoryId: transport })).status).toBe(201);
+  });
+});
+
+describe("assistant", () => {
+  it("reports itself unconfigured without an API key", async () => {
+    const { env, alice } = setup();
+    const body = (await (
+      await req(env, "GET", "/api/assistant/status", alice.cookie)
+    ).json()) as { configured: boolean; keyOk?: boolean };
+    expect(body.configured).toBe(false);
+    expect(body.keyOk).toBe(false);
+  });
+
+  it("returns 501 with guidance rather than failing obscurely", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await req(env, "POST", "/api/assistant/chat", alice.cookie, {
+      familyId,
+      message: "I ate noodles for 70",
+    });
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe("not_configured");
+    expect(body.message).toContain("GEMINI_API_KEY");
+  });
+
+  it("keeps 501 as JSON even when the client asks for SSE", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await app.request(
+      "/api/assistant/chat",
+      {
+        method: "POST",
+        headers: {
+          Cookie: alice.cookie,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ familyId, message: "hello" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(501);
+    expect(res.headers.get("content-type") ?? "").toMatch(/json/i);
+  });
+
+  it("probes a present-but-bad key and surfaces guidance", async () => {
+    const { env, alice } = setup();
+    env.GEMINI_API_KEY = "bad-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 }),
+      ),
+    );
+    try {
+      const res = await req(env, "GET", "/api/assistant/status?probe=1", alice.cookie);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { configured: boolean; keyOk: boolean; message?: string };
+      expect(body.configured).toBe(true);
+      expect(body.keyOk).toBe(false);
+      expect(body.message).toMatch(/API key/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("checks family membership before doing anything", async () => {
+    const { env, familyId, sqlite } = setup();
+    const other = seedFamily(sqlite, seedUser(sqlite).id, "Other");
+    const outsider = seedActor(sqlite, other.id, "owner");
+    const res = await req(env, "POST", "/api/assistant/chat", outsider.cookie, {
+      familyId,
+      message: "hello",
+    });
+    // Membership is rejected before the missing-key check.
+    expect(res.status).toBe(404);
+  });
+
+  it("validates the message", async () => {
+    const { env, familyId, alice } = setup();
+    expect((await req(env, "POST", "/api/assistant/chat", alice.cookie, { familyId, message: "" })).status).toBe(400);
+    expect((await req(env, "POST", "/api/assistant/chat", alice.cookie, { familyId })).status).toBe(400);
+  });
+
+  it("requires a session", async () => {
+    expect((await app.request("/api/assistant/chat", { method: "POST" })).status).toBe(401);
+    expect((await app.request("/api/assistant/status")).status).toBe(401);
+  });
+
+  async function readSseEvents(res: Response): Promise<Record<string, unknown>[]> {
+    const text = await res.text();
+    const events: Record<string, unknown>[] = [];
+    for (const block of text.split("\n\n")) {
+      for (const line of block.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        events.push(JSON.parse(raw) as Record<string, unknown>);
+      }
+    }
+    return events;
+  }
+
+  it("streams SSE tokens + done for a plain prose reply", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    const sse = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"You can "}]}}]}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"spend $20."}]},"finishReason":"STOP"}]}\n\n',
+    ].join("");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":streamGenerateContent");
+        return new Response(sse, { status: 200 });
+      }),
+    );
+    try {
+      const res = await app.request(
+        "/api/assistant/chat",
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "how much can I spend?" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type") ?? "").toMatch(/text\/event-stream/);
+      const events = await readSseEvents(res);
+      expect(events.filter((e) => e.type === "token").map((e) => e.text)).toEqual([
+        "You can ",
+        "spend $20.",
+      ]);
+      const done = events.find((e) => e.type === "done");
+      expect(done?.reply).toBe("You can spend $20.");
+      expect(done?.actions).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("streams a tool summary without a second Gemini round and records the expense", async () => {
+    const { env, familyId, alice, sqlite } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":streamGenerateContent");
+        const sse =
+          'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"add_expense","args":{"amountMajor":70,"description":"noodles"}}}]}}]}\n\n';
+        return new Response(sse, { status: 200 });
+      }),
+    );
+    try {
+      const res = await app.request(
+        `/api/assistant/chat?stream=1`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "I spent 70 on noodles" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = await readSseEvents(res);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+      const token = events.find((e) => e.type === "token");
+      expect(String(token?.text ?? "")).toMatch(/70/);
+      expect(String(token?.text ?? "")).toMatch(/noodles/i);
+      const done = events.find((e) => e.type === "done") as {
+        reply: string;
+        actions: { name: string; result: { summary?: string } }[];
+      };
+      expect(done.actions).toHaveLength(1);
+      expect(done.actions[0].name).toBe("add_expense");
+      expect(done.actions[0].result.summary).toMatch(/noodles/i);
+      expect(done.reply).toBe(done.actions[0].result.summary);
+
+      const row = sqlite
+        .prepare(
+          `SELECT amount_minor, description FROM expenses WHERE family_id = ? AND description = 'noodles'`,
+        )
+        .get(familyId) as { amount_minor: number; description: string } | undefined;
+      expect(row?.amount_minor).toBe(7000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("emits an SSE error event when Gemini fails after the stream starts", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 }),
+      ),
+    );
+    try {
+      const res = await app.request(
+        "/api/assistant/chat",
+        {
+          method: "POST",
+          headers: {
+            Cookie: alice.cookie,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Origin: ORIGIN,
+          },
+          body: JSON.stringify({ familyId, message: "hello" }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = await readSseEvents(res);
+      expect(events.some((e) => e.type === "error")).toBe(true);
+      expect(String(events.find((e) => e.type === "error")?.message ?? "")).toMatch(/API key/i);
+      expect(events.some((e) => e.type === "done")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("still returns JSON when Accept is application/json", async () => {
+    const { env, familyId, alice } = setup();
+    env.GEMINI_API_KEY = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain(":generateContent");
+        expect(String(url)).not.toContain("streamGenerateContent");
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: "Hello from JSON." }] } }],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    try {
+      const res = await req(env, "POST", "/api/assistant/chat", alice.cookie, {
+        familyId,
+        message: "hi",
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type") ?? "").toMatch(/json/i);
+      const body = (await res.json()) as { reply: string; actions: unknown[] };
+      expect(body.reply).toBe("Hello from JSON.");
+      expect(body.actions).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

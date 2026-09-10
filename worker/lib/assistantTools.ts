@@ -262,23 +262,40 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
   const parsed = addExpenseInput.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "invalid_input" };
   const data = parsed.data;
-  const category =
-    data.category && isExpenseCategory(data.category) ? data.category : "other";
-  const spentOn = data.spentOn ?? todayIso(ctx.nowMs);
-  const amountCents = toCents(data.amount);
+  const expenseDate = data.spentOn ?? todayIso(ctx.nowMs);
+  const amountMinor = toCents(data.amount);
   const id = crypto.randomUUID();
   const now = Math.floor(ctx.nowMs / 1000);
+
+  const me = await ctx.db
+    .select({ id: schema.familyMembers.id })
+    .from(schema.familyMembers)
+    .where(
+      and(
+        eq(schema.familyMembers.familyId, ctx.familyId),
+        eq(schema.familyMembers.userId, ctx.userId),
+        eq(schema.familyMembers.status, "active"),
+      ),
+    )
+    .get();
+  if (!me) return { ok: false, error: "not_a_member" };
 
   await ctx.db.insert(schema.expenses).values({
     id,
     familyId: ctx.familyId,
-    createdBy: ctx.userId,
-    amountCents,
+    paidByMemberId: me.id,
+    amountMinor,
     currency: data.currency,
-    category,
-    note: data.note,
-    spentOn,
+    expenseDate,
+    description: data.note ?? data.category ?? null,
+    merchant: null,
+    visibility: "family",
+    status: "active",
+    nestDepth: 0,
+    splitType: "none",
+    createdByUserId: ctx.userId,
     updatedAt: now,
+    createdAt: now,
   });
   await insertAuditEvent(ctx.db, {
     familyId: ctx.familyId,
@@ -286,19 +303,19 @@ async function addExpense(raw: unknown, ctx: ToolContext): Promise<ToolResult> {
     action: "expense_created",
     targetType: "expense",
     targetId: id,
-    meta: { via: "assistant", amountCents, category },
+    meta: { via: "assistant", amountMinor, category: data.category },
   });
 
-  const money = formatMoney(amountCents, data.currency);
-  const label = data.note?.trim() || category;
+  const money = formatMoney(amountMinor, data.currency);
+  const label = data.note?.trim() || data.category || "expense";
   return {
     ok: true,
-    data: { id, amount: data.amount, currency: data.currency, category, spentOn },
+    data: { id, amount: data.amount, currency: data.currency, spentOn: expenseDate },
     action: {
       tool: "add_expense",
       summary: `Added ${money} for ${label}`,
       id,
-      href: "/expenses",
+      href: "/money/expenses",
     },
   };
 }
@@ -561,27 +578,35 @@ async function listExpenses(raw: unknown, ctx: ToolContext): Promise<ToolResult>
   const parsed = listExpensesInput.safeParse(raw ?? {});
   if (!parsed.success) return { ok: false, error: "invalid_input" };
   const limit = parsed.data.limit ?? 20;
-  const conditions = [eq(schema.expenses.familyId, ctx.familyId)];
-  if (parsed.data.category && isExpenseCategory(parsed.data.category)) {
-    conditions.push(eq(schema.expenses.category, parsed.data.category));
-  }
   const rows = await ctx.db
     .select()
     .from(schema.expenses)
-    .where(and(...(conditions as [typeof conditions[0], ...typeof conditions])))
-    .orderBy(desc(schema.expenses.spentOn), desc(sql`"expenses".rowid`))
+    .where(
+      and(
+        eq(schema.expenses.familyId, ctx.familyId),
+        eq(schema.expenses.status, "active"),
+      ),
+    )
+    .orderBy(desc(schema.expenses.expenseDate), desc(sql`"expenses".rowid`))
     .limit(limit);
+
+  const category = parsed.data.category;
+  const filtered =
+    category && isExpenseCategory(category)
+      ? rows.filter((r) =>
+          (r.description ?? "").toLowerCase().includes(category.toLowerCase()),
+        )
+      : rows;
 
   return {
     ok: true,
     data: {
-      expenses: rows.map((r) => ({
+      expenses: filtered.map((r) => ({
         id: r.id,
-        amount: r.amountCents / 100,
+        amount: r.amountMinor / 100,
         currency: r.currency,
-        category: r.category,
-        note: r.note,
-        spentOn: r.spentOn,
+        note: r.description,
+        spentOn: r.expenseDate,
       })),
     },
   };

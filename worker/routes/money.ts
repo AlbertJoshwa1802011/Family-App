@@ -14,7 +14,7 @@ import {
   fromCents,
   settledByDestination,
   toCents,
-} from "../lib/money";
+} from "../lib/settlements";
 
 export const moneyRoutes = new Hono<HonoEnv>();
 

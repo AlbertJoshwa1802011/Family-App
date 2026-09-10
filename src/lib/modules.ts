@@ -66,7 +66,9 @@ export const ROUTE_MODULE: Array<{ prefix: string; module: FamilyModule }> = [
   { prefix: "/notes", module: "notes" },
   { prefix: "/contacts", module: "contacts" },
   { prefix: "/chat", module: "chat" },
+  { prefix: "/money", module: "expenses" },
   { prefix: "/expenses", module: "expenses" },
+  { prefix: "/vault", module: "documents" },
   { prefix: "/assistant", module: "assistant" },
   { prefix: "/locations", module: "location" },
 ];

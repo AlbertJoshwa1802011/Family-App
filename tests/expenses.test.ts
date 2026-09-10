@@ -1,192 +1,786 @@
 /**
- * Family expenses: create/list/update/delete, Zod boundaries, family isolation.
+ * Expenses API — privacy, totals and the write path.
+ *
+ * The privacy rule is the reason this feature exists in the shape it does:
+ * an expense is private to the member who recorded it, and NO family role
+ * (owner or admin included) may read it. These tests are the guard on that.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
-import { fromCents, toCents, formatMoney } from "../worker/lib/expenses";
-import {
-  createTestEnv,
-  seedActor,
-  seedFamily,
-  seedUser,
-  type TestEnv,
-} from "./helpers/testEnv";
+import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
+import type { Env } from "../worker/types";
 
-let t: TestEnv;
-let familyId: string;
-let owner: ReturnType<typeof seedActor>;
-let member: ReturnType<typeof seedActor>;
+interface ExpenseBody {
+  expense: {
+    id: string;
+    amountMinor: number;
+    visibility: "family" | "private";
+    createdByUserId: string;
+  };
+}
 
-beforeEach(() => {
-  t = createTestEnv();
-  const ownerUser = seedUser(t.sqlite);
-  familyId = seedFamily(t.sqlite, ownerUser.id).id;
-  owner = seedActor(t.sqlite, familyId, "owner", { name: "Olive Owner" });
-  member = seedActor(t.sqlite, familyId, "member", { name: "Milo Member" });
-});
+interface ListBody {
+  expenses: { id: string }[];
+  totalMinor: number;
+}
 
-function req(method: string, path: string, cookie: string, body?: object) {
+interface SummaryBody {
+  view: string;
+  currency: string;
+  totalMinor: number;
+  count: number;
+  privateMinor: number;
+  sharedMinor: number;
+  byCategory: { categoryId: string | null; name: string; totalMinor: number; count: number }[];
+  byMonth: { month: string; totalMinor: number }[];
+  byDay: { date: string; totalMinor: number; count: number }[];
+}
+
+const ORIGIN = "http://localhost:5173";
+
+function post(env: Env, path: string, cookie: string, body: unknown) {
   return app.request(
     path,
     {
-      method,
-      headers: { Cookie: cookie, "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        Origin: ORIGIN,
+      },
+      body: JSON.stringify(body),
     },
-    t.env,
+    env,
   );
 }
 
-describe("expense money helpers", () => {
-  it("rounds major units to integer cents", () => {
-    expect(toCents(100)).toBe(10000);
-    expect(toCents(99.5)).toBe(9950);
-    expect(toCents(1.01)).toBe(101);
-    expect(fromCents(10000)).toBe(100);
+function patch(env: Env, path: string, cookie: string, body: unknown) {
+  return app.request(
+    path,
+    {
+      method: "PATCH",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/json",
+        Origin: ORIGIN,
+      },
+      body: JSON.stringify(body),
+    },
+    env,
+  );
+}
+
+function get(env: Env, path: string, cookie: string) {
+  return app.request(path, { headers: { Cookie: cookie } }, env);
+}
+
+/** A family with two members plus an admin, all able to act financially. */
+function setup() {
+  const { env, sqlite } = createTestEnv();
+  const ownerUser = seedUser(sqlite);
+  const family = seedFamily(sqlite, ownerUser.id);
+  const alice = seedActor(sqlite, family.id, "member", { name: "Alice" });
+  const bob = seedActor(sqlite, family.id, "member", { name: "Bob" });
+  const admin = seedActor(sqlite, family.id, "owner", { name: "Owner" });
+  return { env, sqlite, familyId: family.id, alice, bob, admin };
+}
+
+function expensePayload(
+  familyId: string,
+  paidByMemberId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    familyId,
+    paidByMemberId,
+    amountMinor: 12_50,
+    currency: "USD",
+    expenseDate: "2026-08-14",
+    merchant: "Corner Shop",
+    ...overrides,
+  };
+}
+
+describe("expenses: creation", () => {
+  it("creates an expense that is private by default", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as ExpenseBody;
+    expect(body.expense.visibility).toBe("private");
+    expect(body.expense.amountMinor).toBe(1250);
   });
 
-  it("formats INR/USD/EUR/GBP and a fallback code", () => {
-    expect(formatMoney(10000, "INR")).toBe("₹100");
-    expect(formatMoney(1050, "USD")).toBe("$10.50");
-    expect(formatMoney(200, "EUR")).toBe("€2");
-    expect(formatMoney(100, "GBP")).toBe("£1");
-    expect(formatMoney(500, "JPY")).toBe("5 JPY");
+  it("rejects a currency that isn't the family's", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { currency: "EUR" }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("validation_error");
+  });
+
+  it("allows editing a USD expense after the family switched to INR", async () => {
+    const { env, sqlite, familyId, alice } = setup();
+    const created = (await (
+      await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId))
+    ).json()) as ExpenseBody;
+
+    sqlite
+      .prepare("UPDATE families SET default_currency = ? WHERE id = ?")
+      .run("INR", familyId);
+
+    const keep = await patch(env, `/api/expenses/${created.expense.id}`, alice.cookie, {
+      amountMinor: 15_00,
+      currency: "USD",
+      merchant: "Corner Shop",
+    });
+    expect(keep.status).toBe(200);
+
+    const relabel = await patch(env, `/api/expenses/${created.expense.id}`, alice.cookie, {
+      currency: "INR",
+    });
+    expect(relabel.status).toBe(200);
+    const body = (await relabel.json()) as { expense: { currency: string } };
+    expect(body.expense.currency).toBe("INR");
+  });
+
+  it("rejects a negative amount", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { amountMinor: -1 }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("allows a zero amount for container parents", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 0,
+        merchant: "Google Pay",
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects a malformed date", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { expenseDate: "14-08-2026" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("is idempotent for a repeated clientRequestId", async () => {
+    const { env, familyId, alice } = setup();
+    const clientRequestId = crypto.randomUUID();
+    const payload = expensePayload(familyId, alice.memberId, { clientRequestId });
+
+    const first = await post(env, "/api/expenses", alice.cookie, payload);
+    expect(first.status).toBe(201);
+    const second = await post(env, "/api/expenses", alice.cookie, payload);
+    expect(second.status).toBe(200);
+
+    const a = (await first.json()) as ExpenseBody;
+    const b = (await second.json()) as ExpenseBody;
+    expect(b.expense.id).toBe(a.expense.id);
+
+    const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)).json()) as ListBody;
+    expect(list.expenses).toHaveLength(1);
   });
 });
 
-describe("expenses API", () => {
-  it("create → list roundtrip with amount in major units and cents", async () => {
-    const create = await req("POST", "/api/expenses", member.cookie, {
+describe("expenses: privacy", () => {
+  it("hides a private expense from another member's list", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId));
+
+    const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, bob.cookie)).json()) as ListBody;
+    expect(list.expenses).toHaveLength(0);
+    expect(list.totalMinor).toBe(0);
+  });
+
+  it("hides a private expense from the family OWNER too", async () => {
+    const { env, familyId, alice, admin } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId));
+
+    const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, admin.cookie)).json()) as ListBody;
+    // No role bypass: personal books stay personal.
+    expect(list.expenses).toHaveLength(0);
+  });
+
+  it("returns 404 (not 403) when another member fetches it by id", async () => {
+    const { env, familyId, alice, bob } = setup();
+    const created = (await (
+      await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId))
+    ).json()) as ExpenseBody;
+
+    const res = await get(env, `/api/expenses/${created.expense.id}`, bob.cookie);
+    expect(res.status).toBe(404);
+  });
+
+  it("shows an expense once its owner marks it family-visible", async () => {
+    const { env, familyId, alice, bob } = setup();
+    const created = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, { visibility: "family" }),
+      )
+    ).json()) as ExpenseBody;
+
+    const res = await get(env, `/api/expenses/${created.expense.id}`, bob.cookie);
+    expect(res.status).toBe(200);
+
+    const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, bob.cookie)).json()) as ListBody;
+    expect(list.expenses.map((e) => e.id)).toContain(created.expense.id);
+  });
+
+  it("lets only the creator edit an expense", async () => {
+    const { env, familyId, alice, bob, admin } = setup();
+    const created = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, { visibility: "family" }),
+      )
+    ).json()) as ExpenseBody;
+
+    const byOther = await patch(env, `/api/expenses/${created.expense.id}`, bob.cookie, { amountMinor: 1 });
+    expect(byOther.status).toBe(403);
+
+    const byOwner = await patch(env, `/api/expenses/${created.expense.id}`, admin.cookie, { amountMinor: 1 });
+    expect(byOwner.status).toBe(403);
+
+    const byCreator = await patch(env, `/api/expenses/${created.expense.id}`, alice.cookie, { amountMinor: 999 });
+    expect(byCreator.status).toBe(200);
+  });
+
+  it("keeps a trashed expense out of the list", async () => {
+    const { env, familyId, alice } = setup();
+    const created = (await (
+      await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId))
+    ).json()) as ExpenseBody;
+
+    const del = await app.request(
+      `/api/expenses/${created.expense.id}`,
+      { method: "DELETE", headers: { Cookie: alice.cookie, Origin: ORIGIN } },
+      env,
+    );
+    expect([200, 204]).toContain(del.status);
+
+    const list = (await (await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)).json()) as ListBody;
+    expect(list.expenses).toHaveLength(0);
+  });
+
+  it("list view=mine is only the caller's rows; default list still shows shared family rows", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 100 }));
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 200, visibility: "family" }),
+    );
+
+    const mine = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=mine`, alice.cookie)
+    ).json()) as ListBody;
+    expect(mine.expenses).toHaveLength(1);
+    expect(mine.totalMinor).toBe(100);
+
+    const shared = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&view=family`, alice.cookie)
+    ).json()) as ListBody;
+    expect(shared.expenses).toHaveLength(2);
+    expect(shared.totalMinor).toBe(300);
+
+    const def = (await (
+      await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)
+    ).json()) as ListBody;
+    expect(def.expenses).toHaveLength(2);
+    expect(def.totalMinor).toBe(300);
+  });
+});
+
+describe("expenses: summary", () => {
+  it("totals only what the caller recorded under view=mine", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 1000 }));
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 2500 }));
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 9999, visibility: "family" }),
+    );
+
+    const res = await get(env, `/api/expenses/summary?familyId=${familyId}`, alice.cookie);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as SummaryBody;
+    expect(body.view).toBe("mine");
+    expect(body.totalMinor).toBe(3500);
+    expect(body.count).toBe(2);
+    expect(body.currency).toBe("USD");
+  });
+
+  it("includes others' shared expenses under view=family, but not their private ones", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(env, "/api/expenses", alice.cookie, expensePayload(familyId, alice.memberId, { amountMinor: 1000 }));
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 500, visibility: "family" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      bob.cookie,
+      expensePayload(familyId, bob.memberId, { amountMinor: 7777 }), // private to Bob
+    );
+
+    const body = (await (
+      await get(env, `/api/expenses/summary?familyId=${familyId}&view=family`, alice.cookie)
+    ).json()) as SummaryBody;
+
+    expect(body.totalMinor).toBe(1500);
+    expect(body.privateMinor).toBe(1000); // Alice's own
+    expect(body.sharedMinor).toBe(500);
+  });
+
+  it("groups by month and by category", async () => {
+    const { env, familyId, alice } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { amountMinor: 300, expenseDate: "2026-07-02" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { amountMinor: 700, expenseDate: "2026-08-09" }),
+    );
+
+    const body = (await (
+      await get(env, `/api/expenses/summary?familyId=${familyId}`, alice.cookie)
+    ).json()) as SummaryBody;
+
+    expect(body.byMonth).toEqual([
+      { month: "2026-07", totalMinor: 300 },
+      { month: "2026-08", totalMinor: 700 },
+    ]);
+    // Both are uncategorized here, so they roll into one bucket.
+    expect(body.byCategory).toHaveLength(1);
+    expect(body.byCategory[0].name).toBe("Uncategorized");
+    expect(body.byCategory[0].totalMinor).toBe(1000);
+    expect(body.byDay).toEqual([
+      { date: "2026-07-02", totalMinor: 300, count: 1 },
+      { date: "2026-08-09", totalMinor: 700, count: 1 },
+    ]);
+  });
+
+  it("honours a from/to window", async () => {
+    const { env, familyId, alice } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { amountMinor: 300, expenseDate: "2026-07-02" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { amountMinor: 700, expenseDate: "2026-08-09" }),
+    );
+
+    const body = (await (
+      await get(env, `/api/expenses/summary?familyId=${familyId}&from=2026-08-01&to=2026-08-31`, alice.cookie)
+    ).json()) as SummaryBody;
+    expect(body.totalMinor).toBe(700);
+    expect(body.count).toBe(1);
+  });
+
+  it("rejects a malformed date window", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await get(env, `/api/expenses/summary?familyId=${familyId}&from=nope`, alice.cookie);
+    expect(res.status).toBe(400);
+  });
+
+  it("requires familyId", async () => {
+    const { env, alice } = setup();
+    const res = await get(env, "/api/expenses/summary", alice.cookie);
+    expect(res.status).toBe(400);
+  });
+
+  it("hides the family from a non-member", async () => {
+    const { env, familyId, sqlite } = setup();
+    const otherFamily = seedFamily(sqlite, seedUser(sqlite).id, "Other");
+    const outsider = seedActor(sqlite, otherFamily.id, "owner");
+    const res = await get(env, `/api/expenses/summary?familyId=${familyId}`, outsider.cookie);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("expenses: list filters (Money Manager clarity)", () => {
+  it("q= searches merchant and description", async () => {
+    const { env, familyId, alice } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "Corner Shop" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        merchant: "Pharmacy",
+        description: "vitamins",
+      }),
+    );
+
+    const shop = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&q=Corner`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(shop.expenses).toHaveLength(1);
+    expect(shop.expenses[0].merchant).toBe("Corner Shop");
+
+    const note = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&q=vitamin`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(note.expenses).toHaveLength(1);
+    expect(note.expenses[0].merchant).toBe("Pharmacy");
+  });
+
+  it("categoryId=none returns only uncategorized rows", async () => {
+    const { env, familyId, alice } = setup();
+    const cats = (await (
+      await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie)
+    ).json()) as { categories: { id: string }[] };
+    const catId = cats.categories[0].id;
+
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { categoryId: catId, merchant: "Tagged" }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "Loose" }),
+    );
+
+    const none = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&categoryId=none`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(none.expenses.map((e) => e.merchant)).toEqual(["Loose"]);
+
+    const tagged = (await (
+      await get(env, `/api/expenses?familyId=${familyId}&categoryId=${catId}`, alice.cookie)
+    ).json()) as ListBody & { expenses: { merchant: string | null }[] };
+    expect(tagged.expenses.map((e) => e.merchant)).toEqual(["Tagged"]);
+  });
+});
+
+describe("expenses: auth", () => {
+  const routes = [
+    { method: "GET", path: "/api/expenses?familyId=f-1" },
+    { method: "GET", path: "/api/expenses/summary?familyId=f-1" },
+    { method: "GET", path: "/api/expenses/categories?familyId=f-1" },
+    { method: "POST", path: "/api/expenses" },
+    { method: "GET", path: "/api/expenses/e-1" },
+    { method: "PATCH", path: "/api/expenses/e-1" },
+    { method: "DELETE", path: "/api/expenses/e-1" },
+  ];
+
+  for (const { method, path } of routes) {
+    it(`${method} ${path} → 401 without a session`, async () => {
+      const res = await app.request(path, { method });
+      expect(res.status).toBe(401);
+    });
+  }
+});
+
+describe("expenses: nesting", () => {
+  it("creates a child under a parent and rolls up on list/detail", async () => {
+    const { env, familyId, alice } = setup();
+    const parent = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 0,
+          merchant: "Google Pay",
+        }),
+      )
+    ).json()) as ExpenseBody & {
+      expense: { id: string; nestDepth: number; childCount: number };
+    };
+    expect(parent.expense.nestDepth).toBe(0);
+
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 400,
+        merchant: "Coffee",
+        parentExpenseId: parent.expense.id,
+      }),
+    );
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 600,
+        merchant: "Lunch",
+        parentExpenseId: parent.expense.id,
+      }),
+    );
+
+    const list = (await (
+      await get(env, `/api/expenses?familyId=${familyId}`, alice.cookie)
+    ).json()) as {
+      expenses: {
+        id: string;
+        childCount: number;
+        childrenTotalMinor: number;
+        merchant: string | null;
+      }[];
+      totalMinor: number;
+    };
+    // Roots only — the two children are hidden from the default list.
+    expect(list.expenses).toHaveLength(1);
+    expect(list.expenses[0].id).toBe(parent.expense.id);
+    expect(list.expenses[0].childCount).toBe(2);
+    expect(list.expenses[0].childrenTotalMinor).toBe(1000);
+    // Leaf-only total (children), not double-counting the 0 parent.
+    expect(list.totalMinor).toBe(1000);
+
+    const detail = (await (
+      await get(env, `/api/expenses/${parent.expense.id}`, alice.cookie)
+    ).json()) as {
+      expense: { childCount: number; childrenTotalMinor: number };
+      children: { merchant: string | null }[];
+    };
+    expect(detail.expense.childCount).toBe(2);
+    expect(detail.expense.childrenTotalMinor).toBe(1000);
+    expect(detail.children.map((c) => c.merchant).sort()).toEqual(["Coffee", "Lunch"]);
+  });
+
+  it("refuses nesting deeper than grandchild (depth 2)", async () => {
+    const { env, familyId, alice } = setup();
+    const root = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, { amountMinor: 0, merchant: "Root" }),
+      )
+    ).json()) as ExpenseBody;
+    const child = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 0,
+          merchant: "Child",
+          parentExpenseId: root.expense.id,
+        }),
+      )
+    ).json()) as ExpenseBody;
+    const grand = (await (
+      await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          amountMinor: 100,
+          merchant: "Grand",
+          parentExpenseId: child.expense.id,
+        }),
+      )
+    ).json()) as ExpenseBody & { expense: { nestDepth: number } };
+    expect(grand.expense.nestDepth).toBe(2);
+
+    const tooDeep = await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, {
+        amountMinor: 50,
+        parentExpenseId: grand.expense.id,
+      }),
+    );
+    expect(tooDeep.status).toBe(400);
+  });
+});
+
+describe("expenses: categories", () => {
+  it("GET categories returns non-empty builtins", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      categories: { id: string; name: string; color: string | null; emoji?: string }[];
+      tree: { id: string; children: unknown[]; emoji?: string }[];
+    };
+    expect(body.categories.length).toBeGreaterThan(5);
+    expect(body.categories.some((c) => c.id.startsWith("builtin_"))).toBe(true);
+    expect(body.categories.some((c) => c.color && c.color.startsWith("#"))).toBe(true);
+    expect(body.categories.every((c) => typeof c.emoji === "string" && c.emoji.length > 0)).toBe(
+      true,
+    );
+    const dining = body.categories.find((c) => c.id === "builtin_dining");
+    expect(dining?.emoji).toBe("🍔");
+    const groceries = body.tree.find((t) => t.id === "builtin_groceries");
+    expect(groceries?.children.length).toBeGreaterThan(0);
+  });
+
+  it("lets a non-admin member create a family category", async () => {
+    const { env, familyId, alice } = setup();
+    const res = await post(env, "/api/expenses/categories", alice.cookie, {
       familyId,
-      amount: 100,
-      category: "food",
-      note: "outside snacks",
+      name: "School lunch",
+      emoji: "🥗",
     });
-    expect(create.status).toBe(201);
-    const { expense } = (await create.json()) as {
-      expense: { id: string; amount: number; amountCents: number; category: string; note: string };
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      category: { name: string; builtin: boolean; emoji: string; icon: string | null };
     };
-    expect(expense.amount).toBe(100);
-    expect(expense.amountCents).toBe(10000);
-    expect(expense.category).toBe("food");
-    expect(expense.note).toBe("outside snacks");
-
-    const list = await req("GET", `/api/expenses?familyId=${familyId}`, owner.cookie);
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      expenses: { id: string }[];
-      total: number;
-      totalCents: number;
-    };
-    expect(body.expenses.map((e) => e.id)).toEqual([expense.id]);
-    expect(body.total).toBe(100);
-    expect(body.totalCents).toBe(10000);
+    expect(body.category.name).toBe("School lunch");
+    expect(body.category.builtin).toBe(false);
+    expect(body.category.emoji).toBe("🥗");
+    expect(body.category.icon).toBe("🥗");
   });
+});
 
-  it("PATCH updates amount; null note clears; member cannot edit owner's row", async () => {
-    const created = await (
-      await req("POST", "/api/expenses", owner.cookie, {
-        familyId,
-        amount: 50,
-        note: "fuel",
-        category: "transport",
-      })
-    ).json() as { expense: { id: string } };
+describe("expenses: merchant lookup autocomplete", () => {
+  it("ranks prefix + frequency and fills category emoji", async () => {
+    const { env, familyId, alice } = setup();
+    // Seed builtins before referencing category ids.
+    await get(env, `/api/expenses/categories?familyId=${familyId}`, alice.cookie);
 
-    const forbidden = await req("PATCH", `/api/expenses/${created.expense.id}`, member.cookie, {
-      amount: 1,
-    });
-    expect(forbidden.status).toBe(403);
-
-    const patched = await req("PATCH", `/api/expenses/${created.expense.id}`, owner.cookie, {
-      amount: 75.5,
-      note: null,
-    });
-    expect(patched.status).toBe(200);
-    const { expense } = (await patched.json()) as {
-      expense: { amount: number; amountCents: number; note: string | null };
-    };
-    expect(expense.amountCents).toBe(7550);
-    expect(expense.note).toBeNull();
-  });
-
-  it("DELETE: author can delete; stranger 404; missing familyId 400", async () => {
-    const created = await (
-      await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10 })
-    ).json() as { expense: { id: string } };
-
-    expect((await req("GET", "/api/expenses", member.cookie)).status).toBe(400);
-    expect((await req("DELETE", `/api/expenses/${created.expense.id}`, member.cookie)).status).toBe(200);
-    expect((await req("GET", `/api/expenses/${created.expense.id}`, member.cookie)).status).toBe(404);
-  });
-
-  it("Zod: missing amount, negative, bad currency, bad category → 400 validation_error", async () => {
-    const missing = await req("POST", "/api/expenses", member.cookie, { familyId });
-    expect(missing.status).toBe(400);
-    expect(((await missing.json()) as { error: string }).error).toBe("validation_error");
-
-    expect(
-      (await req("POST", "/api/expenses", member.cookie, { familyId, amount: -5 })).status,
-    ).toBe(400);
-    expect(
-      (await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, currency: "rupee" })).status,
-    ).toBe(400);
+    for (let i = 0; i < 3; i++) {
+      const res = await post(
+        env,
+        "/api/expenses",
+        alice.cookie,
+        expensePayload(familyId, alice.memberId, {
+          merchant: "outside snacks",
+          amountMinor: 100_00 + i,
+          categoryId: "builtin_dining",
+          expenseDate: `2026-09-0${i + 1}`,
+        }),
+      );
+      expect(res.status).toBe(201);
+    }
     expect(
       (
-        await req("POST", "/api/expenses", member.cookie, {
-          familyId,
-          amount: 10,
-          category: "!!!bad!!!",
-        })
+        await post(
+          env,
+          "/api/expenses",
+          alice.cookie,
+          expensePayload(familyId, alice.memberId, {
+            merchant: "office coffee",
+            amountMinor: 40_00,
+            categoryId: "builtin_dining_coffee",
+          }),
+        )
       ).status,
-    ).toBe(400);
-    expect(
-      (await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, spentOn: "5 Sept" })).status,
-    ).toBe(400);
+    ).toBe(201);
+
+    const empty = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}`,
+      alice.cookie,
+    );
+    expect(empty.status).toBe(200);
+    const emptyBody = (await empty.json()) as {
+      suggestions: { label: string; count: number; categoryEmoji: string }[];
+    };
+    expect(emptyBody.suggestions[0]?.label).toBe("outside snacks");
+    expect(emptyBody.suggestions[0]?.count).toBe(3);
+    expect(emptyBody.suggestions[0]?.categoryEmoji).toBe("🍔");
+
+    const q = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=out`,
+      alice.cookie,
+    );
+    const { suggestions } = (await q.json()) as {
+      suggestions: { label: string }[];
+    };
+    expect(suggestions[0]?.label).toBe("outside snacks");
   });
 
-  it("family isolation: outsider cannot list, get, create, or mutate", async () => {
-    const created = await (
-      await req("POST", "/api/expenses", member.cookie, { familyId, amount: 20, note: "secret" })
-    ).json() as { expense: { id: string } };
+  it("isolates families and strips LIKE wildcards", async () => {
+    const { env, familyId, alice, bob } = setup();
+    await post(
+      env,
+      "/api/expenses",
+      alice.cookie,
+      expensePayload(familyId, alice.memberId, { merchant: "secret snacks" }),
+    );
 
-    const strangerUser = seedUser(t.sqlite);
-    const otherFamily = seedFamily(t.sqlite, strangerUser.id);
-    const stranger = seedActor(t.sqlite, otherFamily.id, "owner");
+    const strangerEnv = createTestEnv();
+    const strangerOwner = seedUser(strangerEnv.sqlite);
+    const strangerFamily = seedFamily(strangerEnv.sqlite, strangerOwner.id);
+    const stranger = seedActor(strangerEnv.sqlite, strangerFamily.id, "owner");
 
     expect(
-      (await req("GET", `/api/expenses?familyId=${familyId}`, stranger.cookie)).status,
+      (
+        await get(
+          strangerEnv.env,
+          `/api/expenses/lookup?familyId=${familyId}&q=snack`,
+          stranger.cookie,
+        )
+      ).status,
     ).toBe(404);
-    expect(
-      (await req("GET", `/api/expenses/${created.expense.id}`, stranger.cookie)).status,
-    ).toBe(404);
-    expect(
-      (await req("POST", "/api/expenses", stranger.cookie, { familyId, amount: 1 })).status,
-    ).toBe(404);
-    expect(
-      (await req("PATCH", `/api/expenses/${created.expense.id}`, stranger.cookie, { amount: 99 })).status,
-    ).toBe(404);
-    expect(
-      (await req("DELETE", `/api/expenses/${created.expense.id}`, stranger.cookie)).status,
-    ).toBe(404);
-  });
 
-  it("401 without a session; deep path 404 JSON", async () => {
-    expect((await app.request("/api/expenses", {}, t.env)).status).toBe(401);
-    expect(
-      (await app.request("/api/expenses", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, t.env)).status,
-    ).toBe(401);
-    const deep = await app.request("/api/expenses/x/y/z", {}, t.env);
-    expect(deep.status).toBe(404);
-    expect(((await deep.json()) as { error: string }).error).toBe("not_found");
-  });
+    // Private expense: bob (same family) should not see alice's private merchant.
+    const bobView = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=snack`,
+      bob.cookie,
+    );
+    expect(bobView.status).toBe(200);
+    const bobBody = (await bobView.json()) as { suggestions: { label: string }[] };
+    expect(bobBody.suggestions.every((s) => s.label !== "secret snacks")).toBe(true);
 
-  it("filters by category", async () => {
-    await req("POST", "/api/expenses", member.cookie, { familyId, amount: 10, category: "food" });
-    await req("POST", "/api/expenses", member.cookie, { familyId, amount: 40, category: "transport" });
-    const res = await req("GET", `/api/expenses?familyId=${familyId}&category=food`, member.cookie);
-    const { expenses, total } = (await res.json()) as { expenses: { category: string }[]; total: number };
-    expect(expenses.every((e) => e.category === "food")).toBe(true);
-    expect(total).toBe(10);
+    const meta = await get(
+      env,
+      `/api/expenses/lookup?familyId=${familyId}&q=${encodeURIComponent("%_snack")}`,
+      alice.cookie,
+    );
+    expect(meta.status).toBe(200);
+    const { suggestions } = (await meta.json()) as { suggestions: { label: string }[] };
+    expect(suggestions.some((s) => s.label.includes("snack"))).toBe(true);
   });
 });
