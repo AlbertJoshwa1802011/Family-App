@@ -10,6 +10,7 @@ import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
 import { sendEmail } from "../lib/email";
+import { sendEmailViaGmail } from "../lib/gmail";
 import { inviteEmail } from "../lib/emailTemplates";
 import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
 import {
@@ -537,23 +538,43 @@ familyRoutes.post(
       meta: { email, role, modules: parseModulesJson(modulesJson) },
     });
 
-    // Best-effort invite email (no-op without RESEND_API_KEY — the caller
-    // still gets the link to share manually).
+    // Best-effort invite email:
+    // 1) Resend (app transactional mail) when RESEND_API_KEY is set
+    // 2) else the inviter's Gmail via gmail.send (needs re-consent once)
+    // Caller still gets the link to share manually if both fail.
     const [inviter, family] = await Promise.all([
-      db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
-      db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
+      db
+        .select({ name: schema.users.name, email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .get(),
+      db
+        .select({ name: schema.families.name })
+        .from(schema.families)
+        .where(eq(schema.families.id, familyId))
+        .get(),
     ]);
     const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
     const inviteUrl = `${appUrl}/invite/${token}`;
-    const emailSent = await sendEmail(c.env, {
-      to: email,
-      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
-      html: inviteEmail({
-        inviterName: inviter?.name ?? null,
-        familyName: family?.name ?? "your family",
-        inviteUrl,
-      }),
+    const subject = `You're invited to ${family?.name ?? "a family"} on Family Vault`;
+    const html = inviteEmail({
+      inviterName: inviter?.name ?? null,
+      familyName: family?.name ?? "your family",
+      inviteUrl,
     });
+    const message = { to: email, subject, html };
+
+    let emailSent = await sendEmail(c.env, message);
+    let emailVia: "resend" | "gmail" | null = emailSent ? "resend" : null;
+    if (!emailSent && inviter?.email) {
+      emailSent = await sendEmailViaGmail(c.env, {
+        userId,
+        fromEmail: inviter.email,
+        fromName: inviter.name,
+        message,
+      });
+      if (emailSent) emailVia = "gmail";
+    }
 
     return c.json(
       {
@@ -564,6 +585,7 @@ familyRoutes.post(
           token,
           inviteUrl,
           emailSent,
+          emailVia,
           modules: parseModulesJson(modulesJson),
         },
       },

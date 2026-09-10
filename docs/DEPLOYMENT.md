@@ -33,9 +33,12 @@ In Google Cloud Console → Credentials → OAuth client (Web application):
 - Scopes used: `openid email profile` +
   `https://www.googleapis.com/auth/drive.file` (app-created Drive files) +
   `https://www.googleapis.com/auth/calendar.events` (push Family Vault events
-  into each user's primary Google Calendar). Enable **Google Drive API** and
-  **Google Calendar API** on the GCP project. After adding Calendar scope,
-  existing users must sign out and sign back in once so Google re-consents.
+  into each user's primary Google Calendar) +
+  `https://www.googleapis.com/auth/gmail.send` (send family invites from the
+  signed-in user's Gmail when `RESEND_API_KEY` is unset). Enable **Google Drive
+  API**, **Google Calendar API**, and **Gmail API** on the GCP project. After
+  adding Calendar or Gmail scopes, existing users must sign out and sign back
+  in once so Google re-consents.
 
 ### 2.5 Secrets (never in wrangler.jsonc, never committed)
 
