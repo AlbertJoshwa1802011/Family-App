@@ -19,11 +19,11 @@ export function NotificationBell() {
     <Link
       to="/notifications"
       aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
-      className="relative flex size-11 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-white/5 active:scale-95"
+      className="lq-press relative flex size-10 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-white/8 hover:text-fg"
     >
-      <Bell className="size-6" aria-hidden="true" />
+      <Bell className="size-5.5" aria-hidden="true" />
       {unread > 0 && (
-        <span className="absolute top-1.5 right-1.5 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white tabular-nums">
+        <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold tabular-nums text-white shadow-[0_0_0_2px_#080d18]">
           {unread > 9 ? "9+" : unread}
         </span>
       )}

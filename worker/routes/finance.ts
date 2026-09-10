@@ -100,7 +100,7 @@ financeRoutes.get("/settings", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return invalid(c, ["familyId"], "familyId is required");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -114,7 +114,7 @@ financeRoutes.put("/settings", requireSession, zv(settingsSchema), async (c) => 
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (data.savingsTargetKind === "amount" && data.savingsTargetMinor == null) {
@@ -176,7 +176,7 @@ financeRoutes.get("/incomes", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return invalid(c, ["familyId"], "familyId is required");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -192,7 +192,7 @@ financeRoutes.post("/incomes", requireSession, zv(createIncomeSchema), async (c)
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -242,7 +242,7 @@ financeRoutes.patch("/incomes/:id", requireSession, zv(updateIncomeSchema), asyn
   const row = await db.select().from(schema.incomes).where(eq(schema.incomes.id, id)).get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   // Not mine and not shared → it does not exist, as far as this caller knows.
   if (row.visibility === "private" && row.ownerUserId !== userId) {
@@ -278,7 +278,7 @@ financeRoutes.delete("/incomes/:id", requireSession, async (c) => {
   const row = await db.select().from(schema.incomes).where(eq(schema.incomes.id, id)).get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);
@@ -345,7 +345,7 @@ financeRoutes.get("/commitments", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return invalid(c, ["familyId"], "familyId is required");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -367,7 +367,7 @@ financeRoutes.post("/commitments", requireSession, zv(createCommitmentSchema), a
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -430,7 +430,7 @@ financeRoutes.patch("/commitments/:id", requireSession, zv(updateCommitmentSchem
   const row = await db.select().from(schema.commitments).where(eq(schema.commitments.id, id)).get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);
@@ -496,7 +496,7 @@ financeRoutes.delete("/commitments/:id", requireSession, async (c) => {
   const row = await db.select().from(schema.commitments).where(eq(schema.commitments.id, id)).get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.visibility === "private" && row.ownerUserId !== userId) {
     return c.json({ error: "not_found" }, 404);
@@ -525,7 +525,7 @@ financeRoutes.post("/commitments/:id/pay", requireSession, zv(paySchema), async 
   const row = await db.select().from(schema.commitments).where(eq(schema.commitments.id, id)).get();
   if (!row) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, row.familyId);
+  const membership = await requireFamilyMember(c, row.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
   if (row.ownerUserId !== userId) {
     return c.json({ error: row.visibility === "private" ? "not_found" : "forbidden" }, row.visibility === "private" ? 404 : 403);
@@ -601,7 +601,7 @@ financeRoutes.get("/overview", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return invalid(c, ["familyId"], "familyId is required");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const dateParam = c.req.query("date");

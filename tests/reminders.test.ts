@@ -13,6 +13,8 @@ import {
   eventReminderText,
   expiryReminderText,
   parseWindows,
+  taskReminderText,
+  withDayOfWindow,
 } from "../worker/lib/reminders";
 
 const TODAY = Date.UTC(2026, 5, 9); // 2026-06-09 00:00 UTC, in ms
@@ -70,7 +72,7 @@ describe("daysUntilUnix", () => {
 // ── dueReminderWindow ────────────────────────────────────────────────────────
 
 describe("dueReminderWindow", () => {
-  const W = [30, 7, 1];
+  const W = [30, 7, 2, 0];
 
   it("fires the 30-window when only 30 applies", () => {
     expect(dueReminderWindow(25, W)).toBe(30);
@@ -80,12 +82,13 @@ describe("dueReminderWindow", () => {
   it("fires the tightest applicable window", () => {
     expect(dueReminderWindow(7, W)).toBe(7);
     expect(dueReminderWindow(5, W)).toBe(7);
-    expect(dueReminderWindow(1, W)).toBe(1);
-    expect(dueReminderWindow(0, W)).toBe(1);
+    expect(dueReminderWindow(2, W)).toBe(2);
+    expect(dueReminderWindow(1, W)).toBe(2);
+    expect(dueReminderWindow(0, W)).toBe(0);
   });
 
-  it("treats expired (negative) as the tightest window", () => {
-    expect(dueReminderWindow(-3, W)).toBe(1);
+  it("treats expired (negative) as the day-of window (catch-up)", () => {
+    expect(dueReminderWindow(-3, W)).toBe(0);
   });
 
   it("returns null when still beyond every window", () => {
@@ -99,12 +102,33 @@ describe("dueReminderWindow", () => {
 
   it("models a countdown firing each window exactly once", () => {
     // As days tick down, the *selected* window changes only at each crossing,
-    // so paired with per-window dedupe each window fires once.
+    // so paired with per-window dedupe each window fires once — including a
+    // distinct day-of email after the 2-day lead-time.
     expect(dueReminderWindow(30, W)).toBe(30); // first cross into 30
     expect(dueReminderWindow(20, W)).toBe(30); // same window → deduped
     expect(dueReminderWindow(7, W)).toBe(7); // cross into 7
-    expect(dueReminderWindow(2, W)).toBe(7); // same window → deduped
-    expect(dueReminderWindow(1, W)).toBe(1); // cross into 1
+    expect(dueReminderWindow(3, W)).toBe(7); // same window → deduped
+    expect(dueReminderWindow(2, W)).toBe(2); // cross into 2
+    expect(dueReminderWindow(1, W)).toBe(2); // same window → deduped
+    expect(dueReminderWindow(0, W)).toBe(0); // day-of — NOT suppressed by 2d
+  });
+
+  it("legacy [30,7,1] conflated day-of with 1d (the bug we fixed)", () => {
+    const legacy = [30, 7, 1];
+    expect(dueReminderWindow(1, legacy)).toBe(1);
+    // Without window 0, day-of still maps to 1 — same dedupe slot as yesterday.
+    expect(dueReminderWindow(0, legacy)).toBe(1);
+  });
+});
+
+describe("withDayOfWindow", () => {
+  it("is a no-op when 0 is already present", () => {
+    expect(withDayOfWindow([30, 7, 2, 0])).toEqual([30, 7, 2, 0]);
+  });
+
+  it("appends day-of when missing so customized prefs still get today", () => {
+    expect(withDayOfWindow([30, 7])).toEqual([30, 7, 0]);
+    expect(withDayOfWindow([14])).toEqual([14, 0]);
   });
 });
 
@@ -123,15 +147,25 @@ describe("parseWindows", () => {
     expect(parseWindows("42")).toEqual(DEFAULT_WINDOWS);
   });
 
-  it("sorts descending, de-dupes, and drops invalid entries", () => {
-    expect(parseWindows("[7, 30, 1]")).toEqual([30, 7, 1]);
+  it("sorts descending, de-dupes, and keeps day-of (0)", () => {
+    expect(parseWindows("[7, 30, 2, 0]")).toEqual([30, 7, 2, 0]);
     expect(parseWindows("[7, 7, 30, 30]")).toEqual([30, 7]);
-    expect(parseWindows("[3, -1, 0, 1.5, 14]")).toEqual([14, 3]);
+    expect(parseWindows("[3, -1, 1.5, 14, 0]")).toEqual([14, 3, 0]);
   });
 
   it("falls back to defaults if nothing valid survives", () => {
-    expect(parseWindows("[-1, 0, 2.5]")).toEqual(DEFAULT_WINDOWS);
+    expect(parseWindows("[-1, 2.5]")).toEqual(DEFAULT_WINDOWS);
     expect(parseWindows("[]")).toEqual(DEFAULT_WINDOWS);
+  });
+
+  it("upgrades the legacy shipped default to include 2d + day-of", () => {
+    expect(parseWindows("[30,7,1]")).toEqual(DEFAULT_WINDOWS);
+    expect(parseWindows("[1,7,30]")).toEqual(DEFAULT_WINDOWS);
+  });
+
+  it("preserves intentional custom windows that are not the legacy default", () => {
+    expect(parseWindows("[14,3]")).toEqual([14, 3]);
+    expect(parseWindows("[30,7,1,0]")).toEqual([30, 7, 1, 0]);
   });
 
   it("returns a fresh array (not the shared default reference)", () => {
@@ -150,9 +184,17 @@ describe("expiryReminderText", () => {
     expect(t.body).toContain("2 days ago");
   });
 
-  it("phrases an expiring-today document", () => {
+  it("phrases an expiring-today document clearly for email subjects", () => {
     const t = expiryReminderText("Passport", 0);
-    expect(t.title).toContain("today");
+    expect(t.title).toBe("Expires today: Passport");
+    expect(t.body.toLowerCase()).toContain("expires today");
+    expect(t.body.toLowerCase()).toContain("renew");
+  });
+
+  it("phrases the 2-day planning window distinctly", () => {
+    const t = expiryReminderText("Visa", 2);
+    expect(t.title).toContain("2 days");
+    expect(t.body.toLowerCase()).toContain("plan");
   });
 
   it("phrases a future document with singular/plural days", () => {
@@ -169,5 +211,13 @@ describe("eventReminderText", () => {
   it("phrases an upcoming event", () => {
     expect(eventReminderText("Trip", 3).body).toContain("3 days");
     expect(eventReminderText("Trip", 1).body).toContain("1 day");
+  });
+});
+
+describe("taskReminderText", () => {
+  it("phrases overdue, today, and upcoming tasks", () => {
+    expect(taskReminderText("Visa", -1).title).toContain("Overdue");
+    expect(taskReminderText("Visa", 0).title).toContain("today");
+    expect(taskReminderText("Visa", 7).body).toContain("7 days");
   });
 });

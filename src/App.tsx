@@ -1,31 +1,30 @@
 import type { ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { UpdateToast } from "./components/UpdateToast";
 import { useAuth } from "./context/AuthContext";
-import { VaultProvider } from "./context/VaultContext";
 import { Login } from "./pages/Login";
 import { AccessReview } from "./pages/AccessReview";
-import { JoinInvite } from "./pages/JoinInvite";
+import { AdminAccess } from "./pages/AdminAccess";
+import { AcceptInvite } from "./pages/AcceptInvite";
+import { CreateFamily } from "./pages/CreateFamily";
 import { Dashboard } from "./pages/Dashboard";
 import { Documents } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
 import { DocumentForm } from "./pages/DocumentForm";
 import { FamilyPage } from "./pages/Family";
+import { FamilyAccessPage } from "./pages/FamilyAccess";
+import { MemberProfile } from "./pages/MemberProfile";
 import { CalendarPage } from "./pages/Calendar";
 import { EventDetailPage } from "./pages/EventDetail";
 import { EventForm } from "./pages/EventForm";
 import { Tasks } from "./pages/Tasks";
-import { TaskForm } from "./pages/TaskForm";
+import { TaskDetailPage } from "./pages/TaskDetail";
 import { Contacts } from "./pages/Contacts";
-import { ContactForm } from "./pages/ContactForm";
 import { Notes } from "./pages/Notes";
 import { NoteDetailPage } from "./pages/NoteDetail";
-import { Settings } from "./pages/Settings";
-import { Notifications } from "./pages/Notifications";
-import { AdminStorage } from "./pages/admin/Storage";
-import { AdminAccess } from "./pages/admin/Access";
+import { Chat } from "./pages/Chat";
+import { Assistant } from "./pages/Assistant";
 import { Expenses } from "./pages/Expenses";
 import { ExpenseForm } from "./pages/ExpenseForm";
 import { ExpenseDetail } from "./pages/ExpenseDetail";
@@ -39,9 +38,13 @@ import { FundDetail } from "./pages/money/FundDetail";
 import { Vault } from "./pages/Vault";
 import { VaultItemForm } from "./pages/VaultItemForm";
 import { VaultItemDetail } from "./pages/VaultItemDetail";
-import { Chat } from "./pages/Chat";
 import { DeviceLockGate } from "./components/DeviceLockGate";
+import { VaultProvider } from "./context/VaultContext";
+import { Locations } from "./pages/Locations";
+import { Settings } from "./pages/Settings";
+import { Notifications } from "./pages/Notifications";
 import { NotFound } from "./pages/NotFound";
+import { hasModuleAccess, moduleForPath } from "./lib/modules";
 
 function loginRedirect(nextPath: string) {
   const next = encodeURIComponent(nextPath);
@@ -49,7 +52,7 @@ function loginRedirect(nextPath: string) {
 }
 
 function Protected({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, families } = useAuth();
   const location = useLocation();
   if (isLoading) {
     return (
@@ -59,12 +62,46 @@ function Protected({ children }: { children: ReactNode }) {
     );
   }
   if (!isAuthenticated) {
-    return loginRedirect(`${location.pathname}${location.search}`);
+    return loginRedirect(location.pathname + location.search);
+  }
+  if (families.length === 0) return <CreateFamily />;
+  return <>{children}</>;
+}
+
+/** Blocks deep links into modules the member isn't allowed to use. */
+function ModuleGate({ children }: { children: ReactNode }) {
+  const { activeFamily } = useAuth();
+  const { pathname } = useLocation();
+  const module = moduleForPath(pathname);
+  if (
+    module &&
+    activeFamily &&
+    !hasModuleAccess(activeFamily.modules, module, activeFamily.role)
+  ) {
+    return <Navigate to="/" replace />;
   }
   return <>{children}</>;
 }
 
-/** Auth required but NO family/layout gate — invitees may have no family yet. */
+function SuperAdminOnly({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const location = useLocation();
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return loginRedirect(location.pathname + location.search);
+  }
+  if (!user?.appRoles?.includes("super_admin")) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
 function AuthOnly({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
@@ -76,14 +113,14 @@ function AuthOnly({ children }: { children: ReactNode }) {
     );
   }
   if (!isAuthenticated) {
-    return loginRedirect(`${location.pathname}${location.search}`);
+    return loginRedirect(location.pathname + location.search);
   }
   return <>{children}</>;
 }
 
 export default function App() {
   return (
-    <ErrorBoundary>
+    <>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/access/review" element={<AccessReview />} />
@@ -91,32 +128,47 @@ export default function App() {
           path="/invite/:token"
           element={
             <AuthOnly>
-              <JoinInvite />
+              <AcceptInvite />
             </AuthOnly>
           }
         />
         <Route
-          path="/join/:token"
+          path="/admin"
           element={
-            <AuthOnly>
-              <JoinInvite />
-            </AuthOnly>
+            <SuperAdminOnly>
+              <AdminAccess />
+            </SuperAdminOnly>
           }
         />
         <Route
           element={
             <Protected>
-              <VaultProvider>
-                <ErrorBoundary label="This screen crashed">
+              <ModuleGate>
+                <VaultProvider>
                   <Layout />
-                </ErrorBoundary>
-              </VaultProvider>
+                </VaultProvider>
+              </ModuleGate>
             </Protected>
           }
         >
           <Route path="/" element={<Dashboard />} />
+          <Route path="/documents" element={<Documents />} />
+          <Route path="/documents/new" element={<DocumentForm />} />
+          <Route path="/documents/:id" element={<DocumentDetail />} />
+          <Route path="/documents/:id/edit" element={<DocumentForm />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/calendar/events/new" element={<EventForm />} />
+          <Route path="/calendar/events/:id" element={<EventDetailPage />} />
+          <Route path="/calendar/events/:id/edit" element={<EventForm />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/:id" element={<TaskDetailPage />} />
+          <Route path="/contacts" element={<Contacts />} />
+          <Route path="/notes" element={<Notes />} />
+          <Route path="/notes/:id" element={<NoteDetailPage />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/assistant" element={<Assistant />} />
 
-          {/* Vault — Face ID / PIN every visit */}
+          {/* Vault (secrets) — Face ID / PIN every visit */}
           <Route element={<DeviceLockGate section="vault" title="Vault" />}>
             <Route path="/vault" element={<Vault />} />
             <Route path="/vault/new" element={<VaultItemForm />} />
@@ -140,43 +192,20 @@ export default function App() {
             <Route path="/money/wishlist" element={<Wishlist />} />
           </Route>
 
-          {/* Legacy expense paths, kept so existing links and bookmarks work. */}
+          {/* Legacy expense paths */}
           <Route path="/expenses" element={<Navigate to="/money/expenses" replace />} />
           <Route path="/expenses/new" element={<Navigate to="/money/expenses/new" replace />} />
 
-          {/* Documents */}
-          <Route path="/documents" element={<Documents />} />
-          <Route path="/documents/new" element={<DocumentForm />} />
-          <Route path="/documents/:id" element={<DocumentDetail />} />
-          <Route path="/documents/:id/edit" element={<DocumentForm />} />
-
-          {/* Calendar */}
-          <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/calendar/events/new" element={<EventForm />} />
-          <Route path="/calendar/events/:id" element={<EventDetailPage />} />
-          <Route path="/calendar/events/:id/edit" element={<EventForm />} />
-
-          <Route path="/tasks" element={<Tasks />} />
-          <Route path="/tasks/new" element={<TaskForm />} />
-          <Route path="/tasks/:id/edit" element={<TaskForm />} />
-
-          <Route path="/contacts" element={<Contacts />} />
-          <Route path="/contacts/new" element={<ContactForm />} />
-          <Route path="/contacts/:id/edit" element={<ContactForm />} />
-
-          <Route path="/notes" element={<Notes />} />
-          <Route path="/notes/:id" element={<NoteDetailPage />} />
-
+          <Route path="/locations" element={<Locations />} />
           <Route path="/family" element={<FamilyPage />} />
-          <Route path="/chat" element={<Chat />} />
+          <Route path="/family/access" element={<FamilyAccessPage />} />
+          <Route path="/family/members/:id" element={<MemberProfile />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/admin/storage" element={<AdminStorage />} />
-          <Route path="/admin/access" element={<AdminAccess />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
       <UpdateToast />
-    </ErrorBoundary>
+    </>
   );
 }

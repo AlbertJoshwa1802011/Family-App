@@ -43,7 +43,6 @@ async function ownerContact(
   const row = await db
     .select({
       email: schema.users.email,
-      reminderEmail: schema.reminderPrefs.reminderEmail,
       emailEnabled: schema.reminderPrefs.emailEnabled,
     })
     .from(schema.users)
@@ -53,7 +52,7 @@ async function ownerContact(
 
   if (!row) return { email: null, emailEnabled: false };
   return {
-    email: row.reminderEmail ?? row.email,
+    email: row.email,
     emailEnabled: row.emailEnabled ?? true,
   };
 }

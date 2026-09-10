@@ -1,28 +1,11 @@
 import { Hono } from "hono";
-import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { setCookie, deleteCookie } from "hono/cookie";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
-import type { HonoEnv } from "../types";
+import type { HonoEnv, AppContext } from "../types";
 import { getDb, schema } from "../db/client";
-import { requireSession } from "../middleware/requireSession";
-import { generateRandom, sha256Base64url } from "../lib/crypto";
-import { audit, ACTIONS } from "../lib/audit";
-import { isPlatformAdmin } from "../middleware/requirePlatformAdmin";
-import { canSignIn } from "../lib/appAccess";
-import {
-  LOGIN_SCOPES,
-  extraScopesFromConnect,
-  clearUserGoogleAccessCache,
-  cacheUserGoogleAccessToken,
-  replaceGrantedScopes,
-  refreshKey,
-  GOOGLE_SCOPES,
-  userHasScope,
-  userHasRefreshToken,
-  userCalendarReady,
-  scopeListIncludes,
-} from "../lib/google";
-import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
 import {
   createSession,
   deleteSession,
@@ -31,6 +14,16 @@ import {
   COOKIE_NAME,
   SESSION_COOKIE_OPTIONS,
 } from "../lib/session";
+import { sessionIdFromRequest } from "../lib/sessionAuth";
+import { generateRandom, sha256Base64url } from "../lib/crypto";
+import { checkRateLimit, clientIp } from "../lib/rateLimit";
+import {
+  canSignIn,
+  ensureBootstrapSuperAdmin,
+  listAppRoles,
+} from "../lib/appAccess";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
+import { parseModulesJson, FAMILY_MODULES } from "../lib/modules";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -40,11 +33,100 @@ const GOOGLE_JWKS = createRemoteJWKSet(
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const PKCE_TTL_SECS = 600; // 10 minutes
+const MOBILE_CODE_TTL_SECS = 60;
+/** Custom URL scheme for the Albert iOS companion (ASWebAuthenticationSession). */
+export const IOS_OAUTH_CALLBACK_SCHEME = "albert://oauth-callback";
+
+type OAuthClient = "web" | "ios";
+
+function oauthRedirectUri(origin: string): string {
+  return `${origin.replace(/\/$/, "")}/api/auth/google/callback`;
+}
+
+/** Post-login path from ?next= — same-origin relative only. */
+function returnPathFromRequest(c: AppContext): string {
+  return safeAppPath(c.req.query("next") ?? "/");
+}
+
+function oauthClientFromRequest(c: AppContext): OAuthClient {
+  return c.req.query("client") === "ios" ? "ios" : "web";
+}
+
+async function beginGoogleOAuth(
+  c: AppContext,
+): Promise<{ url: string } | Response> {
+  const clientId = c.env?.GOOGLE_CLIENT_ID;
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+
+  if (!clientId) {
+    return c.json({ error: "oauth_not_configured" }, 503);
+  }
+
+  const limited = await checkRateLimit(c, `auth-start:${clientIp(c)}`, {
+    limit: 10,
+    windowSecs: 60,
+  });
+  if (limited) return limited;
+
+  const codeVerifier = generateRandom(32);
+  const codeChallenge = await sha256Base64url(codeVerifier);
+  const state = generateRandom(16);
+  const redirectUri = oauthRedirectUri(origin);
+  const returnTo = returnPathFromRequest(c);
+  const client = oauthClientFromRequest(c);
+
+  await c.env.KV.put(
+    `oauth:state:${state}`,
+    JSON.stringify({ codeVerifier, redirectUri, returnTo, client }),
+    { expirationTtl: PKCE_TTL_SECS },
+  );
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: [
+      "openid",
+      "email",
+      "profile",
+      // Drive: document files created by this app only (non-sensitive).
+      "https://www.googleapis.com/auth/drive.file",
+      // Calendar: push Family Vault events into the user's primary calendar.
+      "https://www.googleapis.com/auth/calendar.events",
+    ].join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+
+  return { url: `${GOOGLE_AUTH_URL}?${params.toString()}` };
+}
+
+// GET /auth/google/start — full-page navigation (phones / in-app browsers).
+// 302s to Google. A GET used to 404 JSON, which is what you see if the
+// address bar stops on /api/auth/google/start.
+authRoutes.get("/google/start", async (c) => {
+  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
+  const result = await beginGoogleOAuth(c);
+  if (result instanceof Response) {
+    if (result.status === 503) {
+      return c.redirect(`${origin}/login?error=oauth_not_configured`);
+    }
+    if (result.status === 429) {
+      return c.redirect(`${origin}/login?error=rate_limited`);
+    }
+    return result;
+  }
+  return c.redirect(result.url);
+});
 
 // GET /auth/me — return authenticated user + their families (or nulls).
 // Not protected by requireSession; we gracefully return null if no valid session.
+// Accepts cookie `sid` (web) or Authorization Bearer (Albert iOS).
 authRoutes.get("/me", async (c) => {
-  const sessionId = getCookie(c, COOKIE_NAME);
+  const sessionId = sessionIdFromRequest(c);
   if (!sessionId) return c.json({ user: null, families: [] });
 
   const db = getDb(c.env);
@@ -62,11 +144,16 @@ authRoutes.get("/me", async (c) => {
 
   if (!user) return c.json({ user: null, families: [] });
 
+  // Bootstrap SUPER_ADMIN_EMAILS → durable super_admin assignment (idempotent).
+  await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
+  const appRoles = await listAppRoles(db, user.id);
+
   // Fetch all active family memberships for this user
-  let memberships = await db
+  const memberships = await db
     .select({
       familyId: schema.familyMembers.familyId,
       role: schema.familyMembers.role,
+      modulesJson: schema.familyMembers.modulesJson,
       familyName: schema.families.name,
       driveFolderId: schema.families.driveFolderId,
       familyCreatedAt: schema.families.createdAt,
@@ -80,51 +167,17 @@ authRoutes.get("/me", async (c) => {
       ),
     );
 
-  if (memberships.length === 0) {
-    // Auto-create a default family for this user
-    const familyId = crypto.randomUUID();
-    const memberId = crypto.randomUUID();
-    const familyName = user.name ? `${user.name.split(" ")[0]}'s Family` : "Personal Family";
-    const now = Math.floor(Date.now() / 1000);
-
-    await db.insert(schema.families).values({
-      id: familyId,
-      name: familyName,
-      ownerUserId: user.id,
-      createdAt: now,
-    });
-
-    await db.insert(schema.familyMembers).values({
-      id: memberId,
-      familyId,
-      userId: user.id,
-      role: "owner",
-      memberType: "user",
-      displayName: user.name,
-      status: "active",
-      createdAt: now,
-    });
-
-    memberships = [
-      {
-        familyId,
-        role: "owner",
-        familyName,
-        driveFolderId: null,
-        familyCreatedAt: now,
-      },
-    ];
-  }
-
   const families = memberships.map((m) => ({
     id: m.familyId,
     name: m.familyName,
     role: m.role,
+    modules:
+      m.role === "owner"
+        ? [...FAMILY_MODULES]
+        : parseModulesJson(m.modulesJson),
     driveFolderId: m.driveFolderId,
     createdAt: m.familyCreatedAt,
   }));
-
-  const platformAdmin = await isPlatformAdmin(db, c.env, user.id);
 
   return c.json({
     user: {
@@ -132,72 +185,17 @@ authRoutes.get("/me", async (c) => {
       email: user.email,
       name: user.name,
       picture: user.picture,
-      isPlatformAdmin: platformAdmin,
+      appRoles,
     },
     families,
   });
 });
 
-// GET /auth/google/status — which extra Google scopes this session can use.
-// `calendar` is true only when calendar.events was granted AND a refresh token
-// exists (otherwise event create cannot write to Google Calendar).
-authRoutes.get("/google/status", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const [contacts, gmail, calendar, hasRefreshToken] = await Promise.all([
-    userHasScope(c.env, userId, GOOGLE_SCOPES.contacts),
-    userHasScope(c.env, userId, GOOGLE_SCOPES.gmailSend),
-    userCalendarReady(c.env, userId),
-    userHasRefreshToken(c.env, userId),
-  ]);
-  return c.json({ contacts, gmail, calendar, hasRefreshToken });
-});
-
-// GET /auth/google/start — build and return a Google OAuth redirect (PKCE).
-// Returns 302 redirect to the Google auth URL.
-authRoutes.get("/google/start", async (c) => {
-  const clientId = c.env?.GOOGLE_CLIENT_ID;
-  const origin = requestOrigin(c.req.url, c.env?.APP_URL);
-
-  if (!clientId) {
-    return c.redirect(`${origin}/login?error=oauth_not_configured`);
-  }
-
-  const connect = c.req.query("connect") ?? "";
-  const extra = extraScopesFromConnect(connect);
-  // Prefer returnTo; accept ?next= as an alias so invite deep-links work.
-  const returnTo = c.req.query("returnTo") || c.req.query("next") || "/";
-  // Force the consent screen only when requesting extra scopes (Calendar,
-  // Contacts, Gmail) or when the client asks for a fresh refresh token.
-  // prompt=consent on every login re-shows Google's "unverified app" warning.
-  const forceConsent = extra.length > 0 || c.req.query("consent") === "1";
-
-  // PKCE: code_verifier is random; code_challenge = BASE64URL(SHA256(verifier))
-  const codeVerifier = generateRandom(32); // 43-char base64url, satisfies RFC 7636
-  const codeChallenge = await sha256Base64url(codeVerifier);
-  const state = generateRandom(16);
-  const redirectUri = `${origin}/api/auth/google/callback`;
-
-  // Persist verifier + exact redirect_uri (token exchange must match).
-  await c.env.KV.put(
-    `oauth:state:${state}`,
-    JSON.stringify({ codeVerifier, extra, returnTo, redirectUri }),
-    { expirationTtl: PKCE_TTL_SECS },
-  );
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: [...LOGIN_SCOPES, ...extra].join(" "),
-    access_type: "offline",
-    prompt: forceConsent ? "consent" : "select_account",
-    include_granted_scopes: "true",
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-  });
-
-  return c.redirect(`${GOOGLE_AUTH_URL}?${params.toString()}`);
+// POST /auth/google/start — JSON { url } for clients that prefer fetch.
+authRoutes.post("/google/start", async (c) => {
+  const result = await beginGoogleOAuth(c);
+  if (result instanceof Response) return result;
+  return c.json({ url: result.url });
 });
 
 // GET /auth/google/callback — OAuth redirect handler. Exchanges code for tokens,
@@ -213,6 +211,13 @@ authRoutes.get("/google/callback", async (c) => {
   if (error) return redirect(`/login?error=${encodeURIComponent(error)}`);
   if (!code || !state) return redirect("/login?error=missing_params");
 
+  // Per-IP throttle: the callback does a token exchange + D1 writes.
+  const limited = await checkRateLimit(c, `auth-callback:${clientIp(c)}`, {
+    limit: 10,
+    windowSecs: 60,
+  });
+  if (limited) return redirect("/login?error=rate_limited");
+
   const clientId = c.env?.GOOGLE_CLIENT_ID;
   const clientSecret = c.env?.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) return redirect("/login?error=oauth_not_configured");
@@ -221,14 +226,27 @@ authRoutes.get("/google/callback", async (c) => {
   const kvKey = `oauth:state:${state}`;
   const stored = await c.env.KV.get(kvKey, "json") as {
     codeVerifier: string;
-    extra?: string[];
-    returnTo?: string;
     redirectUri?: string;
+    returnTo?: string;
+    client?: OAuthClient;
   } | null;
   if (!stored) return redirect("/login?error=invalid_state");
   await c.env.KV.delete(kvKey);
 
-  const redirectUri = stored.redirectUri ?? `${origin}/api/auth/google/callback`;
+  const redirectUri = stored.redirectUri ?? oauthRedirectUri(origin);
+  const returnTo = safeAppPath(stored.returnTo ?? "/");
+  const oauthClient: OAuthClient = stored.client === "ios" ? "ios" : "web";
+  const loginError = (code: string) => {
+    if (oauthClient === "ios") {
+      // ASWebAuthenticationSession receives errors on the same custom scheme.
+      return c.redirect(
+        `${IOS_OAUTH_CALLBACK_SCHEME}?error=${encodeURIComponent(code)}`,
+      );
+    }
+    const q = new URLSearchParams({ error: code });
+    if (returnTo !== "/") q.set("next", returnTo);
+    return redirect(`/login?${q.toString()}`);
+  };
 
   // Exchange authorization code for tokens
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -246,19 +264,13 @@ authRoutes.get("/google/callback", async (c) => {
 
   if (!tokenRes.ok) {
     console.error("Token exchange failed:", await tokenRes.text());
-    await audit(c, {
-      action: ACTIONS.AUTH_LOGIN_FAILED,
-      meta: { reason: "token_exchange_failed" },
-    });
-    return redirect("/login?error=token_exchange_failed");
+    return loginError("token_exchange_failed");
   }
 
   const tokens = (await tokenRes.json()) as {
     id_token: string;
     access_token: string;
     refresh_token?: string;
-    expires_in?: number;
-    scope?: string;
   };
 
   // Verify the Google ID token with jose against Google's JWKS endpoint
@@ -274,11 +286,7 @@ authRoutes.get("/google/callback", async (c) => {
     picture = payload["picture"] as string | undefined;
   } catch (e) {
     console.error("ID token verification failed:", e);
-    await audit(c, {
-      action: ACTIONS.AUTH_LOGIN_FAILED,
-      meta: { reason: "token_invalid" },
-    });
-    return redirect("/login?error=token_invalid");
+    return loginError("token_invalid");
   }
 
   const db = getDb(c.env);
@@ -286,12 +294,7 @@ authRoutes.get("/google/callback", async (c) => {
   // Closed signup: only approved emails / bootstrap admins / returning users.
   const access = await canSignIn(db, c.env, { email, googleSub: sub });
   if (!access.ok) {
-    const q = new URLSearchParams({
-      error: access.reason,
-      email,
-    });
-    if (name?.trim()) q.set("name", name.trim());
-    return redirect(`/login?${q.toString()}`);
+    return loginError(access.reason);
   }
 
   // Upsert user: update profile fields on conflict (user might have changed their name/picture)
@@ -317,60 +320,27 @@ authRoutes.get("/google/callback", async (c) => {
 
   // Fetch the real user ID (might differ from the UUID we tried to insert)
   const user = await db
-    .select({ id: schema.users.id })
+    .select({ id: schema.users.id, email: schema.users.email })
     .from(schema.users)
     .where(eq(schema.users.googleSub, sub))
     .get();
 
-  if (!user) return redirect("/login?error=user_create_failed");
+  if (!user) return loginError("user_create_failed");
 
-  const wantedExtras = stored.extra ?? [];
-  const wantedCalendar = wantedExtras.includes(GOOGLE_SCOPES.calendarEvents);
-  const grantedScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
+  await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
-  // Persist refresh token when Google issues one (first consent / force consent).
+  // Cache refresh token in KV (Drive + Google Calendar push need it).
+  // Drop any cached access token so the next API call picks up newly granted
+  // scopes (e.g. calendar.events after a re-consent).
   if (tokens.refresh_token) {
-    await c.env.KV.put(refreshKey(user.id), tokens.refresh_token);
+    await c.env.KV.put(`user:refresh_token:${user.id}`, tokens.refresh_token);
   }
-
-  // Always cache the access token from THIS consent — it already carries any
-  // newly granted scopes (calendar.events). Clearing-only left us with no
-  // usable token when Google omitted refresh_token on incremental Connect.
   if (tokens.access_token) {
-    await cacheUserGoogleAccessToken(
-      c.env,
-      user.id,
-      tokens.access_token,
-      tokens.expires_in,
-    );
+    await c.env.KV.put(`user:access_token:${user.id}`, tokens.access_token, {
+      expirationTtl: 3300,
+    });
   } else {
-    await clearUserGoogleAccessCache(c.env, user.id);
-  }
-
-  // Google's scope string is the live grant (include_granted_scopes=true).
-  if (tokens.scope) {
-    await replaceGrantedScopes(c.env, user.id, tokens.scope);
-  }
-
-  // Connect Calendar must actually grant calendar.events + leave us able to
-  // refresh later. Otherwise Settings showed "On" while create could not write.
-  if (wantedCalendar) {
-    if (!scopeListIncludes(grantedScopes, GOOGLE_SCOPES.calendarEvents)) {
-      return redirect(
-        `/settings?error=${encodeURIComponent("calendar_not_granted")}`,
-      );
-    }
-    const hasRefresh =
-      Boolean(tokens.refresh_token) ||
-      Boolean(await c.env.KV.get(refreshKey(user.id)));
-    if (!hasRefresh) {
-      // Rare: Google withheld refresh_token and we never stored one. Force a
-      // consent pass so offline Calendar writes work on every create.
-      const returnTo = encodeURIComponent(safeAppPath(stored.returnTo ?? "/settings"));
-      return redirect(
-        `/api/auth/google/start?connect=calendar&consent=1&returnTo=${returnTo}`,
-      );
-    }
+    await c.env.KV.delete(`user:access_token:${user.id}`);
   }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
@@ -380,36 +350,179 @@ authRoutes.get("/google/callback", async (c) => {
     maxAge: SESSION_ABSOLUTE_SECS,
   });
 
-  await audit(c, {
-    actorUserId: user.id,
-    action: ACTIONS.AUTH_LOGIN,
-    meta: { userAgent: c.req.header("user-agent") },
-  });
+  // Albert iOS: hand off via one-time code on the custom URL scheme.
+  // Never put the session id in the redirect URL (referrer / history risk).
+  if (oauthClient === "ios") {
+    const mobileCode = generateRandom(24);
+    await c.env.KV.put(
+      `oauth:mobile:${mobileCode}`,
+      JSON.stringify({ sessionId }),
+      { expirationTtl: MOBILE_CODE_TTL_SECS },
+    );
+    return c.redirect(
+      `${IOS_OAUTH_CALLBACK_SCHEME}?code=${encodeURIComponent(mobileCode)}`,
+    );
+  }
 
-  const dest = safeAppPath(stored.returnTo ?? "/");
   // 200 HTML bounce (not 302): Safari/iOS drops Set-Cookie on the 302 that
   // follows Google's cross-site redirect, which looks like a failed phone login.
-  return c.html(loginBounceHtml(dest), 200);
+  // returnTo restores deep links (e.g. /invite/:token) after sign-in.
+  return c.html(loginBounceHtml(returnTo), 200);
 });
+
+const mobileExchangeSchema = z.object({
+  code: z.string().min(8).max(128),
+});
+
+// POST /auth/mobile/exchange — Albert iOS trades a one-time OAuth code for a
+// Bearer session token (same D1 session row the cookie would have used).
+authRoutes.post(
+  "/mobile/exchange",
+  zValidator("json", mobileExchangeSchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: "validation_error", issues: result.error.issues },
+        400,
+      );
+    }
+  }),
+  async (c) => {
+    const limited = await checkRateLimit(c, `auth-mobile:${clientIp(c)}`, {
+      limit: 20,
+      windowSecs: 60,
+    });
+    if (limited) return limited;
+
+    const { code } = c.req.valid("json");
+    const kvKey = `oauth:mobile:${code}`;
+    const stored = (await c.env.KV.get(kvKey, "json")) as {
+      sessionId?: string;
+    } | null;
+    if (!stored?.sessionId) {
+      return c.json({ error: "invalid_code" }, 401);
+    }
+    await c.env.KV.delete(kvKey);
+
+    const db = getDb(c.env);
+    const session = await db
+      .select({
+        userId: schema.sessions.userId,
+        expiresAt: schema.sessions.expiresAt,
+      })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, stored.sessionId))
+      .get();
+
+    if (!session) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    // Slide idle window via the shared validator.
+    const valid = await validateSession(db, stored.sessionId);
+    if (!valid) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const user = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, session.userId))
+      .get();
+    if (!user) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
+    const appRoles = await listAppRoles(db, user.id);
+
+    const memberships = await db
+      .select({
+        familyId: schema.familyMembers.familyId,
+        role: schema.familyMembers.role,
+        modulesJson: schema.familyMembers.modulesJson,
+        familyName: schema.families.name,
+        driveFolderId: schema.families.driveFolderId,
+        familyCreatedAt: schema.families.createdAt,
+      })
+      .from(schema.familyMembers)
+      .innerJoin(
+        schema.families,
+        eq(schema.familyMembers.familyId, schema.families.id),
+      )
+      .where(
+        and(
+          eq(schema.familyMembers.userId, user.id),
+          eq(schema.familyMembers.status, "active"),
+        ),
+      );
+
+    const families = memberships.map((m) => ({
+      id: m.familyId,
+      name: m.familyName,
+      role: m.role,
+      modules:
+        m.role === "owner"
+          ? [...FAMILY_MODULES]
+          : parseModulesJson(m.modulesJson),
+      driveFolderId: m.driveFolderId,
+      createdAt: m.familyCreatedAt,
+    }));
+
+    return c.json({
+      sessionToken: stored.sessionId,
+      expiresAt: session.expiresAt,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+        appRoles,
+      },
+      families,
+    });
+  },
+);
+
+const mobileDeviceSchema = z.object({
+  platform: z.literal("ios"),
+  deviceToken: z.string().min(8).max(4096).optional(),
+});
+
+// POST /auth/mobile/device — stub for future APNs registration (v1 local notifs).
+authRoutes.post(
+  "/mobile/device",
+  zValidator("json", mobileDeviceSchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: "validation_error", issues: result.error.issues },
+        400,
+      );
+    }
+  }),
+  async (c) => {
+    const sessionId = sessionIdFromRequest(c);
+    if (!sessionId) return c.json({ error: "unauthorized" }, 401);
+    const db = getDb(c.env);
+    const result = await validateSession(db, sessionId);
+    if (!result) return c.json({ error: "unauthorized" }, 401);
+    // Intentionally no-op storage in v1 — keeps the native client contract stable.
+    return c.json({ ok: true });
+  },
+);
 
 // POST /auth/logout — revoke session in D1 and clear the cookie.
 authRoutes.post("/logout", async (c) => {
-  const sessionId = getCookie(c, COOKIE_NAME);
+  const sessionId = sessionIdFromRequest(c);
   if (sessionId) {
     try {
       const db = getDb(c.env);
-      const session = await validateSession(db, sessionId);
       await deleteSession(db, sessionId);
-      if (session) {
-        await audit(c, {
-          actorUserId: session.userId,
-          action: ACTIONS.AUTH_LOGOUT,
-        });
-      }
     } catch {
       // Best-effort — still clear the cookie even if the DB call fails
     }
   }
+  // Same Path/Secure/SameSite/HttpOnly as setCookie — otherwise the browser
+  // keeps the original sid and the next /auth/me still looks signed-in.
   deleteCookie(c, COOKIE_NAME, SESSION_COOKIE_OPTIONS);
   return c.json({ ok: true });
 });

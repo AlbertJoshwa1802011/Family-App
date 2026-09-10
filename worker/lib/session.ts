@@ -8,7 +8,8 @@ export const COOKIE_NAME = "sid";
 
 /**
  * Cookie flags MUST match on set and delete. Browsers (especially Safari /
- * iOS) ignore a Max-Age=0 overwrite that omits Secure or SameSite.
+ * iOS standalone PWAs) will ignore a Max-Age=0 overwrite that omits Secure
+ * or SameSite, which leaves the sid cookie in place after "Sign out".
  */
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,

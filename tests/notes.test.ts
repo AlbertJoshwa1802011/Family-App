@@ -309,7 +309,7 @@ describe("notes CRUD", () => {
 });
 
 describe("notes security", () => {
-  it("401 without session; 404 for outsiders", async () => {
+  it("401 without session; 404 for outsiders; CSRF rejected", async () => {
     expect(
       (await app.request(`/api/notes?familyId=${familyId}`, {}, t.env)).status,
     ).toBe(401);
@@ -331,6 +331,21 @@ describe("notes security", () => {
         })
       ).status,
     ).toBe(404);
+
+    const csrf = await app.request(
+      "/api/notes",
+      {
+        method: "POST",
+        headers: {
+          Cookie: member.cookie,
+          "Content-Type": "application/json",
+          Origin: "https://evil.example",
+        },
+        body: JSON.stringify({ familyId, title: "forged" }),
+      },
+      t.env,
+    );
+    expect(csrf.status).toBe(403);
   });
 
   it("private notes hidden from other members (404); visible to owner/admin", async () => {
@@ -440,7 +455,7 @@ describe("notes security", () => {
       (
         await req("POST", "/api/notes", member.cookie, {
           familyId,
-          kind: "sermon",
+          kind: "has spaces",
         })
       ).status,
     ).toBe(400);

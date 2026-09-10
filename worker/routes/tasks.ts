@@ -1,12 +1,18 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { audit, ACTIONS } from "../lib/audit";
+import { notifyTaskAssigned, notifyTaskUnassigned } from "../lib/scheduleNotify";
+import {
+  allDocumentsInFamily,
+  allMembersInFamily,
+  eventInFamily,
+  taskInFamily,
+} from "../lib/familyScope";
 import {
   MAX_TASK_DEPTH,
   TASK_VIEWS,
@@ -29,53 +35,32 @@ export const taskRoutes = new Hono<HonoEnv>();
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
-  .nullish();
+  .optional();
 
-const subtaskSchema = z.object({
-  id: z.string(),
-  title: z.string().min(1).max(300),
-  done: z.boolean().default(false),
-});
-
-const optionalText = z.string().max(2000).nullish();
-const optionalId = z.string().min(1).nullish();
+const priorityEnum = z.enum(["low", "medium", "high"]);
 
 const createTaskSchema = z.object({
   familyId: z.string().min(1),
   title: z.string().min(1).max(300),
-  notes: optionalText,
-  assignedToMemberId: optionalId,
+  notes: z.string().max(2000).optional(),
+  assignedToMemberId: z.string().optional(),
   dueDate: isoDate,
-  relatedDocumentId: optionalId,
-  relatedEventId: optionalId,
-  referredTaskId: optionalId,
-  subtasks: z.array(subtaskSchema).max(20).nullish(),
-  reminderDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
-    .nullish(),
-  remindMemberId: optionalId,
-  parentTaskId: optionalId,
-  priority: z.enum(["low", "medium", "high"]).optional(),
+  relatedDocumentId: z.string().optional(),
+  relatedEventId: z.string().optional(),
+  parentTaskId: z.string().min(1).max(64).optional(),
+  priority: priorityEnum.optional(),
 });
 
 const updateTaskSchema = z.object({
   title: z.string().min(1).max(300).optional(),
-  notes: optionalText,
-  assignedToMemberId: optionalId,
+  notes: z.string().max(2000).nullable().optional(),
+  assignedToMemberId: z.string().nullable().optional(),
   dueDate: isoDate,
   status: z.enum(["open", "done", "archived"]).optional(),
-  relatedDocumentId: optionalId,
-  relatedEventId: optionalId,
-  referredTaskId: optionalId,
-  subtasks: z.array(subtaskSchema).max(20).nullish(),
-  reminderDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
-    .nullish(),
-  remindMemberId: optionalId,
-  parentTaskId: optionalId,
-  priority: z.enum(["low", "medium", "high"]).optional(),
+  relatedDocumentId: z.string().nullable().optional(),
+  relatedEventId: z.string().nullable().optional(),
+  parentTaskId: z.string().min(1).max(64).nullable().optional(),
+  priority: priorityEnum.optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -85,91 +70,133 @@ function zv<T extends z.ZodType>(s: T) {
   });
 }
 
-type Subtask = { id: string; title: string; done: boolean };
+type TaskRow = typeof schema.tasks.$inferSelect;
 
-function parseSubtasks(json: string | null | undefined): Subtask[] {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json) as Subtask[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+interface AssigneeName {
+  assignedToName: string | null;
+}
+
+/** Display name used in "X assigned you ..." notification copy. */
+async function taskActorName(db: ReturnType<typeof getDb>, userId: string): Promise<string> {
+  const row = await db
+    .select({ name: schema.users.name, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  return row?.name ?? row?.email ?? "A family member";
+}
+
+async function assigneeNames(
+  db: ReturnType<typeof getDb>,
+  familyId: string,
+  tasks: TaskRow[],
+): Promise<Map<string, string | null>> {
+  const ids = [
+    ...new Set(
+      tasks
+        .map((t) => t.assignedToMemberId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const map = new Map<string, string | null>();
+  if (ids.length === 0) return map;
+  const members = await db
+    .select({
+      id: schema.familyMembers.id,
+      displayName: schema.familyMembers.displayName,
+      name: schema.users.name,
+    })
+    .from(schema.familyMembers)
+    .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
+    .where(eq(schema.familyMembers.familyId, familyId));
+  for (const m of members) {
+    map.set(m.id, m.displayName ?? m.name ?? null);
   }
+  return map;
 }
 
-function decorateTask<T extends { subtasksJson?: string | null }>(row: T) {
-  return { ...row, subtasks: parseSubtasks(row.subtasksJson) };
+function present(
+  task: TaskRow & { childCount: number; doneChildCount: number } & Partial<AssigneeName>,
+) {
+  return {
+    id: task.id,
+    familyId: task.familyId,
+    title: task.title,
+    notes: task.notes,
+    assignedToMemberId: task.assignedToMemberId,
+    assignedToName: task.assignedToName ?? null,
+    dueDate: task.dueDate,
+    status: task.status,
+    priority: task.priority,
+    parentTaskId: task.parentTaskId,
+    createdBy: task.createdBy,
+    relatedDocumentId: task.relatedDocumentId,
+    relatedEventId: task.relatedEventId,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    completedAt: task.completedAt,
+    childCount: task.childCount,
+    doneChildCount: task.doneChildCount,
+  };
 }
 
-function presentFamilyTasks<T extends { id: string; parentTaskId?: string | null; status: string; subtasksJson?: string | null }>(
-  familyTasks: T[],
-  subset: T[],
+async function decorate(
+  db: ReturnType<typeof getDb>,
+  familyId: string,
+  familyTasks: TaskRow[],
+  subset: TaskRow[],
 ) {
   const counted = attachChildCounts(familyTasks);
-  const byId = new Map(counted.map((t) => [t.id, t]));
+  const countsById = new Map(counted.map((t) => [t.id, t]));
+  const names = await assigneeNames(db, familyId, subset);
   return subset.map((t) => {
-    const c = byId.get(t.id);
-    return decorateTask({
+    const c = countsById.get(t.id);
+    return present({
       ...t,
       childCount: c?.childCount ?? 0,
       doneChildCount: c?.doneChildCount ?? 0,
+      assignedToName: t.assignedToMemberId
+        ? (names.get(t.assignedToMemberId) ?? null)
+        : null,
     });
   });
 }
 
-function descendantMaxRelDepth(
-  tasks: Array<{ id: string; parentTaskId?: string | null }>,
-  rootId: string,
-): number {
-  const kids = descendantIds(tasks, rootId);
-  if (kids.length === 0) return 0;
-  const rootDepth = depthOf(tasks, rootId);
-  let max = 0;
-  for (const id of kids) {
-    max = Math.max(max, depthOf(tasks, id) - rootDepth);
-  }
-  return max;
+function canEditTask(
+  task: TaskRow,
+  userId: string,
+  membership: { id: string; role: string },
+): boolean {
+  return (
+    task.createdBy === userId ||
+    task.assignedToMemberId === membership.id ||
+    membership.role === "admin" ||
+    membership.role === "owner"
+  );
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 // GET /tasks?familyId=:id&status=&assignee=&view=&q=
 taskRoutes.get("/", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
-  let familyId = c.req.query("familyId");
+  const familyId = c.req.query("familyId");
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  if (!familyId) {
-    const membership = await db
-      .select({ familyId: schema.familyMembers.familyId })
-      .from(schema.familyMembers)
-      .where(
-        and(
-          eq(schema.familyMembers.userId, userId),
-          eq(schema.familyMembers.status, "active"),
-        ),
-      )
-      .get();
-    if (!membership) return c.json({ tasks: [] });
-    familyId = membership.familyId;
-  }
-
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const viewRaw = c.req.query("view");
   if (viewRaw && !(TASK_VIEWS as readonly string[]).includes(viewRaw)) {
-    return c.json(
-      { error: "validation_error", issues: [{ path: ["view"], message: "invalid view" }] },
-      400,
-    );
+    return c.json({ error: "validation_error", issues: [{ path: ["view"], message: "invalid view" }] }, 400);
   }
   const view = viewRaw as TaskView | undefined;
   const statusFilter = c.req.query("status");
   const assigneeFilter = c.req.query("assignee");
   const q = c.req.query("q") ?? "";
 
+  const db = getDb(c.env);
   const familyTasks = await loadFamilyTasks(db, familyId);
+
   let subset = familyTasks;
   if (statusFilter) {
     if (statusFilter !== "open" && statusFilter !== "done" && statusFilter !== "archived") {
@@ -184,16 +211,20 @@ taskRoutes.get("/", requireSession, async (c) => {
     subset = subset.filter((t) => t.assignedToMemberId === assigneeFilter);
   }
   if (view) {
+    const nowSecs = Math.floor(Date.now() / 1000);
     subset = applyTaskView(subset, {
       view,
       myMemberId: membership.id,
-      nowSecs: Math.floor(Date.now() / 1000),
+      nowSecs,
       todayIso: utcTodayIso(),
     });
   } else if (!statusFilter) {
+    // Default list hides archived so closed-for-good tasks don't clutter.
     subset = subset.filter((t) => t.status !== "archived");
   }
   if (q.trim()) {
+    // Search within the current view, then pull in ancestors (even if they
+    // don't match the view) so a hit 4 layers down still has a visible path.
     const hits = searchTasks(subset, q);
     const keep = new Set(hits.map((t) => t.id));
     for (const t of hits) {
@@ -202,24 +233,47 @@ taskRoutes.get("/", requireSession, async (c) => {
     subset = familyTasks.filter((t) => keep.has(t.id));
   }
 
-  return c.json({ tasks: presentFamilyTasks(familyTasks, subset), view: view ?? null });
+  const tasks = await decorate(db, familyId, familyTasks, subset);
+  return c.json({ tasks, view: view ?? null });
 });
 
-// POST /tasks — create a task.
+// POST /tasks — create a task (optionally nested under parentTaskId).
 taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
+
+  if (
+    data.assignedToMemberId &&
+    !(await allMembersInFamily(db, data.familyId, [data.assignedToMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+  if (
+    data.relatedDocumentId &&
+    !(await allDocumentsInFamily(db, data.familyId, [data.relatedDocumentId]))
+  ) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
+  if (
+    data.relatedEventId &&
+    !(await eventInFamily(db, data.familyId, data.relatedEventId))
+  ) {
+    return c.json({ error: "invalid_event_id" }, 400);
+  }
+
   const familyTasks = await loadFamilyTasks(db, data.familyId);
 
   if (data.parentTaskId) {
-    const parent = familyTasks.find((t) => t.id === data.parentTaskId);
-    if (!parent) return c.json({ error: "invalid_parent_id" }, 400);
-    if (depthOf(familyTasks, data.parentTaskId) + 1 > MAX_TASK_DEPTH) {
+    if (!(await taskInFamily(db, data.familyId, data.parentTaskId))) {
+      return c.json({ error: "invalid_parent_id" }, 400);
+    }
+    const parentDepth = depthOf(familyTasks, data.parentTaskId);
+    if (parentDepth + 1 > MAX_TASK_DEPTH) {
       return c.json({ error: "max_task_depth" }, 400);
     }
   }
@@ -231,28 +285,16 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     id: taskId,
     familyId: data.familyId,
     title: data.title,
-    notes: data.notes ?? undefined,
-    assignedToMemberId: data.assignedToMemberId ?? undefined,
+    notes: data.notes,
+    assignedToMemberId: data.assignedToMemberId,
     dueDate: data.dueDate,
     status: "open",
-    createdBy: userId,
-    relatedDocumentId: data.relatedDocumentId ?? undefined,
-    relatedEventId: data.relatedEventId ?? undefined,
-    referredTaskId: data.referredTaskId ?? undefined,
-    subtasksJson: data.subtasks ? JSON.stringify(data.subtasks) : undefined,
-    reminderDate: data.reminderDate ?? undefined,
-    remindMemberId: data.remindMemberId ?? undefined,
-    parentTaskId: data.parentTaskId ?? undefined,
+    parentTaskId: data.parentTaskId,
     priority: data.priority ?? "medium",
+    createdBy: userId,
+    relatedDocumentId: data.relatedDocumentId,
+    relatedEventId: data.relatedEventId,
     updatedAt: now,
-  });
-
-  await audit(c, {
-    familyId: data.familyId,
-    action: ACTIONS.TASK_CREATED,
-    targetType: "task",
-    targetId: taskId,
-    meta: { title: data.title },
   });
 
   const task = await db
@@ -261,13 +303,24 @@ taskRoutes.post("/", requireSession, zv(createTaskSchema), async (c) => {
     .where(eq(schema.tasks.id, taskId))
     .get();
 
-  if (!task) return c.json({ error: "internal_error" }, 500);
-  const all = [...familyTasks, task];
-  const [presented] = presentFamilyTasks(all, [task]);
+  // Tell the person the job was handed to. Assigning work to someone who is
+  // never told is the same failure as scheduling an event they never hear about.
+  if (data.assignedToMemberId) {
+    await notifyTaskAssigned(
+      db,
+      c.env,
+      { id: taskId, familyId: data.familyId, title: data.title, dueDate: data.dueDate },
+      [data.assignedToMemberId],
+      { userId, name: await taskActorName(db, userId) },
+    );
+  }
+
+  const all = [...familyTasks, task!];
+  const [presented] = await decorate(db, data.familyId, all, [task!]);
   return c.json({ task: presented }, 201);
 });
 
-// GET /tasks/:id
+// GET /tasks/:id — task + ancestor breadcrumb + direct children (all statuses).
 taskRoutes.get("/:id", requireSession, async (c) => {
   const { id: taskId } = c.req.param();
   const db = getDb(c.env);
@@ -280,23 +333,25 @@ taskRoutes.get("/:id", requireSession, async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   const familyTasks = await loadFamilyTasks(db, task.familyId);
   const ancestors = ancestorChain(familyTasks, task.id);
   const children = familyTasks.filter((t) => t.parentTaskId === task.id);
-  const [presented] = presentFamilyTasks(familyTasks, [task]);
+  const [presented] = await decorate(db, task.familyId, familyTasks, [task]);
+  const presentedAncestors = await decorate(db, task.familyId, familyTasks, ancestors);
+  const presentedChildren = await decorate(db, task.familyId, familyTasks, children);
 
   return c.json({
     task: presented,
-    ancestors: presentFamilyTasks(familyTasks, ancestors),
-    children: presentFamilyTasks(familyTasks, children),
+    ancestors: presentedAncestors,
+    children: presentedChildren,
     depth: depthOf(familyTasks, task.id),
   });
 });
 
-// PATCH /tasks/:id — update task fields or toggle status.
+// PATCH /tasks/:id — update fields, complete/reopen/archive, or reparent.
 taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
   const { id: taskId } = c.req.param();
   const userId = c.get("userId")!;
@@ -311,29 +366,49 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
-  // Members can only update tasks they created or are assigned to
-  const canEdit =
-    task.createdBy === userId ||
-    task.assignedToMemberId === membership.id ||
-    membership.role === "admin" ||
-    membership.role === "owner";
+  if (!canEditTask(task, userId, membership)) {
+    return c.json({ error: "forbidden" }, 403);
+  }
 
-  if (!canEdit) return c.json({ error: "forbidden" }, 403);
+  if (
+    updates.assignedToMemberId &&
+    !(await allMembersInFamily(db, task.familyId, [updates.assignedToMemberId]))
+  ) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+  if (
+    updates.relatedDocumentId &&
+    !(await allDocumentsInFamily(db, task.familyId, [updates.relatedDocumentId]))
+  ) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
+  if (
+    updates.relatedEventId &&
+    !(await eventInFamily(db, task.familyId, updates.relatedEventId))
+  ) {
+    return c.json({ error: "invalid_event_id" }, 400);
+  }
 
   const familyTasks = await loadFamilyTasks(db, task.familyId);
 
-  if (updates.parentTaskId !== undefined && updates.parentTaskId) {
-    const parent = familyTasks.find((t) => t.id === updates.parentTaskId);
-    if (!parent) return c.json({ error: "invalid_parent_id" }, 400);
-    if (wouldCreateCycle(familyTasks, task.id, updates.parentTaskId)) {
-      return c.json({ error: "task_cycle" }, 400);
-    }
-    const newDepth = depthOf(familyTasks, updates.parentTaskId) + 1;
-    if (newDepth + descendantMaxRelDepth(familyTasks, task.id) > MAX_TASK_DEPTH) {
-      return c.json({ error: "max_task_depth" }, 400);
+  if (updates.parentTaskId !== undefined) {
+    if (updates.parentTaskId === null) {
+      // promote to root — always allowed
+    } else {
+      if (!(await taskInFamily(db, task.familyId, updates.parentTaskId))) {
+        return c.json({ error: "invalid_parent_id" }, 400);
+      }
+      if (wouldCreateCycle(familyTasks, task.id, updates.parentTaskId)) {
+        return c.json({ error: "task_cycle" }, 400);
+      }
+      const newDepth = depthOf(familyTasks, updates.parentTaskId) + 1;
+      const extra = descendantMaxRelDepth(familyTasks, task.id);
+      if (newDepth + extra > MAX_TASK_DEPTH) {
+        return c.json({ error: "max_task_depth" }, 400);
+      }
     }
   }
 
@@ -342,15 +417,11 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
     updatedAt: now,
   };
   if (updates.title !== undefined) set.title = updates.title;
-  if (updates.notes !== undefined) set.notes = updates.notes ?? undefined;
-  if (updates.assignedToMemberId !== undefined) set.assignedToMemberId = updates.assignedToMemberId ?? undefined;
+  if (updates.notes !== undefined) set.notes = updates.notes;
+  if (updates.assignedToMemberId !== undefined) set.assignedToMemberId = updates.assignedToMemberId;
   if (updates.dueDate !== undefined) set.dueDate = updates.dueDate;
-  if (updates.relatedDocumentId !== undefined) set.relatedDocumentId = updates.relatedDocumentId ?? undefined;
-  if (updates.relatedEventId !== undefined) set.relatedEventId = updates.relatedEventId ?? undefined;
-  if (updates.referredTaskId !== undefined) set.referredTaskId = updates.referredTaskId ?? undefined;
-  if (updates.subtasks !== undefined) set.subtasksJson = updates.subtasks ? JSON.stringify(updates.subtasks) : undefined;
-  if (updates.reminderDate !== undefined) set.reminderDate = updates.reminderDate ?? undefined;
-  if (updates.remindMemberId !== undefined) set.remindMemberId = updates.remindMemberId ?? undefined;
+  if (updates.relatedDocumentId !== undefined) set.relatedDocumentId = updates.relatedDocumentId;
+  if (updates.relatedEventId !== undefined) set.relatedEventId = updates.relatedEventId;
   if (updates.priority !== undefined) set.priority = updates.priority;
   if (updates.parentTaskId !== undefined) set.parentTaskId = updates.parentTaskId;
   if (updates.status !== undefined) {
@@ -364,31 +435,39 @@ taskRoutes.patch("/:id", requireSession, zv(updateTaskSchema), async (c) => {
 
   await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, taskId));
 
-  await audit(c, {
-    familyId: task.familyId,
-    action:
-      updates.status === "done" ? ACTIONS.TASK_COMPLETED : ACTIONS.TASK_UPDATED,
-    targetType: "task",
-    targetId: taskId,
-  });
-
   const updatedTask = await db
     .select()
     .from(schema.tasks)
     .where(eq(schema.tasks.id, taskId))
     .get();
 
-  return c.json({
-    task: updatedTask
-      ? presentFamilyTasks(
-          familyTasks.map((t) => (t.id === taskId ? updatedTask : t)),
-          [updatedTask],
-        )[0]
-      : updatedTask,
-  });
+  // Reassignment tells BOTH sides: the new owner picks it up, the old one stops.
+  if (
+    updates.assignedToMemberId !== undefined &&
+    updates.assignedToMemberId !== task.assignedToMemberId
+  ) {
+    const actor = { userId, name: await taskActorName(db, userId) };
+    const summary = {
+      id: taskId,
+      familyId: task.familyId,
+      title: updatedTask!.title,
+      dueDate: updatedTask!.dueDate,
+    };
+    if (updates.assignedToMemberId) {
+      await notifyTaskAssigned(db, c.env, summary, [updates.assignedToMemberId], actor);
+    }
+    if (task.assignedToMemberId) {
+      await notifyTaskUnassigned(db, c.env, summary, [task.assignedToMemberId], actor);
+    }
+  }
+
+  const all = familyTasks.map((t) => (t.id === taskId ? updatedTask! : t));
+  const [presented] = await decorate(db, task.familyId, all, [updatedTask!]);
+  return c.json({ task: presented });
 });
 
-// DELETE /tasks/:id — hard delete.
+// DELETE /tasks/:id — hard delete this task AND its descendants.
+// D1 FK cascades are advisory; we delete explicitly (deepest-first).
 taskRoutes.delete("/:id", requireSession, async (c) => {
   const { id: taskId } = c.req.param();
   const userId = c.get("userId")!;
@@ -402,7 +481,7 @@ taskRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!task) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, task.familyId);
+  const membership = await requireFamilyMember(c, task.familyId, "member", "tasks");
   if (membership instanceof Response) return membership;
 
   if (task.createdBy !== userId && membership.role === "member") {
@@ -412,15 +491,23 @@ taskRoutes.delete("/:id", requireSession, async (c) => {
   const familyTasks = await loadFamilyTasks(db, task.familyId);
   const descendants = descendantIds(familyTasks, task.id);
   const ids = [...descendants, task.id];
-  await db.delete(schema.tasks).where(inArray(schema.tasks.id, ids));
 
-  await audit(c, {
-    familyId: task.familyId,
-    action: ACTIONS.TASK_DELETED,
-    targetType: "task",
-    targetId: taskId,
-    meta: { title: task.title },
-  });
+  await db.delete(schema.tasks).where(inArray(schema.tasks.id, ids));
 
   return c.json({ ok: true, deleted: ids.length });
 });
+
+/** Deepest relative depth of the subtree rooted at `rootId` (0 if no children). */
+function descendantMaxRelDepth(
+  tasks: Array<{ id: string; parentTaskId?: string | null }>,
+  rootId: string,
+): number {
+  const kids = descendantIds(tasks, rootId);
+  if (kids.length === 0) return 0;
+  const rootDepth = depthOf(tasks, rootId);
+  let max = 0;
+  for (const id of kids) {
+    max = Math.max(max, depthOf(tasks, id) - rootDepth);
+  }
+  return max;
+}

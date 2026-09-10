@@ -395,7 +395,7 @@ export function Expenses() {
     return (
       <>
         <AppBar title="Expenses" />
-        <Page width="list">
+        <Page   width="list">
           <EmptyState
             icon={Wallet}
             title="No family yet"
@@ -409,7 +409,7 @@ export function Expenses() {
   return (
     <>
       <AppBar title="Spending" />
-      <Page width="list" className="space-y-4 pb-24 md:pb-10">
+      <Page   width="list" className="space-y-4 pb-24 md:pb-10">
         <MoneySubNav />
         <div className="flex items-center justify-between gap-2">
           <button
@@ -502,7 +502,7 @@ export function Expenses() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search merchant or note…"
-            className="liquid-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+            className="lq-field liquid-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             aria-label="Search expenses"
           />
         </div>

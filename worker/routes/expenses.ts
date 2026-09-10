@@ -262,7 +262,7 @@ expenseRoutes.get("/categories", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -320,7 +320,7 @@ expenseRoutes.post("/categories", requireSession, zv(createCategorySchema), asyn
 
   // Any family member may create categories so the expense form can add them
   // inline. Archive remains admin+ (see /categories/:id/archive).
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -415,7 +415,7 @@ expenseRoutes.post("/categories/:id/archive", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId, "admin");
+  const membership = await requireFamilyMember(c, familyId, "admin", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -453,7 +453,7 @@ expenseRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -550,7 +550,7 @@ expenseRoutes.get("/lookup", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const rawQ = (c.req.query("q") ?? "").trim().slice(0, 120);
@@ -657,7 +657,7 @@ expenseRoutes.get("/suggestions", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -761,7 +761,7 @@ expenseRoutes.post("/", requireSession, zv(createExpenseSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const limited = await checkRateLimit(c, `expense-create:${userId}`, {
@@ -944,7 +944,7 @@ expenseRoutes.get("/summary", requireSession, async (c) => {
     );
   }
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const from = c.req.query("from");
@@ -1099,7 +1099,7 @@ expenseRoutes.get("/:id", requireSession, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (isExpenseHiddenFrom(expense, userId)) {
@@ -1150,7 +1150,7 @@ expenseRoutes.patch("/:id", requireSession, zv(updateExpenseSchema), async (c) =
     return c.json({ error: "not_found" }, 404);
   }
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (isExpenseHiddenFrom(expense, userId)) {
@@ -1263,7 +1263,7 @@ expenseRoutes.delete("/:id", requireSession, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  const membership = await requireFamilyMember(c, expense.familyId);
+  const membership = await requireFamilyMember(c, expense.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (isExpenseHiddenFrom(expense, userId)) {

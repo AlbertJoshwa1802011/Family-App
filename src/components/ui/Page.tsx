@@ -15,16 +15,16 @@ import { cn } from "../../lib/cn";
 export type PageWidth = "prose" | "list" | "wide" | "full";
 
 const WIDTH_CLASSES: Record<PageWidth, string> = {
-  prose:
-    "mx-auto w-full max-w-xl px-4 md:max-w-2xl md:px-6 lg:max-w-3xl",
-  list:
-    "mx-auto w-full max-w-2xl px-4 md:max-w-3xl md:px-6 lg:max-w-5xl xl:max-w-6xl",
-  wide:
-    "mx-auto w-full max-w-5xl px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl",
+  prose: "mx-auto w-full max-w-xl px-4 md:max-w-2xl md:px-6 lg:max-w-3xl",
+  list: "mx-auto w-full max-w-2xl px-4 md:max-w-3xl md:px-6 lg:max-w-5xl xl:max-w-6xl",
+  wide: "mx-auto w-full max-w-5xl px-4 md:px-6 lg:max-w-6xl xl:max-w-7xl",
   full: "w-full px-4 md:px-6 lg:px-8",
 };
 
-/** Standard content container. Clears the bottom nav on mobile; no extra offset on tablet/desktop. */
+/**
+ * Standard content container. Clears the floating bottom nav on mobile
+ * (`pb-nav`); optional width presets keep Money/Vault layouts usable on laptop.
+ */
 export function Page({
   children,
   className,
@@ -36,7 +36,13 @@ export function Page({
   width?: PageWidth;
 }) {
   return (
-    <div className={cn(WIDTH_CLASSES[width], "pt-4 pb-8 md:pt-6 md:pb-10", className)}>
+    <div
+      className={cn(
+        WIDTH_CLASSES[width],
+        "pt-3 pb-nav md:pt-6 md:pb-10",
+        className,
+      )}
+    >
       {children}
     </div>
   );

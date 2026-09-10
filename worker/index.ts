@@ -13,23 +13,27 @@ import { eventRoutes } from "./routes/events";
 import { taskRoutes } from "./routes/tasks";
 import { contactRoutes } from "./routes/contacts";
 import { noteRoutes } from "./routes/notes";
-import { activityRoutes } from "./routes/activity";
-import { adminRoutes } from "./routes/admin";
-import { vaultRoutes } from "./routes/vault";
-import { itemsRoutes } from "./routes/items";
-import { expenseRoutes } from "./routes/expenses";
-import { financeRoutes } from "./routes/finance";
-import { fundRoutes } from "./routes/funds";
-import { wishlistRoutes } from "./routes/wishlist";
-import { assistantRoutes } from "./routes/assistant";
 import { calendarRoutes } from "./routes/calendar";
-import { churchRoutes } from "./routes/church";
+import { chatRoutes } from "./routes/chat";
+import { expenseRoutes } from "./routes/expenses";
+import { moneyRoutes } from "./routes/money";
 import { settlementRoutes } from "./routes/settlements";
 import { deviceLockRoutes } from "./routes/deviceLock";
-import { chatRoutes } from "./routes/chat";
-import { accessRoutes, handlePublicReviewGet } from "./routes/access";
-import { runExpiryReminders, runLifeEventReminders } from "./cron";
+import { vaultRoutes } from "./routes/vault";
+import { fundRoutes } from "./routes/funds";
+import { wishlistRoutes } from "./routes/wishlist";
+import { financeRoutes } from "./routes/finance";
+import { churchRoutes } from "./routes/church";
 import { runCommitmentReminders } from "./lib/finance/commitmentCron";
+import { assistantRoutes } from "./routes/assistant";
+import { accessRoutes } from "./routes/access";
+import { labelRoutes } from "./routes/labels";
+import { tagRoutes } from "./routes/tags";
+import { linkRoutes } from "./routes/links";
+import { locationRoutes } from "./routes/locations";
+import { csrfProtect } from "./middleware/csrf";
+import { runExpiryReminders } from "./cron";
+import { runWeeklyDigest } from "./lib/digest";
 import { getDb } from "./db/client";
 import { purgeExpiredSessions } from "./lib/session";
 
@@ -37,9 +41,6 @@ import { purgeExpiredSessions } from "./lib/session";
 // route with its own (larger) streaming limit; this protects every metadata
 // endpoint from a memory-exhaustion DoS via a giant JSON payload.
 const JSON_BODY_LIMIT = 1024 * 1024;
-/** Multipart R2 upload path — must stay under the R2_MAX_BYTES soft cap (+ overhead). */
-const R2_UPLOAD_BODY_LIMIT = 26 * 1024 * 1024;
-const R2_UPLOAD_PATH = /^\/api\/documents\/[^/]+\/files\/upload$/;
 
 const app = new Hono<HonoEnv>();
 
@@ -48,37 +49,24 @@ const app = new Hono<HonoEnv>();
 app.use("/api/*", requestId());
 app.use("/api/*", logger());
 app.use("/api/*", secureHeaders());
+// CSRF: reject cross-site state-changing requests before they touch a handler.
+// (Lax cookies alone don't cover top-level GETs or older browsers — CLAUDE.md §8.)
+app.use("/api/*", csrfProtect);
 // Reject oversized JSON bodies before any handler runs (memory-safety).
-// Skip the multipart R2 upload route — it has its own larger limit below.
-app.use("/api/*", async (c, next) => {
-  if (c.req.method === "POST" && R2_UPLOAD_PATH.test(new URL(c.req.url).pathname)) {
-    return next();
-  }
-  return bodyLimit({
+app.use(
+  "/api/*",
+  bodyLimit({
     maxSize: JSON_BODY_LIMIT,
-    onError: (ctx) => ctx.json({ error: "payload_too_large" }, 413),
-  })(c, next);
-});
-app.use("/api/documents/:id/files/upload", bodyLimit({
-  maxSize: R2_UPLOAD_BODY_LIMIT,
-  onError: (c) => c.json({ error: "payload_too_large" }, 413),
-}));
+    onError: (c) => c.json({ error: "payload_too_large" }, 413),
+  }),
+);
 
 // --- API routes (everything else falls through to static assets) ---
 const api = new Hono<HonoEnv>();
 
-api.get("/health", (c) => {
-  const appUrl = (c.env?.APP_URL ?? "").replace(/\/$/, "");
-  return c.json({
-    ok: true,
-    service: "family-vault",
-    time: Date.now(),
-    oauth: {
-      loginCallback: appUrl ? `${appUrl}/api/auth/google/callback` : null,
-      storageCallback: appUrl ? `${appUrl}/api/admin/storage/connect/callback` : null,
-    },
-  });
-});
+api.get("/health", (c) =>
+  c.json({ ok: true, service: "family-vault", time: Date.now() }),
+);
 
 api.route("/auth", authRoutes);
 api.route("/families", familyRoutes);
@@ -88,30 +76,28 @@ api.route("/events", eventRoutes);
 api.route("/tasks", taskRoutes);
 api.route("/contacts", contactRoutes);
 api.route("/notes", noteRoutes);
-api.route("/activity", activityRoutes);
-api.route("/admin", adminRoutes);
-api.route("/vault", vaultRoutes);
-api.route("/items", itemsRoutes);
-api.route("/expenses", expenseRoutes);
-api.route("/finance", financeRoutes);
-api.route("/funds", fundRoutes);
-api.route("/wishlist", wishlistRoutes);
-api.route("/assistant", assistantRoutes);
 api.route("/calendar", calendarRoutes);
-api.route("/church", churchRoutes);
+api.route("/chat", chatRoutes);
+api.route("/expenses", expenseRoutes);
+api.route("/money", moneyRoutes);
 api.route("/settlements", settlementRoutes);
 api.route("/device-lock", deviceLockRoutes);
-api.route("/chat", chatRoutes);
+api.route("/vault", vaultRoutes);
+api.route("/funds", fundRoutes);
+api.route("/wishlist", wishlistRoutes);
+api.route("/finance", financeRoutes);
+api.route("/church", churchRoutes);
+api.route("/assistant", assistantRoutes);
 api.route("/access", accessRoutes);
+api.route("/labels", labelRoutes);
+api.route("/tags", tagRoutes);
+api.route("/links", linkRoutes);
+api.route("/locations", locationRoutes);
 
 // Unknown API routes must return JSON 404 (NOT the SPA index.html).
 api.all("*", (c) => c.json({ error: "not_found" }, 404));
 
 app.route("/api", api);
-
-// Email "Approve access" links land here (legacy inbox URLs). Must be on the
-// Worker — the SPA/SW would otherwise swallow GET /access/review as index.html.
-app.get("/access/review", handlePublicReviewGet);
 
 // Consistent JSON error shape for API; never leak internals to the client.
 app.onError((err, c) => {
@@ -131,16 +117,16 @@ export { app };
 export default {
   fetch: app.fetch,
 
-  // Daily 09:00 Asia/Kolkata (`30 3 * * *` UTC in wrangler.jsonc).
-  // Runs on Cloudflare whether or not anyone is logged in or has the PWA open.
+  // Daily maintenance cron (see wrangler.jsonc triggers.crons):
+  // expiry/event/task reminders + expired-session purge.
   async scheduled(
     _event: ScheduledController,
     env: HonoEnv["Bindings"],
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(runExpiryReminders(env));
-    ctx.waitUntil(runCommitmentReminders(env));
-    ctx.waitUntil(runLifeEventReminders(env));
+    ctx.waitUntil(runWeeklyDigest(env)); // Mondays only; per-week dedupe inside
     ctx.waitUntil(purgeExpiredSessions(getDb(env)));
+    ctx.waitUntil(runCommitmentReminders(env));
   },
 } satisfies ExportedHandler<HonoEnv["Bindings"]>;

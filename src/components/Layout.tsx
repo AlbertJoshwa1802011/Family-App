@@ -1,20 +1,25 @@
 import { Outlet } from "react-router-dom";
-import { AppShell } from "./shell/AppShell";
-import { Assistant } from "./money/Assistant";
-import { LifeEventPrompt } from "./LifeEventPrompt";
+import { BottomNav } from "./BottomNav";
+import { AssistantSheet } from "./AssistantSheet";
+import { useOptionalAuth } from "../context/AuthContext";
+import { hasModuleAccess } from "../lib/modules";
 
-/**
- * Root layout wrapper consumed by the protected route in App.tsx.
- * Delegates entirely to AppShell, which handles responsive nav
- * (mobile bottom tabs / tablet rail / desktop sidebar) and the
- * main content area offset.
- */
 export function Layout() {
+  const auth = useOptionalAuth();
+  const activeFamily = auth?.activeFamily ?? null;
+  const showAssistant = hasModuleAccess(
+    activeFamily?.modules,
+    "assistant",
+    activeFamily?.role,
+  );
+
   return (
-    <AppShell>
-      <Outlet />
-      <Assistant />
-      <LifeEventPrompt />
-    </AppShell>
+    <>
+      <main className="min-h-full">
+        <Outlet />
+      </main>
+      <BottomNav />
+      {showAssistant && <AssistantSheet />}
+    </>
   );
 }

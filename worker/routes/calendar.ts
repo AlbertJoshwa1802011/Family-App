@@ -1,31 +1,41 @@
-/**
- * Calendar-app integration: per-event ICS download + a subscribable feed.
- *
- * Google Calendar polls ICS feeds on its own schedule (often hours). Instant
- * appearance on the phone uses the Calendar API write path in googleCalendar.ts.
- */
 import { Hono } from "hono";
 import { and, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
-import { requireFamilyMember } from "../middleware/requireMember";
 import { buildCalendar, type IcsAllDayItem, type IcsEvent } from "../lib/ics";
 import { generateRandom } from "../lib/crypto";
-import { toWebcalUrl } from "../lib/googleCalendar";
+import {
+  CALENDAR_REMINDER_LEAD_DAYS,
+  isoMinusDays,
+} from "../lib/expiryCalendar";
 
 export const calendarRoutes = new Hono<HonoEnv>();
 
 const FEED_KV_PREFIX = "calfeed:";
 const FEED_USER_PREFIX = "calfeed_user:";
 
-function feedUrls(appUrl: string, token: string) {
-  const url = `${appUrl}/api/calendar/feed/${token}.ics`;
-  return { url, webcalUrl: toWebcalUrl(url) };
-}
+/**
+ * Calendar-app integration.
+ *
+ * Primary path: Google Calendar **API push** on event create/update/cancel
+ * (`worker/lib/eventCalendarSync.ts`) — Family Vault is the source of truth.
+ *
+ * Secondary surfaces (kept for Apple/Outlook and offline export):
+ *  - POST /calendar/feed-token → mints (or rotates) a capability token and
+ *    returns the subscribable webcal/https feed URL for the current user.
+ *  - GET /calendar/feed/:token.ics → the feed itself. Calendar apps
+ *    (Google/Apple/Outlook) can't send session cookies, so this is a
+ *    capability URL: the unguessable token IS the credential. Rotating the
+ *    token invalidates the old URL. Content respects private-doc visibility.
+ *    Note: Google polls subscribed ICS feeds slowly; prefer the API push.
+ */
 
+// POST /calendar/feed-token — mint/rotate the current user's feed token.
 calendarRoutes.post("/feed-token", requireSession, async (c) => {
   const userId = c.get("userId")!;
+
+  // Invalidate any previous token (rotation semantics).
   const old = await c.env.KV.get(`${FEED_USER_PREFIX}${userId}`);
   if (old) await c.env.KV.delete(`${FEED_KV_PREFIX}${old}`);
 
@@ -34,28 +44,24 @@ calendarRoutes.post("/feed-token", requireSession, async (c) => {
   await c.env.KV.put(`${FEED_USER_PREFIX}${userId}`, token);
 
   const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json(feedUrls(appUrl, token));
+  const httpsUrl = `${appUrl}/api/calendar/feed/${token}.ics`;
+  const webcalUrl = httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
+  return c.json({ url: httpsUrl, webcalUrl });
 });
 
-calendarRoutes.get("/feed-token", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const token = await c.env.KV.get(`${FEED_USER_PREFIX}${userId}`);
-  if (!token) return c.json({ url: null, webcalUrl: null });
-  const appUrl = c.env.APP_URL ?? new URL(c.req.url).origin;
-  return c.json(feedUrls(appUrl, token));
-});
-
+// GET /calendar/feed/:token.ics — subscribable calendar (capability URL).
 calendarRoutes.get("/feed/:file", async (c) => {
   const raw = c.req.param("file");
-  if (!raw?.endsWith(".ics")) return c.json({ error: "not_found" }, 404);
+  if (!raw.endsWith(".ics")) return c.json({ error: "not_found" }, 404);
   const token = raw.slice(0, -4);
 
-  const userId = await c.env.KV?.get(`${FEED_KV_PREFIX}${token}`);
+  const userId = await c.env.KV.get(`${FEED_KV_PREFIX}${token}`);
   if (!userId) return c.json({ error: "not_found" }, 404);
 
   const db = getDb(c.env);
   const nowSecs = Math.floor(Date.now() / 1000);
 
+  // The user's active family memberships.
   const memberships = await db
     .select({
       familyId: schema.familyMembers.familyId,
@@ -70,10 +76,13 @@ calendarRoutes.get("/feed/:file", async (c) => {
     );
 
   const familyIds = memberships.map((m) => m.familyId);
+  const roleByFamily = new Map(memberships.map((m) => [m.familyId, m.role]));
+
   const events: IcsEvent[] = [];
   const expiries: IcsAllDayItem[] = [];
 
   if (familyIds.length > 0) {
+    // Events: last 30 days onward, active + cancelled (cancelled marked).
     const rows = await db
       .select()
       .from(schema.events)
@@ -81,101 +90,94 @@ calendarRoutes.get("/feed/:file", async (c) => {
         and(
           inArray(schema.events.familyId, familyIds),
           ne(schema.events.status, "trashed"),
-          gte(schema.events.startAt, nowSecs - 30 * 24 * 3600),
+          gte(schema.events.startAt, nowSecs - 30 * 86400),
         ),
       );
-    for (const r of rows) {
+
+    for (const ev of rows) {
       events.push({
-        uid: r.id,
-        title: r.title,
-        description: r.description,
-        location: r.location,
-        startAt: r.startAt,
-        endAt: r.endAt,
-        allDay: r.allDay,
-        status: r.status === "cancelled" ? "cancelled" : "active",
+        uid: `event-${ev.id}@family-vault`,
+        title: ev.title,
+        description: ev.description,
+        location: ev.location,
+        startAt: ev.startAt,
+        endAt: ev.endAt,
+        allDay: Boolean(ev.allDay),
+        cancelled: ev.status === "cancelled",
+        sequence: Math.max(0, (ev.version ?? 1) - 1),
+        updatedAt: ev.updatedAt ?? ev.createdAt,
       });
     }
 
+    // Document expiries as all-day items (private docs only for their owner
+    // unless the user is owner/admin of that family).
     const docs = await db
-      .select({
-        id: schema.documents.id,
-        title: schema.documents.title,
-        expiryDate: schema.documents.expiryDate,
-        visibility: schema.documents.visibility,
-        ownerUserId: schema.documents.ownerUserId,
-        familyId: schema.documents.familyId,
-      })
+      .select()
       .from(schema.documents)
       .where(
         and(
           inArray(schema.documents.familyId, familyIds),
+          eq(schema.documents.status, "active"),
           isNotNull(schema.documents.expiryDate),
-          ne(schema.documents.status, "trashed"),
         ),
       );
-    const roleByFamily = new Map(memberships.map((m) => [m.familyId, m.role]));
-    for (const d of docs) {
-      if (!d.expiryDate) continue;
-      const role = roleByFamily.get(d.familyId);
-      if (
-        d.visibility === "private" &&
-        d.ownerUserId !== userId &&
+
+    for (const doc of docs) {
+      const role = roleByFamily.get(doc.familyId) ?? "member";
+      const hidden =
+        doc.visibility === "private" &&
+        doc.ownerUserId !== userId &&
         role !== "owner" &&
-        role !== "admin"
-      ) {
-        continue;
-      }
+        role !== "admin";
+      if (hidden) continue;
       expiries.push({
-        uid: `doc-expiry-${d.id}`,
-        title: `Expires: ${d.title}`,
-        startDate: d.expiryDate,
+        uid: `expiry-${doc.id}@family-vault`,
+        title: `${doc.title} expires`,
+        date: doc.expiryDate!,
+        description: "Family Vault expiry reminder",
       });
+
+      // Opt-in "renew a week before" marker. Family-visible docs also get a
+      // real events row (already in `events` above); private docs only appear
+      // here so the title never leaks onto the shared family calendar.
+      if (doc.calendarReminderEnabled) {
+        const renewDate = isoMinusDays(
+          doc.expiryDate!,
+          CALENDAR_REMINDER_LEAD_DAYS,
+        );
+        if (renewDate) {
+          // Skip duplicate when a shared renew event already exists in the feed.
+          const hasSharedEvent =
+            doc.visibility === "family" && Boolean(doc.expiryReminderEventId);
+          if (!hasSharedEvent) {
+            expiries.push({
+              uid: `renew-${doc.id}@family-vault`,
+              title: `Renew: ${doc.title}`,
+              date: renewDate,
+              description: `Plan renewal — expires ${doc.expiryDate}`,
+            });
+          }
+        }
+      }
     }
   }
 
-  const ics = buildCalendar({ events, expiries, nowSecs, name: "Family Vault" });
-  return new Response(ics, {
+  const body = buildCalendar({
+    name: "Family Vault",
+    events,
+    allDayItems: expiries,
+    nowSecs,
+    refreshMinutes: 15,
+  });
+
+  return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": "inline; filename=family-vault.ics",
-      "Cache-Control": "private, max-age=300",
-    },
-  });
-});
-
-calendarRoutes.get("/events/:id/ics", requireSession, async (c) => {
-  const eventId = c.req.param("id");
-  if (!eventId) return c.json({ error: "not_found" }, 404);
-  const db = getDb(c.env);
-  const event = await db
-    .select()
-    .from(schema.events)
-    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
-    .get();
-  if (!event) return c.json({ error: "not_found" }, 404);
-  const membership = await requireFamilyMember(c, event.familyId);
-  if (membership instanceof Response) return membership;
-
-  const ics = buildCalendar({
-    events: [
-      {
-        uid: event.id,
-        title: event.title,
-        description: event.description,
-        location: event.location,
-        startAt: event.startAt,
-        endAt: event.endAt,
-        allDay: event.allDay,
-        status: event.status === "cancelled" ? "cancelled" : "active",
-      },
-    ],
-    name: event.title,
-  });
-  return new Response(ics, {
-    headers: {
-      "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${event.title.replace(/[^\w.-]+/g, "_")}.ics"`,
+      "Content-Disposition": 'inline; filename="family-vault.ics"',
+      // Subscribed calendars must re-fetch often — new events should appear
+      // without waiting hours. Apple respects this better than Google.
+      "Cache-Control": "no-cache, max-age=0, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 });

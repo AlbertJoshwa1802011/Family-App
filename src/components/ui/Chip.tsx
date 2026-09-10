@@ -20,9 +20,9 @@ export function Chip({
       aria-pressed={selected}
       {...props}
       className={cn(
-        "liquid-bubble liquid-flat liquid-press rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap",
+        "lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-400/70",
-        selected ? "liquid-primary text-white" : "text-fg-muted hover:text-fg",
+        selected ? "lq-primary text-white" : "text-fg-muted hover:text-fg",
         className,
       )}
     >

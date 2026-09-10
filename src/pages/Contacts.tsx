@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Mail, Phone, Plus, Contact as ContactIcon, RefreshCw } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Mail, Phone, Plus, Contact as ContactIcon, Search, X } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -9,8 +8,11 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
-import { api, ApiError } from "../lib/api";
+import { TypePicker } from "../components/ui/TypePicker";
+import { inputCls } from "../lib/fieldCls";
+import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useLabels } from "../lib/useLabels";
 
 interface ContactSummary {
   id: string;
@@ -24,7 +26,7 @@ interface ContactSummary {
 function ContactSkeleton() {
   return (
     <div className="flex min-h-14 items-center gap-3 px-4 py-3">
-      <Skeleton className="size-10 rounded-xl" />
+      <Skeleton className="size-10 rounded-full" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-3.5 w-1/2" />
         <Skeleton className="h-3 w-1/3" />
@@ -34,105 +36,74 @@ function ContactSkeleton() {
 }
 
 export function Contacts() {
-  const navigate = useNavigate();
-  const { activeFamilyId } = useAuth();
-  const qc = useQueryClient();
+  const { activeFamily } = useAuth();
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const { format: formatRelationship, find: findRelationship } = useLabels(
+    activeFamily?.id,
+    "contact_relationship",
+  );
+
+  // Debounce so we don't hit the API per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", activeFamilyId],
+    queryKey: ["contacts", activeFamily?.id, debounced],
     queryFn: () =>
       api<{ contacts: ContactSummary[] }>(
-        activeFamilyId ? `/contacts?familyId=${activeFamilyId}` : "/contacts"
+        `/contacts?familyId=${activeFamily!.id}${
+          debounced ? `&q=${encodeURIComponent(debounced)}` : ""
+        }`,
       ),
-  });
-
-  const googleStatus = useQuery({
-    queryKey: ["google-status"],
-    queryFn: () =>
-      api<{ contacts: boolean; gmail: boolean; calendar: boolean }>("/auth/google/status"),
-  });
-
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  const sync = useMutation({
-    mutationFn: () =>
-      api<{ pulled: number; created: number; updated: number; pushed: number }>(
-        `/contacts/sync?familyId=${activeFamilyId}`,
-        { method: "POST" },
-      ),
-    onSuccess: async (res) => {
-      await qc.invalidateQueries({ queryKey: ["contacts"] });
-      setSyncMsg(
-        `Synced: ${res.created} new from Google, ${res.pushed} sent to your phone.`,
-      );
-    },
-    onError: (e: unknown) => {
-      const code = e instanceof ApiError ? e.code : "";
-      if (code === "contacts_not_connected") {
-        setSyncMsg("Google Contacts is not connected for this login. Tap Connect Google Contacts, accept Contacts permission, then sync again.");
-        return;
-      }
-      if (code === "google_sync_failed") {
-        setSyncMsg(
-          e instanceof Error
-            ? e.message
-            : "Google blocked Contacts sync. Enable the People API on the Cloud project and complete app verification (Contacts is a restricted scope).",
-        );
-        return;
-      }
-      setSyncMsg(e instanceof Error ? e.message : "Sync failed.");
-    },
+    enabled: Boolean(activeFamily),
   });
 
   const contacts = data?.contacts ?? [];
+  const searching = debounced.length > 0;
 
   return (
     <>
       <AppBar title="Emergency contacts" back />
-      <Page className="space-y-3">
-        <Card className="space-y-3 p-4">
-          <p className="text-sm text-fg-muted">
-            Contacts you add here sync to Google Contacts on your phone, and
-            contacts already in Google (including ones the phone backed up)
-            sync here. iPhone: Settings → Contacts → Accounts → Google.
-          </p>
-          {googleStatus.data?.contacts ? (
-            <Button
-              variant="secondary"
-              fullWidth
-              loading={sync.isPending}
-              leadingIcon={<RefreshCw className="size-4" />}
-              onClick={() => {
-                setSyncMsg(null);
-                sync.mutate();
-              }}
-              disabled={!activeFamilyId}
+      <Page className="space-y-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 z-1 size-4 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, email, or phone…"
+            aria-label="Search contacts"
+            className={`${inputCls} pr-10 pl-10`}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-3 z-1 -translate-y-1/2 text-fg-subtle hover:text-fg"
             >
-              Sync with Google Contacts
-            </Button>
-          ) : (
-            <Button
-              variant="secondary"
-              fullWidth
-              onClick={() => {
-                window.location.href = `/api/auth/google/start?connect=contacts&returnTo=${encodeURIComponent("/contacts")}`;
-              }}
-            >
-              Connect Google Contacts
-            </Button>
+              <X className="size-4" />
+            </button>
           )}
-          {syncMsg && (
-            <p className="text-xs text-fg-muted" role="status">
-              {syncMsg}
-            </p>
-          )}
-        </Card>
+        </div>
+
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 4 }).map((_, i) => (
               <ContactSkeleton key={i} />
             ))}
           </Card>
-        ) : contacts.length === 0 ? (
+        ) : contacts.length === 0 && searching ? (
+          <EmptyState
+            icon={Search}
+            title="No matching contacts"
+            description="Try a different name, email, or phone number."
+          />
+        ) : contacts.length === 0 && !composerOpen ? (
           <EmptyState
             icon={ContactIcon}
             title="No contacts yet"
@@ -140,30 +111,33 @@ export function Contacts() {
             action={
               <Button
                 leadingIcon={<Plus className="size-4" />}
-                onClick={() => navigate("/contacts/new")}
+                onClick={() => setComposerOpen(true)}
               >
                 Add contact
               </Button>
             }
           />
         ) : (
-          <Card className="divide-y divide-line overflow-hidden">
-            {contacts.map((c) => (
+          <Card className="divide-y divide-white/8 overflow-hidden">
+            {contacts.map((c) => {
+              const rel = findRelationship(c.relationship);
+              return (
               <div key={c.id} className="px-4 py-3">
-                <div
-                  className="flex items-center gap-3 cursor-pointer"
-                  onClick={() => navigate(`/contacts/${c.id}/edit`)}
-                >
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-vault-500/10 text-vault-300">
-                    <ContactIcon className="size-5" aria-hidden="true" />
+                <div className="flex items-center gap-3">
+                  <span className="lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full text-vault-300 [--lq-tint:var(--color-vault-400)]">
+                    {rel ? (
+                      <span className="text-lg" aria-hidden="true">{rel.emoji}</span>
+                    ) : (
+                      <ContactIcon className="size-5" aria-hidden="true" />
+                    )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-fg hover:text-vault-300 transition-colors">
+                    <div className="truncate text-sm font-medium text-fg">
                       {c.name}
                     </div>
                     {c.relationship && (
                       <div className="truncate text-xs text-fg-muted">
-                        {c.relationship}
+                        {formatRelationship(c.relationship)}
                       </div>
                     )}
                   </div>
@@ -191,15 +165,150 @@ export function Contacts() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </Card>
+        )}
+
+        {composerOpen && activeFamily && (
+          <ContactComposer
+            familyId={activeFamily.id}
+            onClose={() => setComposerOpen(false)}
+          />
         )}
       </Page>
       <Fab
         icon={Plus}
         label="Add contact"
-        onClick={() => navigate("/contacts/new")}
+        onClick={() => setComposerOpen(true)}
       />
     </>
+  );
+}
+
+
+function ContactComposer({
+  familyId,
+  onClose,
+}: {
+  familyId: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    name: "",
+    relationship: "",
+    phone: "",
+    email: "",
+  });
+  const [error, setError] = useState("");
+
+  const create = useMutation({
+    mutationFn: () =>
+      api("/contacts", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId,
+          name: form.name.trim(),
+          relationship: form.relationship.trim() || undefined,
+          phone: form.phone.trim() || undefined,
+          email: form.email.trim() || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["contacts"] });
+      onClose();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    setError("");
+    create.mutate();
+  }
+
+  return (
+    <form onSubmit={submit} noValidate className="mt-4">
+      <Card className="space-y-3 p-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+            Name <span className="text-danger">*</span>
+          </label>
+          <input
+            type="text"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="e.g. Dr. Rivera"
+            autoFocus
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+            Relationship
+          </label>
+          <TypePicker
+            domain="contact_relationship"
+            familyId={familyId}
+            value={form.relationship}
+            onChange={(relationship) =>
+              setForm((f) => ({ ...f, relationship }))
+            }
+            title=""
+            valueMode="label"
+            className="mb-2"
+          />
+          <input
+            type="text"
+            value={form.relationship}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, relationship: e.target.value }))
+            }
+            placeholder="e.g. Pediatrician"
+            className={inputCls}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+              Phone
+            </label>
+            <input
+              type="tel"
+              value={form.phone}
+              onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+              placeholder="+1 555 010 2000"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-fg-muted">
+              Email
+            </label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              placeholder="name@example.com"
+              className={inputCls}
+            />
+          </div>
+        </div>
+        {error && <p className="text-xs text-danger">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" loading={create.isPending} className="flex-1">
+            Add contact
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </Card>
+    </form>
   );
 }

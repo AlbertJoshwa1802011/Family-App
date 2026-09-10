@@ -1,63 +1,59 @@
 /**
- * App-level access control (closed signup).
+ * App-level access control (closed signup + extensible platform roles).
  *
- * Family roles (owner/admin/member) and platform_admins stay separate. This
- * module answers: may this Google identity create a session at all?
+ * Family roles (owner/admin/member) stay on family_members. This module is
+ * orthogonal: who may sign into the product at all, and who may administer it.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Env } from "../types";
 import { schema, type Db } from "../db/client";
+import { APP_ROLES, type AppRole } from "../db/schema";
+
+export type { AppRole };
+export { APP_ROLES };
 
 /** Normalize emails for grant / allowlist matching. */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/**
- * Bootstrap admins who may always sign in (and receive demo-request mail by
- * default). Kept in sync with the SHA-256 allowlist in
- * worker/middleware/requirePlatformAdmin.ts.
- */
-const BOOTSTRAP_ADMIN_EMAILS = [
-  "albertjoshwa.a@zohocorp.com",
-  "albertjoshrock101@gmail.com",
-] as const;
+/** Comma/whitespace-separated SUPER_ADMIN_EMAILS from env. */
+export function parseSuperAdminEmails(env: Env): string[] {
+  const raw = env.SUPER_ADMIN_EMAILS ?? "";
+  return raw
+    .split(/[,;\s]+/)
+    .map((e) => normalizeEmail(e))
+    .filter(Boolean);
+}
 
-export function isBootstrapAdminEmail(email: string): boolean {
-  const normalized = normalizeEmail(email);
-  return (BOOTSTRAP_ADMIN_EMAILS as readonly string[]).includes(normalized);
+export function isBootstrapSuperAdmin(env: Env, email: string): boolean {
+  const set = new Set(parseSuperAdminEmails(env));
+  return set.has(normalizeEmail(email));
 }
 
 /**
  * Where demo-request notification emails go. Prefer ACCESS_NOTIFY_EMAIL,
- * else PLATFORM_ADMIN_EMAILS first entry, else the primary bootstrap admin.
+ * else the first SUPER_ADMIN_EMAILS entry.
  */
 export function accessNotifyEmail(env: Env): string | null {
   const explicit = env.ACCESS_NOTIFY_EMAIL?.trim();
   if (explicit) return normalizeEmail(explicit);
-
-  const fromVar = (env.PLATFORM_ADMIN_EMAILS ?? "")
-    .split(/[,;\s]+/)
-    .map((e) => normalizeEmail(e))
-    .filter(Boolean)[0];
-  if (fromVar) return fromVar;
-
-  return BOOTSTRAP_ADMIN_EMAILS[1] ?? BOOTSTRAP_ADMIN_EMAILS[0] ?? null;
+  return parseSuperAdminEmails(env)[0] ?? null;
 }
 
 /**
  * Whether this Google identity may create a session.
  *
- * Order:
+ * Order matters:
  * 1. Explicit revoke on access_grants → deny (wins over grandfathering)
- * 2. Bootstrap admin email → allow
+ * 2. Bootstrap SUPER_ADMIN_EMAILS → allow
  * 3. Approved access_grant → allow
  * 4. Existing user row (pre-gate / already onboarded) → allow
- * 5. Else → deny (must request access)
+ * 5. Else → deny (must request a demo)
  */
 export async function canSignIn(
   db: Db,
-  _env: Env,
+  env: Env,
   opts: { email: string; googleSub: string },
 ): Promise<{ ok: true } | { ok: false; reason: "access_denied" | "access_revoked" }> {
   const email = normalizeEmail(opts.email);
@@ -72,7 +68,7 @@ export async function canSignIn(
     return { ok: false, reason: "access_revoked" };
   }
 
-  if (isBootstrapAdminEmail(email)) {
+  if (isBootstrapSuperAdmin(env, email)) {
     return { ok: true };
   }
 
@@ -91,6 +87,57 @@ export async function canSignIn(
   }
 
   return { ok: false, reason: "access_denied" };
+}
+
+/** Roles currently assigned to a user. */
+export async function listAppRoles(db: Db, userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ role: schema.appRoleAssignments.role })
+    .from(schema.appRoleAssignments)
+    .where(eq(schema.appRoleAssignments.userId, userId));
+  return rows.map((r) => r.role);
+}
+
+export async function userHasAppRole(
+  db: Db,
+  userId: string,
+  role: AppRole | string,
+): Promise<boolean> {
+  const row = await db
+    .select({ id: schema.appRoleAssignments.id })
+    .from(schema.appRoleAssignments)
+    .where(
+      and(
+        eq(schema.appRoleAssignments.userId, userId),
+        eq(schema.appRoleAssignments.role, role),
+      ),
+    )
+    .get();
+  return Boolean(row);
+}
+
+/**
+ * Ensure bootstrap SUPER_ADMIN_EMAILS get a durable super_admin assignment
+ * after their user row exists (idempotent).
+ */
+export async function ensureBootstrapSuperAdmin(
+  db: Db,
+  env: Env,
+  userId: string,
+  email: string,
+): Promise<void> {
+  if (!isBootstrapSuperAdmin(env, email)) return;
+  const already = await userHasAppRole(db, userId, "super_admin");
+  if (already) return;
+  await db
+    .insert(schema.appRoleAssignments)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      role: "super_admin",
+      grantedByUserId: null,
+    })
+    .onConflictDoNothing();
 }
 
 /** Upsert an approved access grant for an email (idempotent). */

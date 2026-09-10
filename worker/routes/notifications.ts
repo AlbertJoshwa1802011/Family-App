@@ -5,9 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
-import { parseWindows } from "../lib/reminders";
-import { reminderEmailHtml, sendEmailDetailed, canSendEmail } from "../lib/email";
-import { absoluteAppUrl } from "../lib/publicUrl";
+import { DEFAULT_WINDOWS, parseWindows } from "../lib/reminders";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -16,12 +14,8 @@ const NOTIFICATION_LIMIT = 50;
 const prefsSchema = z.object({
   emailEnabled: z.boolean().optional(),
   pushEnabled: z.boolean().optional(),
-  // Lead-time windows in days; sanitized server-side before storage.
-  windows: z.array(z.number().int().positive().max(365)).max(10).optional(),
-  // Where reminders are delivered. Empty string or null clears the override and
-  // falls back to the account's sign-in address.
-  reminderEmail: z.union([z.string().email().max(320), z.literal(""), z.null()]).optional(),
-  digestEnabled: z.boolean().optional(),
+  // Lead-time windows in days (0 = day of expiry/event); sanitized server-side.
+  windows: z.array(z.number().int().min(0).max(365)).max(10).optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -117,8 +111,6 @@ notificationRoutes.get("/prefs", requireSession, async (c) => {
       emailEnabled: row?.emailEnabled ?? true,
       pushEnabled: row?.pushEnabled ?? false,
       windows: parseWindows(row?.windowsJson),
-      reminderEmail: row?.reminderEmail ?? null,
-      digestEnabled: row?.digestEnabled ?? true,
     },
   });
 });
@@ -139,105 +131,23 @@ notificationRoutes.put("/prefs", requireSession, zv(prefsSchema), async (c) => {
   const windowsJson =
     updates.windows !== undefined
       ? JSON.stringify(parseWindows(JSON.stringify(updates.windows)))
-      : (existing?.windowsJson ?? "[30,7,1]");
+      : (existing?.windowsJson ?? JSON.stringify(DEFAULT_WINDOWS));
 
   const emailEnabled = updates.emailEnabled ?? existing?.emailEnabled ?? true;
   const pushEnabled = updates.pushEnabled ?? existing?.pushEnabled ?? false;
-  const digestEnabled = updates.digestEnabled ?? existing?.digestEnabled ?? true;
-  // "" is an explicit clear; undefined means "leave as is".
-  const reminderEmail =
-    updates.reminderEmail === undefined
-      ? (existing?.reminderEmail ?? null)
-      : updates.reminderEmail === "" || updates.reminderEmail === null
-        ? null
-        : updates.reminderEmail.trim().toLowerCase();
 
   if (existing) {
     await db
       .update(schema.reminderPrefs)
-      .set({ emailEnabled, pushEnabled, windowsJson, reminderEmail, digestEnabled })
+      .set({ emailEnabled, pushEnabled, windowsJson })
       .where(eq(schema.reminderPrefs.userId, userId));
   } else {
     await db
       .insert(schema.reminderPrefs)
-      .values({ userId, emailEnabled, pushEnabled, windowsJson, reminderEmail, digestEnabled });
+      .values({ userId, emailEnabled, pushEnabled, windowsJson });
   }
 
   return c.json({
-    prefs: {
-      emailEnabled,
-      pushEnabled,
-      windows: parseWindows(windowsJson),
-      reminderEmail,
-      digestEnabled,
-    },
+    prefs: { emailEnabled, pushEnabled, windows: parseWindows(windowsJson) },
   });
-});
-
-// POST /notifications/test-email — send a short "Family Vault test reminder"
-// to prefs.reminderEmail ?? user.email. Session required.
-notificationRoutes.post("/test-email", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
-
-  if (!(await canSendEmail(c.env, userId))) {
-    return c.json(
-      {
-        error: "email_not_configured",
-        message:
-          "Reconnect Google Drive storage (includes Gmail send) or set RESEND_API_KEY.",
-      },
-      503,
-    );
-  }
-
-  const user = await db
-    .select({ email: schema.users.email })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .get();
-  if (!user) return c.json({ error: "not_found" }, 404);
-
-  const prefs = await db
-    .select({ reminderEmail: schema.reminderPrefs.reminderEmail })
-    .from(schema.reminderPrefs)
-    .where(eq(schema.reminderPrefs.userId, userId))
-    .get();
-
-  const to = (prefs?.reminderEmail ?? user.email).trim().toLowerCase();
-  const appUrl = absoluteAppUrl(c.env, c.req.url);
-
-  const result = await sendEmailDetailed(
-    c.env,
-    {
-      to,
-      subject: "Test reminder",
-      html: reminderEmailHtml({
-        heading: "Family Vault test reminder",
-        body: "This is a test. If you received it, reminder email delivery is working.",
-        ctaLabel: "Open Family Vault",
-        ctaUrl: appUrl,
-      }),
-      text: "Family Vault test reminder — delivery is working.",
-    },
-    { fromUserId: userId },
-  );
-
-  if (!result.ok) {
-    const error = result.error ?? "email_send_failed";
-    const message =
-      error === "gmail_api_disabled"
-        ? "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or add a Resend API key with a verified domain."
-        : error === "resend_testing_recipients"
-          ? "Resend is in testing mode and can only email the Resend account owner. Reconnect Admin → Storage with Gmail send so every family member can receive mail, or verify a domain in Resend."
-          : error === "gmail_auth_failed"
-            ? "Gmail rejected the send. Reconnect Admin → Storage (must include gmail.send), or tap Connect Gmail in Settings."
-            : "Could not send via Gmail or Resend. Reconnect Admin → Storage so mail can leave from the family Gmail, or verify a Resend domain.";
-    return c.json(
-      { error, message },
-      error === "email_not_configured" ? 503 : 502,
-    );
-  }
-
-  return c.json({ ok: true, to, via: result.via, from: result.from });
 });

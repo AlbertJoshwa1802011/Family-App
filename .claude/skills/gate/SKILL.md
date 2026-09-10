@@ -1,51 +1,42 @@
 ---
 name: gate
-description: >
-  Run Family Vault's definition-of-done gate before any commit, PR, or "is it
-  green" check. Use after any multi-file change, and whenever asked if tests
-  pass. typecheck + lint + full vitest + build; plus migration validation if
-  the schema changed.
+description: Run Family Vault's definition-of-done gate before any commit — typecheck, lint, tests, build, and (when the schema changed) migration generation + validation. Use before committing, when asked "is it green", or after any multi-file change.
 ---
 
-# Gate — definition of done
+# The Gate — definition of done
 
-This skill is **mandatory**. Do not commit, open a PR, or call a change done
-until it passes. Focused slices (`npm run test:ship`, `npm run test:regression`)
-are for local iteration only.
-
-## Run
+Every change must pass ALL of these before it can be committed. No exceptions,
+no "it's just docs" shortcuts for code changes.
 
 ```bash
-npm run gate
+npm run typecheck   # tsc project refs + worker tsconfig + node tsconfig
+npm run lint        # eslint flat config (incl. react-hooks/purity)
+npm run test        # vitest — 358 tests across 23 files, ALL must pass
+npm run build       # tsc -b && vite build (catches PWA/plugin/worker breakage)
 ```
 
-That is `typecheck` + `lint` + **full** `npm test` (511 tests, 37 files) + `build`.
-Alias: `npm run test:gate`. GitHub CI and production deploy already run `npm run gate`.
-
-If you edited `worker/db/schema.ts` or generated SQL:
+If `worker/db/schema.ts` was touched, additionally:
 
 ```bash
-npm run db:generate
-python3 scripts/validate_migrations.py
+npm run db:generate                       # drizzle-kit generates migrations/NNNN_*.sql
+python3 scripts/validate_migrations.py    # applies ALL migrations to a scratch DB
 ```
 
-## Rules
+## Interpreting failures
 
-1. Failures are blockers. Do not wave through a pre-existing red test as "not mine."
-2. `npm run test:ship` and `npm run test:regression` are **not** the gate.
-   Ship = Home / tasks / Contacts / Face ID / cron / email / upload.
-   Regression = events / church / expenses / calendar / bubble nav.
-3. New behavior needs a test in the matching `tests/<area>.test.ts` (or a new
-   file). See `CLAUDE.md §7` and `docs/TESTING.md`.
-4. Do not skip the gate because the change "is docs only" unless you are sure
-   no executable file moved — still run `npm run gate` when in doubt.
+- **typecheck error in `src/`** but the code is worker-side (or vice versa):
+  check you edited the right tsconfig project — there are three.
+- **Test failure with 500s in integration tests**: usually a drizzle query whose
+  selected columns have duplicate result names — the node:sqlite D1 adapter
+  maps rows positionally. Alias one side:
+  `sql<string>\`${schema.families.name}\`.as("family_name")`.
+- **Lint `react-hooks/purity`**: never call `Date.now()` in render — use
+  `const [now] = useState(() => Math.floor(Date.now() / 1000))`.
+- **Build fails but typecheck passed**: usually the vite plugin triangle — do
+  NOT bump `vite`/`@cloudflare/vite-plugin`/`vite-plugin-pwa`/`@vitejs/plugin-react`
+  independently (see CLAUDE.md §5).
 
-## After it is green
+## When the gate is green
 
-Commit with a conventional subject (`feat:`, `fix:`, `test:`, `docs:`, `security:`).
-See `docs/SHIPPING.md`.
-
-If you added or changed an auth-gated `/api/*` route, also confirm the focused
-Vitest file covers **401 + happy path + isolation**
-(`.claude/skills/verify-authenticated/SKILL.md`). Do not “verify” by curling
-production without a session — `401` there is expected middleware behavior.
+Commit with a conventional subject (`feat:`/`fix:`/`security:`/`docs:`/`test:`)
+and a body explaining the why. Then see the `release` skill for push/PR/deploy.

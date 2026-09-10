@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
+/** Primary action bubble. Clears the floating bottom nav. */
 export function Fab({
   icon: Icon,
   label,
@@ -16,15 +17,13 @@ export function Fab({
       {...props}
       aria-label={label}
       className={cn(
-        "liquid-bubble liquid-raised liquid-primary liquid-press",
-        // z-40 keeps Add event / Add task above any leftover chrome; never
-        // compete with the assistant (which lives in the AppBar, not here).
-        "fixed right-4 bottom-24 z-40 flex size-14 items-center justify-center rounded-full md:bottom-6",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
+        "fixed right-5 bottom-28 z-30 flex size-15 items-center justify-center rounded-full",
+        "lq lq-raised lq-primary lq-press",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-300 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950",
         className,
       )}
     >
-      <Icon className="relative z-10 size-6" aria-hidden="true" />
+      <Icon className="size-6.5" strokeWidth={2.2} aria-hidden="true" />
     </button>
   );
 }

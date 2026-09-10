@@ -1,152 +1,182 @@
-# Testing process
+# Family Vault — Testing Guide
 
-Agents: this is the process. `CLAUDE.md §1` and `.claude/skills/gate/SKILL.md`
-say the same thing. One command before every commit and on every CI / production deploy:
+How this app is tested, how to run everything, and the catalog of test cases the
+suite guarantees. Read alongside `CLAUDE.md §7` (philosophy) and `docs/DEPLOYMENT.md`.
 
-```bash
-npm run gate
-```
+---
 
-That is the same as `npm run test:gate`. It runs **typecheck → lint → vitest → production build**. GitHub Actions (`.github/workflows/ci.yml` and `deploy.yml`) call `npm run gate` so local and CI cannot drift.
-
-## Authenticated verification (read this before curling anything)
-
-**Do not curl production and treat `401 unauthorized` as a feature failure.**
-Auth-gated routes *must* return 401 without a session cookie — that only proves
-middleware is live. Agents cannot mint a production Google session.
-
-| Path | When | How |
-|---|---|---|
-| **Vitest + `seedActor`** (preferred) | Every new `/api/*` feature | See `.claude/skills/verify-authenticated/SKILL.md` and `tests/settlements.test.ts` |
-| **`npm run dev:seed` + curl localhost** | Need real HTTP against `npm run dev` without OAuth | Seeds local D1 with fixed `sid=` cookies and prints curl examples |
-| Production curl without cookie | Post-deploy smoke only | `401` is **expected**; use a signed-in browser for human smoke |
-
-Minimum Vitest coverage for a new resource: no-cookie `401`, happy path `200/201`,
-Zod `validation_error`, cross-family `404`.
+## 1. The testing process (run this before every commit)
 
 ```bash
-npx vitest run tests/<name>.test.ts   # prove the feature
-npm run db:migrate:local && npm run dev:seed   # optional local HTTP
-npm run gate                          # before commit
+npm run typecheck   # tsc project refs + worker + node configs
+npm run lint        # eslint (incl. react-hooks/purity)
+npm run test        # vitest — 358 tests across 23 files
+npm run build       # tsc -b && vite build (catches PWA/plugin breakage)
 ```
 
-| Script | When to use it |
+If you touched `worker/db/schema.ts`:
+
+```bash
+npm run db:generate
+python3 scripts/validate_migrations.py
+```
+
+All five green = definition of done. CI (`.github/workflows/ci.yml`) enforces the
+same gate on every push/PR.
+
+---
+
+## 2. Test architecture — three layers
+
+### Layer 1: Contract tests (no database)
+`app.request(path, init)` calls the Hono app directly with no env. Verifies the
+HTTP contract: status codes, JSON error shapes (`validation_error`, `not_found`,
+`unauthorized`), security headers on every endpoint, Zod boundaries
+(null / wrong type / out of range / bad format), 404-not-HTML for unknown
+`/api/*` paths, and 401-before-400 middleware ordering.
+
+Files: `worker.test.ts`, `worker-extended.test.ts`, `events.test.ts`,
+`auth.test.ts`, `notifications.test.ts`.
+
+### Layer 2: Integration tests (real database)
+`tests/helpers/testEnv.ts` wraps Node's built-in `node:sqlite` in a
+**D1-compatible adapter** and runs the actual generated migrations, plus an
+in-memory KV with TTL. Tests exercise the real route → drizzle → SQL path with
+seeded users, sessions, families, and documents — zero extra dependencies.
+
+Files: `integration-flows.test.ts` (success paths), `authz-matrix.test.ts`
+(security), `security-hardening.test.ts` (CSRF + rate limits), `chat.test.ts`,
+`mentions-remind.test.ts`, `email-digest.test.ts` (fetch-stubbed Resend),
+`search-categorize-calendar.test.ts`, `regression-deep.test.ts` (session
+lifecycle, cross-family isolation matrix, trashed surfaces, unicode/limits),
+`expenses.test.ts`, `assistant.test.ts` (tools + mocked tool loop + task
+cron windows), `gemini.test.ts` (Gemini REST adapter + fetch-stubbed HTTP).
+
+### Layer 2.5: Live application testing (real runtime, real users)
+`npm run dev` + `npm run dev:seed` (two users with session cookies, no OAuth
+needed) → drive real user journeys with curl → `npm run dev:screenshots` for
+mobile-viewport UI review. The full scripted family journey lives in
+`.claude/skills/live-test/SKILL.md`. Use this before shipping anything
+user-visible.
+
+Seed helpers: `seedUser`, `seedSession` (returns a `sid=` cookie),
+`seedFamily`, `seedMember`, `seedActor` (user+membership+session in one call),
+`seedDocument`.
+
+### Layer 3: Pure-function unit tests
+`expiry.test.ts`, `eventTime.test.ts`, `reminders.test.ts`, `email.test.ts` —
+timezone-stable fixtures via `Date.UTC()`. `stress.test.ts` runs 20k mixed
+concurrent requests against the pipeline and asserts a throughput floor and
+zero 500s.
+
+### Layer 4: Component & design-system tests (jsdom)
+`ui-primitives`, `ui-forms`, `ui-navigation`, `ui-regressions` (`*.test.tsx`) render
+the UI with `@testing-library/react`. They opt into a DOM per-file with a
+`// @vitest-environment jsdom` docblock so the worker suites keep running in fast
+plain Node. Shared harness: `tests/helpers/render.tsx` (`renderUi`, `classes`,
+`expectGlass`, `calcFraction`).
+
+`design-system.test.ts` is deliberately **not** a rendering test — it parses
+`src/index.css` and the component sources. jsdom has no layout, no `@layer`
+ordering and no `backdrop-filter`, so the cascade and stacking invariants of the
+liquid-glass system can only be asserted against the stylesheet itself. See
+`docs/TEST_RECORD.md` for the defects these guard against.
+
+Interactions use `fireEvent`; `@testing-library/user-event` is intentionally not
+a dependency (see §5).
+
+---
+
+## 3. Test-case catalog — what the suite guarantees
+
+### Security (the cases that protect family PII)
+
+| Case | File |
 |---|---|
-| `npm run gate` / `test:gate` | Before commit, before merge, what CI runs |
-| `npm run test` | All Vitest files (fast loop while implementing) |
-| `npm run test:regression` | Events, church, expenses, calendar, nav |
-| `npm run test:ship` | Home, tasks, Contacts, Face ID, email, cron |
-| `npm run test:watch` | Vitest watch mode |
-| `npm run test:catalog` | Per-module 1000-case grids in `tests/catalog/` |
-| `npm run dev:seed` | Local D1 users + session cookies for curl/browser without OAuth |
+| Member A cannot list/get/PATCH/download/comment-on/enumerate-files-of/attach-files-to member B's **private** document (404, never 403 — existence not revealed) | `authz-matrix` |
+| Owner, admin, and the doc's owner CAN see a private doc | `authz-matrix` |
+| A non-member of the family sees nothing, even family-visible docs | `authz-matrix` |
+| Member cannot delete another's family doc (403); admin can | `authz-matrix` |
+| Cross-origin POST/PATCH/DELETE → 403 `csrf_rejected` before auth runs | `security-hardening` |
+| Forged Referer (no Origin) → 403; same-origin and APP_URL origins pass; header-less non-browser clients pass | `security-hardening` |
+| Download proxy GET is Origin/Referer-checked (Lax-cookie CSRF vector) | `security-hardening` |
+| OAuth start: 10/min/IP → 429 with Retry-After; per-IP isolation | `security-hardening` |
+| Invites: 20/h/user → 429; upload-url: 30/min/user → 429 | `security-hardening` |
+| Rate limiter fails open without KV (never 429 in unit envs) | `security-hardening` |
+| Invite tokens are email-bound (403 `invite_email_mismatch`), single-use (409), expire (410) | `integration-flows` |
+| Cross-family injection rejected: event attendees/documents, task assignee/related IDs (400 `invalid_*_ids`) | `integration-flows`, `events` |
+| All protected routes 401 without a session cookie | `auth`, `worker-extended` |
+| Security headers present on every endpoint incl. errors | `worker-extended` |
+| Oversized bodies → 413, never OOM | `stress` |
 
-Integration tests use a real in-memory SQLite that applies every file in
-`migrations/` (`tests/helpers/testEnv.ts`). Do not mock the database.
+### Success paths (the "basic functionality" cases)
 
-## Module catalogs (1000+ cases each)
+| Case | File |
+|---|---|
+| Create family → creator is owner → listed in /families | `integration-flows` |
+| Create document with all fields → list → get → update → **clear fields with null** → trash → audit-logged | `integration-flows` |
+| Record file v1, v2 → version increments, currentFileId advances | `integration-flows` |
+| Create event with attendees → range query finds it → cancel keeps it visible as cancelled | `integration-flows` |
+| Create task → nest subtasks → toggle done (root leaves To-do / appears in Completed; done child stays nested under an open parent) → unassign via null → cascade-delete descendants | `integration-flows`, `tasks` |
+| Task views: todo / priority / due / recent / mine / completed; sorts due/added/priority; search includes ancestors; depth cap; cycle reject | `tasks`, `taskTree` |
+| Contact create → update → delete | `integration-flows` |
+| Invite → accept with matching email → new member can read family docs | `integration-flows` |
+| **Reminder pipeline**: expiring doc → cron run → in-app notification for every active member → second run dedupes → mark read works | `integration-flows` |
+| Private-doc reminders go ONLY to the doc owner | `integration-flows` |
+| Reminder prefs PUT persists, normalizes windows; GET returns defaults | `integration-flows` |
+| Assistant: Gemini preferred over Anthropic; 503 without either key; snacks expense via stubbed generateContent | `gemini`, `assistant` |
+| Assistant tools write family-scoped expenses/tasks/events; private docs omitted from member snapshot; threads are per-user | `assistant` |
+| Task due emails/notifications at 7, 2, and 1 days; assigned tasks notify only the assignee | `assistant` |
 
-These are table-driven `it.each` grids — real contracts, not junk combinatorics.
-One TestEnv is created per `describe` (migrations are expensive; never per-case).
+### Boundaries & regressions
 
-| File | What it records | Count (approx.) |
-|---|---|---|
-| `tests/catalog/api-contract-matrix.test.ts` | Every Worker route: 401, nosniff, request-id, never HTML, broken JSON, deep-path JSON 404 | ~700 |
-| `tests/catalog/events-1000.test.ts` | POST create: 10 titles × 4 types × 2 allDay × 2 location × 7 start offsets, plus Zod rejects | 1120+ |
-| `tests/catalog/expenses-1000.test.ts` | POST amountMinor 0–499 × visibility family/private (`categoryId: null` allowed) | 1000+ |
-| `tests/catalog/documents-1000.test.ts` | POST 200 expiry days × 2 visibility × 3 categories | 1200+ |
-| `tests/catalog/tasks-1000.test.ts` | POST 1000 due dates, then PATCH status cycle | 1000+ |
-| `tests/catalog/contacts-1000.test.ts` | POST 1000 names / relationship / phone | 1000+ |
-| `tests/catalog/families-1000.test.ts` | POST 1000 family names | 1000+ |
-| `tests/catalog/finance-1000.test.ts` | POST incomes 1–500 × 2 visibility, cadence cycle | 1000+ |
-| `tests/catalog/wishlist-1000.test.ts` | POST cost 1–500 × 2 visibility, priority 1–5 | 1000+ |
-| `tests/catalog/items-1000.test.ts` | POST type `note`, 500 titles × 2 visibility | 1000+ |
-| `tests/catalog/church-1000.test.ts` | Settle: 500 invalid `periodKey` → 400; 504 valid months without token → 503 | 1000+ |
-| `tests/catalog/expiry-days.test.ts` | `expiryStatus` for day offsets −250…+749 at pinned UTC midnight | 1000 |
-| `tests/catalog/money-1000.test.ts` | `formatMajorFromMinor` ↔ `parseMajorToMinor` for 200 amounts × 5 currencies | 1000 |
-| `tests/catalog/bubble-1000.test.ts` | `clampBubble` / `snapBubbleToEdge` across 200 widths × 5 heights | 1000+ |
+- Zod: every mutation's min/max/enum/regex/format boundaries (`worker-extended`, `events`).
+- Expiry badge timezone stability at UTC midnight (`expiry`).
+- `eventMonthKey` 0-indexed month pin (`eventTime`).
+- Reminder windowing: tightest-due-window selection, past-expiry handling (`reminders`).
+- Email: no-op without `RESEND_API_KEY`, failure → dedupe row removed for retry (`email`, `integration-flows`).
 
-Cross-family reads still 404 (do not leak). Zod failures stay `{ error: "validation_error", issues }`.
+---
 
-## Regression catalog (must stay green)
+## 4. High-value cases still worth adding (next)
 
-These cases lock the bugs this branch fixed. They live in
-`tests/regression-v16.test.ts` plus the focused files below.
+1. **Component tests** — *partly done*. The UI primitives, form controls, nav
+   chrome and design-system contracts are covered (264 cases). Still worth
+   adding: DocumentForm validation, CreateFamily onboarding, EventForm
+   hydration on edit, AcceptInvite error states — i.e. the *page-level* flows.
+2. **E2E (Playwright)** against `npm run dev`: login-stubbed cookie → create
+   family → add document → upload (mock Drive) → see expiry badge → reminder
+   notification appears. The dev server runs real workerd + local D1.
+3. **Migration round-trip test**: apply all migrations to a fresh DB and diff
+   against `drizzle-kit` schema snapshot (guards hand-edited migrations).
+4. **Drive lib contract tests** with a mocked `fetch` (token refresh, 401 retry,
+   resumable-URL Location handling).
+5. **Session lifecycle**: idle-window slide, absolute expiry, purge cron.
+6. **Concurrency**: two simultaneous file records on one document (currentFileId
+   must settle on the later version).
+7. **Typecheck the worker suites**: `tsconfig.test.json` currently covers only
+   `*.test.tsx` plus the helpers. The older `*.test.ts` files need Cloudflare's
+   ambient types and a few Anthropic SDK fixture updates (18 pre-existing
+   errors) before they can join `npm run typecheck`.
+8. **Automated accessibility pass** (axe): roles, labels, tap targets and
+   reduced-motion are asserted today, but colour contrast is still eyeballed.
 
-### Event edit + email
-- `GET /events/:id` returns title, type, startAt, endAt, location, description, nested `event.attendees` (edit form hydrates from this).
-- Create writes `event_created` in-app notification for the actor.
-- Tagged attendees also get `event_created` even if their email prefs are off.
-- PATCH keeps the edit-form fields and writes `event_updated`.
-- Cancel writes `event_cancelled`.
-- Empty title → `400 validation_error`.
-- Event CRUD is `201` even when Google Calendar returns 403 (`needs_reconnect`).
-- Successful Calendar upsert stores `googleCalendarEventId`.
+---
 
-### Google Calendar + ICS
-- OAuth start includes `calendar.events` only with `connect=calendar` (+ `prompt=consent`).
-- Timed ICS uses `DTSTART:`; all-day ICS uses `VALUE=DATE`.
-- Feed token is 401 without a session; `url` is null before mint; rotate invalidates the old URL.
-- Feed does not leak another family's events or private document expiries.
-- Per-event ICS is 401 unauthenticated, 404 for another family / unknown id.
-- Create/PATCH re-reads the event so `googleCalendarEventId` is present after a successful write.
-- Known missing `calendar.events` scope → `needs_reconnect` without calling Calendar API.
-- Calendar API disabled → `needs_api_enabled`.
+## 5. Conventions for new tests
 
-### Church funds
-- Snapshot / settle require a session.
-- Missing `CONTRIBUTIONS_API_TOKEN` → `503 church_not_configured`.
-- Unknown fund → 404; other family → 404; invalid `periodKey` → `400 validation_error`.
-- Duplicate month → 409; upstream 500 → 502.
-- Settle stores rupees as minor units (`1000` → `100000`) and snapshot lists it.
-
-### Expenses
-- Built-in categories have `#` colours.
-- `POST /expenses` with `categoryId: null` still creates the row (add is not blocked).
-- `GET /categories` without `familyId` → 400.
-- `GET /expenses?view=mine` lists only the caller's books (same rule as summary).
-- `GET /expenses?q=` matches merchant/description; `categoryId=none` is uncategorized.
-- `GET /expenses/summary` includes `byDay` for the month heat-map.
-
-### Bubble nav
-- Clamp stays inside the padded viewport.
-- Snap is left/right by centre vs midline (no rubber-band back to the start).
-- Default position is bottom-centre.
-
-### Pinned liquid tab bar
-- `indexFromX` maps five equal slots (WhatsApp-style); out-of-range X clamps to 0/last.
-- `clampPillLeft` never leaves the bar (including a pill wider than the bar).
-- `pillLeftForIndex` keeps first/last pills inside the inset.
-
-### Face ID / PIN
-- `b64urlDecode` accepts unpadded 1-, 2-, and 3-byte payloads (the old pad formula threw `invalid_client_data`).
-- `parseClientData` allows any origin on the allow-list; rejects foreign origin / type / challenge.
-- `GET /device-lock/status` `rpId` follows the request `Origin` hostname.
-- PIN reset without email → 503 `email_not_configured`; with Resend → 200 `{ to }`.
-- PIN reset confirm with a hashed KV code replaces the PIN and cannot reuse the code.
-- WebAuthn register with a foreign origin → 400 `invalid_client_data` plus a Face ID message.
-
-### Health / OAuth URIs
-- `GET /api/health` lists `oauth.loginCallback` and `oauth.storageCallback` from `APP_URL`.
-- Trailing slash on `APP_URL` is stripped; missing `APP_URL` → null callbacks.
-
-### Contacts sync
-- Unconnected → 409 `contacts_not_connected`.
-- People API 403 → 502 `google_sync_failed` with a People API / verification message.
-
-### Expenses Mine / Shared
-- `GET /expenses?view=mine` is only the caller's rows.
-- `view=family` and omitting `view` still include others' `visibility=family` rows (privacy filter unchanged).
-
-## Adding a new API surface
-
-Mirror `tests/events.test.ts` / `tests/regression-v16.test.ts`:
-
-1. Unauthenticated → 401 `unauthorized`.
-2. Unknown deep path → 404 `not_found` JSON (never HTML).
-3. Invalid body → 400 `{ error: "validation_error", issues }`.
-4. Happy path status + response shape.
-5. Cross-family → 404 (do not leak existence).
-6. Security headers (`x-content-type-options: nosniff`) on the route.
-
-If you change `worker/db/schema.ts`: `npm run db:generate`, then
-`python3 scripts/validate_migrations.py`, then `npm run test:gate`.
+- One resource = one describe block; name cases by behavior, not endpoint.
+- Integration tests: build state through the API when the API can do it;
+  seed directly only for preconditions the API can't create (users, sessions).
+- Always assert the **error body shape**, not just the status.
+- Never assert on wall-clock timing; use seeded dates relative to `Date.now()`.
+- Keep the D1 adapter honest: use explicit aliased field selections in drizzle
+  queries (see the header comment in `tests/helpers/testEnv.ts`).
+- Component tests assert the **contract** — the shared `.lq` recipe, variant and
+  tone maps, roles, labels, tap-target minimums, prop names — not pixel output.
+  A reimplementation that keeps the contract should keep passing.
+- Prefer `fireEvent` over adding `@testing-library/user-event`; the suite's rule
+  is no new test dependencies (same reason `testEnv.ts` adapts `node:sqlite`
+  rather than pulling in a D1 mock).
+- Assert sliding-pill geometry with `calcFraction()`, never the literal `calc()`
+  string — jsdom normalises `index / count` into a decimal.

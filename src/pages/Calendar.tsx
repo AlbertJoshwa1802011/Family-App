@@ -11,12 +11,14 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Fab } from "../components/ui/Fab";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import {
   formatEventTime,
   formatMonthYear,
   eventMonthKey,
   eventTypeColor,
 } from "../lib/eventTime";
+import { useLabels } from "../lib/useLabels";
 
 export interface EventSummary {
   id: string;
@@ -42,15 +44,24 @@ function EventSkeleton() {
 }
 
 function EventRow({ event }: { event: EventSummary }) {
+  const { activeFamily } = useAuth();
+  const { find: findType } = useLabels(activeFamily?.id, "event_type");
   const colors = eventTypeColor(event.type);
+  const typeMeta = findType(event.type);
   return (
     <ListItem
       to={`/calendar/events/${event.id}`}
       leading={
-        <span
-          className={`mt-0.5 size-2.5 shrink-0 self-start rounded-full ${colors.dot}`}
-          aria-hidden="true"
-        />
+        typeMeta ? (
+          <span className="mt-0.5 text-base leading-none" aria-hidden="true">
+            {typeMeta.emoji}
+          </span>
+        ) : (
+          <span
+            className={`mt-0.5 size-2.5 shrink-0 self-start rounded-full ${colors.dot}`}
+            aria-hidden="true"
+          />
+        )
       }
       title={
         <span
@@ -77,23 +88,25 @@ function EventRow({ event }: { event: EventSummary }) {
 
 export function CalendarPage() {
   const navigate = useNavigate();
+  const { activeFamily } = useAuth();
 
+  // Stable reference: computed once on mount so re-renders don't shift the query window.
   const [now] = useState(() => Math.floor(Date.now() / 1000));
-  const weekEnd = now + 7 * 24 * 3600;
   const sixMonths = now + 6 * 30 * 24 * 3600;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["events", { from: now, to: sixMonths }],
+    queryKey: ["events", activeFamily?.id, { from: now, to: sixMonths }],
     queryFn: () =>
-      api<{ events: EventSummary[] }>(`/events?from=${now}&to=${sixMonths}`),
+      api<{ events: EventSummary[] }>(
+        `/events?familyId=${activeFamily!.id}&from=${now}&to=${sixMonths}`,
+      ),
+    enabled: Boolean(activeFamily),
   });
 
   const events = (data?.events ?? []).filter((e) => e.status !== "trashed");
-  const thisWeek = events.filter((e) => e.startAt <= weekEnd);
-  const later = events.filter((e) => e.startAt > weekEnd);
-  const nextUp = events.find((e) => e.status === "active");
 
-  const groupedLater = later.reduce<Map<string, EventSummary[]>>((acc, ev) => {
+  // Group events by month
+  const grouped = events.reduce<Map<string, EventSummary[]>>((acc, ev) => {
     const key = eventMonthKey(ev.startAt);
     if (!acc.has(key)) acc.set(key, []);
     acc.get(key)!.push(ev);
@@ -105,12 +118,12 @@ export function CalendarPage() {
       <AppBar title="Calendar" />
       <Page className="space-y-6">
         {isLoading ? (
-          <Card className="divide-y divide-line" aria-busy="true">
+          <Card className="divide-y divide-white/8" aria-busy="true">
             {Array.from({ length: 5 }).map((_, i) => (
               <EventSkeleton key={i} />
             ))}
           </Card>
-        ) : events.length === 0 ? (
+        ) : grouped.size === 0 ? (
           <EmptyState
             icon={CalendarDays}
             title="No upcoming events"
@@ -118,7 +131,7 @@ export function CalendarPage() {
             action={
               <button
                 onClick={() => navigate("/calendar/events/new")}
-                className="inline-flex items-center gap-2 rounded-full bg-vault-600 px-5 py-2.5 text-sm font-semibold text-white"
+                className="lq lq-raised lq-primary lq-press inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold"
               >
                 <Plus className="size-4" />
                 Add event
@@ -126,44 +139,18 @@ export function CalendarPage() {
             }
           />
         ) : (
-          <>
-            {nextUp && (
-              <section className="space-y-2">
-                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                  Next up
-                </h3>
-                <Card className="overflow-hidden border-vault-500/30 bg-vault-500/5">
-                  <EventRow event={nextUp} />
-                </Card>
-              </section>
-            )}
-
-            {thisWeek.length > 0 && (
-              <section className="space-y-2">
-                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                  This week
-                </h3>
-                <Card className="divide-y divide-line overflow-hidden">
-                  {thisWeek.map((ev) => (
-                    <EventRow key={ev.id} event={ev} />
-                  ))}
-                </Card>
-              </section>
-            )}
-
-            {Array.from(groupedLater.entries()).map(([key, monthEvents]) => (
-              <section key={key} className="space-y-2">
-                <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                  {formatMonthYear(monthEvents[0].startAt)}
-                </h3>
-                <Card className="divide-y divide-line overflow-hidden">
-                  {monthEvents.map((ev) => (
-                    <EventRow key={ev.id} event={ev} />
-                  ))}
-                </Card>
-              </section>
-            ))}
-          </>
+          Array.from(grouped.entries()).map(([key, monthEvents]) => (
+            <section key={key} className="space-y-2">
+              <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+                {formatMonthYear(monthEvents[0].startAt)}
+              </h3>
+              <Card className="divide-y divide-white/8 overflow-hidden">
+                {monthEvents.map((ev) => (
+                  <EventRow key={ev.id} event={ev} />
+                ))}
+              </Card>
+            </section>
+          ))
         )}
       </Page>
       <Fab icon={Plus} label="Add event" onClick={() => navigate("/calendar/events/new")} />

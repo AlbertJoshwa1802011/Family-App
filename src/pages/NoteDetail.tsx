@@ -7,23 +7,21 @@ import { Page } from "../components/ui/Page";
 import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { Chip } from "../components/ui/Chip";
+import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
 import {
-  KIND_LABELS,
-  NOTE_KINDS,
   noteDisplayTitle,
   type Note,
-  type NoteKind,
   type Notebook,
 } from "../lib/notes";
 
 type Draft = {
   title: string;
   body: string;
-  kind: NoteKind;
+  kind: string;
   noteDate: string;
   visibility: "family" | "private";
   pinned: boolean;
@@ -261,31 +259,31 @@ function NoteEditor({
               <button
                 type="button"
                 className={cn(
-                  "liquid-bubble liquid-flat liquid-press flex size-10 items-center justify-center rounded-full",
+                  "lq lq-flat lq-press flex size-10 items-center justify-center rounded-full",
                   draft.pinned ? "text-vault-300" : "text-fg-subtle",
                 )}
                 aria-label={draft.pinned ? "Unpin" : "Pin"}
                 aria-pressed={draft.pinned}
                 onClick={() => update("pinned", !draft.pinned)}
               >
-                <Pin className="relative z-10 size-5" />
+                <Pin className="size-5" />
               </button>
             )}
             {isTrashed && canManageTrash ? (
               <button
                 type="button"
-                className="liquid-bubble liquid-flat liquid-press flex size-10 items-center justify-center rounded-full text-fg-muted"
+                className="lq lq-flat lq-press flex size-10 items-center justify-center rounded-full text-fg-muted"
                 aria-label="Restore note"
                 disabled={restore.isPending}
                 onClick={() => restore.mutate()}
               >
-                <RotateCcw className="relative z-10 size-5" />
+                <RotateCcw className="size-5" />
               </button>
             ) : null}
             {canEdit || canManageTrash ? (
               <button
                 type="button"
-                className="liquid-bubble liquid-flat liquid-press flex size-10 items-center justify-center rounded-full text-danger"
+                className="lq lq-flat lq-press flex size-10 items-center justify-center rounded-full text-danger"
                 aria-label={
                   isTrashed ? "Delete forever" : "Move to Recently Deleted"
                 }
@@ -302,7 +300,7 @@ function NoteEditor({
                   remove.mutate();
                 }}
               >
-                <Trash2 className="relative z-10 size-5" />
+                <Trash2 className="size-5" />
               </button>
             ) : null}
           </span>
@@ -310,13 +308,18 @@ function NoteEditor({
       />
       <Page>
         {isTrashed && canManageTrash && (
-          <div className="liquid-bubble liquid-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
+          <div className="lq lq-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
             This note is in Recently Deleted. Restore it, or delete it forever.
             <div className="mt-3 flex gap-2">
-              <Button loading={restore.isPending} onClick={() => restore.mutate()}>
+              <Button
+                size="sm"
+                loading={restore.isPending}
+                onClick={() => restore.mutate()}
+              >
                 Restore
               </Button>
               <Button
+                size="sm"
                 variant="danger"
                 loading={remove.isPending}
                 onClick={() => {
@@ -336,7 +339,7 @@ function NoteEditor({
         )}
 
         {isTrashed && !canManageTrash && (
-          <div className="liquid-bubble liquid-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
+          <div className="lq lq-flat mb-4 rounded-2xl px-4 py-3 text-sm text-fg-muted">
             This note is in Recently Deleted.
           </div>
         )}
@@ -399,20 +402,13 @@ function NoteEditor({
         {!isTrashed && canEdit && (
           <div className="mt-6 space-y-4 border-t border-white/8 pt-4">
             <div>
-              <p className="mb-2 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-                Kind
-              </p>
-              <div className="-mx-1 flex flex-wrap gap-2 px-1">
-                {NOTE_KINDS.map((k) => (
-                  <Chip
-                    key={k}
-                    selected={draft.kind === k}
-                    onClick={() => update("kind", k)}
-                  >
-                    {KIND_LABELS[k]}
-                  </Chip>
-                ))}
-              </div>
+              <TypePicker
+                domain="note_kind"
+                familyId={activeFamily?.id}
+                value={draft.kind}
+                onChange={(kind) => update("kind", kind)}
+                title="Kind"
+              />
             </div>
 
             <div>

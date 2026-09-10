@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, CalendarDays, HardDrive, Info, LogOut, Mail } from "lucide-react";
+import { useState } from "react";
+import { Bell, CalendarPlus, Check, Copy, Info, LogOut, Mail, Shield } from "lucide-react";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -16,147 +16,13 @@ interface ReminderPrefs {
   emailEnabled: boolean;
   pushEnabled: boolean;
   windows: number[];
-  reminderEmail: string | null;
 }
 
-// Lead-time options offered in the UI (days before expiry/event).
-const WINDOW_OPTIONS = [1, 3, 7, 14, 30, 60];
+// Lead-time options offered in the UI (days before expiry/event). 0 = day of.
+const WINDOW_OPTIONS = [0, 2, 7, 14, 30, 60];
 
-const emailInputClass =
-  "w-full rounded-xl border border-line bg-ink-950 px-3.5 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus:border-vault-500 focus:outline-none";
-
-/**
- * Local draft for the reminder-email override. Remounted via `key` when the
- * server value changes so we never sync draft→props through an effect.
- */
-function ReminderEmailField({
-  initial,
-  disabled,
-  onSave,
-  saving,
-}: {
-  initial: string | null;
-  disabled?: boolean;
-  onSave: (next: string | null) => void;
-  saving?: boolean;
-}) {
-  const [draft, setDraft] = useState(initial ?? "");
-  const dirty = draft.trim() !== (initial ?? "").trim();
-
-  const commit = () => {
-    if (!dirty || saving) return;
-    // Empty string clears the override so the cron falls back to the login email.
-    onSave(draft.trim() === "" ? null : draft.trim());
-  };
-
-  return (
-    <div className="space-y-2 px-4 py-3">
-      <label htmlFor="reminder-email" className="text-sm font-medium text-fg">
-        Send reminders to
-      </label>
-      <div className="flex gap-2">
-        <input
-          id="reminder-email"
-          type="email"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          placeholder="albertjoshrock101@gmail.com"
-          disabled={disabled || saving}
-          className={emailInputClass}
-        />
-        {dirty && (
-          <Button
-            type="button"
-            variant="secondary"
-            loading={saving}
-            onClick={commit}
-            className="shrink-0"
-          >
-            Save
-          </Button>
-        )}
-      </div>
-      <p className="text-xs text-fg-muted">
-        Daily cron emails reminders even if you don't open the app. Leave blank
-        to use your Google account email.
-      </p>
-    </div>
-  );
-}
-
-function GoogleConnectionsCard() {
-  const { data } = useQuery({
-    queryKey: ["google-status"],
-    queryFn: () =>
-      api<{
-        contacts: boolean;
-        gmail: boolean;
-        calendar: boolean;
-        hasRefreshToken?: boolean;
-      }>("/auth/google/status"),
-  });
-
-  return (
-    <Card className="divide-y divide-line overflow-hidden">
-      <ListItem
-        leading={<Mail className="size-5 text-fg-muted" />}
-        title="Gmail reminders"
-        subtitle={
-          data?.gmail
-            ? "Granted — reminders can leave from your Gmail"
-            : "Grant Gmail send so tests and reminders leave from your account"
-        }
-        trailing={
-          data?.gmail ? (
-            <span className="text-xs text-success">On</span>
-          ) : (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                window.location.href = `/api/auth/google/start?connect=gmail&returnTo=${encodeURIComponent("/settings")}`;
-              }}
-            >
-              Connect
-            </Button>
-          )
-        }
-      />
-      <ListItem
-        leading={<CalendarDays className="size-5 text-fg-muted" />}
-        title="Google Calendar"
-        subtitle={
-          data?.calendar
-            ? "Connected — creating an event writes it to Google automatically"
-            : "Connect once so event create/update/delete sync inside the app"
-        }
-        trailing={
-          data?.calendar ? (
-            <span className="text-xs text-success">On</span>
-          ) : (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                window.location.href = `/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent("/settings")}`;
-              }}
-            >
-              Connect
-            </Button>
-          )
-        }
-      />
-      <ListItem
-        to="/contacts"
-        leading={<Mail className="size-5 text-fg-muted" />}
-        title="Google Contacts"
-        subtitle={
-          data?.contacts
-            ? "Connected — sync from the Contacts screen"
-            : "Connect to two-way sync with your phone"
-        }
-      />
-    </Card>
-  );
+function windowLabel(w: number): string {
+  return w === 0 ? "Today" : `${w}d`;
 }
 
 function ReminderPrefsCard() {
@@ -174,53 +40,6 @@ function ReminderPrefsCard() {
       }),
     // Optimistically reflect the change, then reconcile with the server.
     onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
-  });
-
-  const [testMsg, setTestMsg] = useState<string | null>(null);
-  const testEmail = useMutation({
-    mutationFn: () =>
-      api<{ ok: true; to: string; via?: string; from?: string }>(
-        "/notifications/test-email",
-        { method: "POST" },
-      ),
-    onSuccess: (res) =>
-      setTestMsg(
-        `Sent to ${res.to}${res.via ? ` via ${res.via}` : ""}${res.from ? ` from ${res.from}` : ""}`,
-      ),
-    onError: (e: unknown) => {
-      const msg = e instanceof Error ? e.message : "Could not send test email.";
-      if (msg === "email_not_configured") {
-        setTestMsg(
-          "Email is not configured. Reconnect Storage (Gmail send) or set RESEND_API_KEY.",
-        );
-        return;
-      }
-      if (msg === "gmail_api_disabled") {
-        setTestMsg(
-          "Enable Gmail API on the Google Cloud project, then reconnect Admin → Storage. Or verify a Resend domain.",
-        );
-        return;
-      }
-      if (msg.includes("Resend is in testing mode") || msg === "resend_testing_recipients") {
-        setTestMsg(
-          "Resend can only email the account owner until a domain is verified. Reconnect Admin → Storage with Gmail send so every family member receives mail.",
-        );
-        return;
-      }
-      if (msg === "gmail_auth_failed") {
-        setTestMsg(
-          "Gmail rejected the send. Reconnect Admin → Storage (include gmail.send), or Connect Gmail above.",
-        );
-        return;
-      }
-      if (msg === "email_send_failed" || msg.startsWith("resend_")) {
-        setTestMsg(
-          "Could not send. Reconnect Admin → Storage for Gmail send (reaches all members), or verify a Resend domain.",
-        );
-        return;
-      }
-      setTestMsg(msg);
-    },
   });
 
   if (isLoading || !data) {
@@ -242,7 +61,7 @@ function ReminderPrefsCard() {
   };
 
   return (
-    <Card className="divide-y divide-line overflow-hidden">
+    <Card className="divide-y divide-white/8 overflow-hidden">
       <ListItem
         leading={<Mail className="size-5 text-fg-muted" />}
         title="Email reminders"
@@ -255,30 +74,25 @@ function ReminderPrefsCard() {
             disabled={save.isPending}
             onClick={() => save.mutate({ emailEnabled: !prefs.emailEnabled })}
             className={cn(
-              "relative flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 px-0.5",
-              prefs.emailEnabled ? "bg-vault-600" : "bg-white/10",
+              "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
+              prefs.emailEnabled ? "lq lq-primary" : "lq lq-field",
             )}
           >
             <span
               className={cn(
-                "size-5 rounded-full bg-white transition-transform duration-200 shadow-sm",
+                "absolute top-0.5 left-0.5 size-5 rounded-full bg-white",
+                "transition-transform duration-300 ease-[var(--ease-liquid)]",
                 prefs.emailEnabled ? "translate-x-5" : "translate-x-0",
               )}
             />
           </button>
         }
       />
-      <ReminderEmailField
-        key={prefs.reminderEmail ?? "none"}
-        initial={prefs.reminderEmail}
-        disabled={save.isPending}
-        saving={save.isPending}
-        onSave={(next) => save.mutate({ reminderEmail: next })}
-      />
       <div className="px-4 py-3">
         <div className="text-sm font-medium text-fg">Lead time</div>
         <div className="mt-0.5 text-xs text-fg-muted">
-          How far ahead to remind you. Pick one or more.
+          How far ahead to remind you. &quot;Today&quot; is always sent for
+          document expiry even if unchecked here.
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {WINDOW_OPTIONS.map((w) => {
@@ -289,96 +103,98 @@ function ReminderPrefsCard() {
                 disabled={save.isPending}
                 onClick={() => toggleWindow(w)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
-                  on
-                    ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                    : "border-line text-fg-muted hover:bg-white/5",
+                  "lq lq-flat lq-press rounded-full px-3.5 py-1.5 text-xs font-semibold disabled:opacity-50",
+                  on ? "lq-primary text-white" : "text-fg-muted hover:text-fg",
                 )}
               >
-                {w}d
+                {windowLabel(w)}
               </button>
             );
           })}
         </div>
-      </div>
-      <div className="space-y-2 px-4 py-3">
-        <Button
-          fullWidth
-          variant="secondary"
-          loading={testEmail.isPending}
-          onClick={() => {
-            setTestMsg(null);
-            testEmail.mutate();
-          }}
-        >
-          Send test email
-        </Button>
-        {testMsg && (
-          <p className="text-xs text-fg-muted" role="status">
-            {testMsg}
-          </p>
-        )}
       </div>
     </Card>
   );
 }
 
 function CalendarFeedCard() {
-  const [url, setUrl] = useState<string | null>(null);
-  const [webcalUrl, setWebcalUrl] = useState<string | null>(null);
+  const [feedUrl, setFeedUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
   const mint = useMutation({
     mutationFn: () =>
-      api<{ url: string; webcalUrl: string }>("/calendar/feed-token", { method: "POST" }),
+      api<{ url: string; webcalUrl?: string }>("/calendar/feed-token", {
+        method: "POST",
+      }),
     onSuccess: (res) => {
-      setUrl(res.url);
-      setWebcalUrl(res.webcalUrl);
+      setFeedUrl(res.url);
+      setCopied(false);
     },
   });
-  const existing = useQuery({
-    queryKey: ["calendar", "feed-token"],
-    queryFn: () =>
-      api<{ url: string | null; webcalUrl: string | null }>("/calendar/feed-token"),
-  });
-  const shown = url ?? existing.data?.url ?? null;
-  const appleUrl = webcalUrl ?? existing.data?.webcalUrl ?? null;
 
   return (
-    <section className="space-y-2">
-      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-        Calendar subscribe (Apple & backup)
-      </h3>
-      <Card className="space-y-3 p-4">
-        <p className="text-sm text-fg-muted">
-          Instant Google Calendar needs Connections → Google Calendar above.
-          Creating an event then writes to Google inside the app. The ICS feed
-          below is only a backup for Apple Calendar subscribe.
+    <Card className="space-y-3 p-4">
+      <div className="flex items-start gap-3">
+        <CalendarPlus className="mt-0.5 size-5 shrink-0 text-fg-muted" />
+        <div>
+          <div className="text-sm font-medium text-fg">Calendar sync</div>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            New events default to Google Calendar and Apple Calendar (checkboxes
+            on the create form — both on). No separate connect button. The
+            optional feed below can also carry document expiries and opt-in
+            &quot;Renew&quot; markers (enable on a document for the week-before
+            planning event).
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-white/10 pt-3">
+        <div className="text-xs font-medium text-fg">Optional feed URL</div>
+        <p className="mt-0.5 text-xs text-fg-subtle">
+          Advanced: subscribe Apple Calendar / Outlook to a live feed of family
+          events. Most people can ignore this.
         </p>
-        {shown && (
-          <div className="space-y-2">
-            <p className="break-all rounded-xl bg-ink-950 px-3 py-2 text-xs text-fg-subtle">
-              {shown}
-            </p>
-            {appleUrl && (
-              <a
-                href={appleUrl}
-                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-white/5 px-4 text-sm font-semibold text-fg"
-              >
-                Subscribe in Apple Calendar
-              </a>
-            )}
+      </div>
+
+      {feedUrl ? (
+        <>
+          <div className="flex items-center gap-2">
+            <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">
+              {feedUrl}
+            </code>
+            <Button
+              size="md"
+              variant="secondary"
+              leadingIcon={
+                copied ? <Check className="size-4" /> : <Copy className="size-4" />
+              }
+              onClick={async () => {
+                await navigator.clipboard.writeText(feedUrl);
+                setCopied(true);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
           </div>
-        )}
+          <p className="text-xs text-fg-subtle">
+            Anyone with the link can read your calendar — regenerate it to
+            revoke the old one.
+          </p>
+        </>
+      ) : (
         <Button
           variant="secondary"
           fullWidth
           loading={mint.isPending}
-          leadingIcon={<CalendarDays className="size-4" />}
           onClick={() => mint.mutate()}
         >
-          {shown ? "Rotate calendar feed URL" : "Create calendar feed URL"}
+          Show feed URL
         </Button>
-      </Card>
-    </section>
+      )}
+      {mint.isError && (
+        <p className="text-xs text-danger">{(mint.error as Error).message}</p>
+      )}
+    </Card>
   );
 }
 
@@ -389,7 +205,7 @@ export function Settings() {
   return (
     <>
       <AppBar title="Settings" />
-      <Page width="wide" className="space-y-6">
+      <Page className="space-y-6">
         <Card className="flex items-center gap-3 p-4">
           <Avatar
             name={user?.name}
@@ -408,8 +224,9 @@ export function Settings() {
         </Card>
 
         {/* Keep Sign out under the profile card — NOT at the page bottom.
-            On a phone the bottom button sits under the nav; taps go Home
-            and never call logout. */}
+            The floating BottomNav is translucent; a bottom-placed Sign out
+            painted through the Home tab and taps navigated home without
+            logging out. */}
         <Button
           type="button"
           variant="danger"
@@ -428,28 +245,21 @@ export function Settings() {
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Reminders
           </h3>
-          <p className="rounded-xl border border-line bg-surface/60 px-3 py-2 text-xs text-fg-muted">
-            New events email you immediately. Daily cron still sends lead-time
-            reminders from Gmail (reconnect Storage) or Resend. Use the test
-            button to confirm delivery.
-          </p>
           <ReminderPrefsCard />
         </section>
 
-        <CalendarFeedCard />
-
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
-            Google
+            Calendar
           </h3>
-          <GoogleConnectionsCard />
+          <CalendarFeedCard />
         </section>
 
         <section className="space-y-2">
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             Notifications
           </h3>
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             <ListItem
               to="/notifications"
               leading={<Bell className="size-5 text-fg-muted" />}
@@ -459,21 +269,19 @@ export function Settings() {
           </Card>
         </section>
 
-        {user?.isPlatformAdmin && (
+        {user?.appRoles?.includes("super_admin") && (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">Admin</h3>
-            <Card className="divide-y divide-line overflow-hidden">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              Platform
+            </h3>
+            <Card className="divide-y divide-white/8 overflow-hidden">
               <ListItem
-                to="/admin/storage"
-                leading={<HardDrive className="size-5 text-fg-muted" />}
-                title="Storage account"
-                subtitle="Connect Google Drive so document uploads work"
+                to="/admin"
+                leading={<Shield className="size-5 text-fg-muted" />}
+                title="App access"
+                subtitle="Approve demos & invite teammates"
               />
             </Card>
-            <p className="px-1 text-xs text-fg-subtle">
-              Connect Drive here so uploads and Gmail reminders (from this
-              account) work. Cloudflare R2 is optional extra storage.
-            </p>
           </section>
         )}
 
@@ -481,7 +289,7 @@ export function Settings() {
           <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
             About
           </h3>
-          <Card className="divide-y divide-line overflow-hidden">
+          <Card className="divide-y divide-white/8 overflow-hidden">
             <ListItem
               leading={<Info className="size-5 text-fg-muted" />}
               title="Version"
@@ -489,7 +297,6 @@ export function Settings() {
             />
           </Card>
         </section>
-
       </Page>
     </>
   );

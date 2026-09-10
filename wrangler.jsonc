@@ -10,13 +10,11 @@
   // When using @cloudflare/vite-plugin, do NOT set `assets.directory` here — the plugin
   // injects the built client directory at build time. `run_worker_first` ensures /api/*
   // hits the Worker before the SPA fallback can swallow it (so unknown /api routes get a
-  // JSON 404, not index.html). `/access/review` is the email approve/reject landing —
-  // it must hit the Worker (HTML, no JS) instead of the SPA, including links already
-  // sitting in admin inboxes.
+  // JSON 404, not index.html).
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/access/review"]
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {
@@ -32,35 +30,13 @@
       "id": "bcb22812f2ec49bab095196ff2267e59"
     }
   ],
-  // Document file bytes (passports, insurance PDFs, etc.).
-  // Do NOT uncomment until R2 is enabled on the Cloudflare account AND the
-  // bucket exists — otherwise `wrangler deploy` fails.
-  //
-  // Cloudflare dashboard steps (one-time, needs a payment method; free tier
-  // still applies after R2 is turned on):
-  //   1. dash.cloudflare.com → R2 Object Storage → Overview → Enable R2
-  //      (add a billing method if prompted).
-  //   2. Create bucket named `family-vault-files` (or run
-  //      `npx wrangler r2 bucket create family-vault-files`).
-  //   3. Uncomment the block below and merge/deploy.
-  // Full walkthrough: docs/OPS.md §7.
-  // "r2_buckets": [
-  //   {
-  //     "binding": "FILES",
-  //     "bucket_name": "family-vault-files"
-  //   }
-  // ],
   "triggers": {
-    // 09:00 Asia/Kolkata (UTC+5:30) every day. Cloudflare cron is UTC.
-    // This Worker scheduled() handler runs whether or not anyone is logged in
-    // or has the app open — expiry, event, and commitment reminder emails
-    // plus in-app notifications are written from here.
-    "crons": ["30 3 * * *"]
+    "crons": ["0 8 * * *"]
   },
   "vars": {
     "APP_URL": "https://fam.connect-cloud.workers.dev",
-    "CONTRIBUTIONS_API_URL": "https://light-of-jesus-ministry-contributions.pages.dev",
-    // Access-request notifications land here (login "Request access" form).
-    "ACCESS_NOTIFY_EMAIL": "albertjoshrock101@gmail.com"
+    // Bootstrap platform operators (comma-separated). On login these emails
+    // receive durable `super_admin` and always pass the closed-signup gate.
+    "SUPER_ADMIN_EMAILS": "albertjoshrock101@gmail.com"
   }
 }

@@ -1,14 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
+  CheckSquare,
+  FileText,
+  Link2,
   MapPin,
+  NotebookPen,
   Pencil,
   Trash2,
   Users,
   XCircle,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppBar } from "../components/ui/AppBar";
 import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
@@ -16,13 +20,21 @@ import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { formatEventTime, eventTypeColor } from "../lib/eventTime";
+import { useLabels } from "../lib/useLabels";
+
+type Rsvp = "invited" | "accepted" | "declined" | "tentative";
 
 interface Attendee {
   memberId: string;
   userId: string;
   name: string | null;
+  displayName: string | null;
+  memberType: "user" | "dependent";
+  rsvp: Rsvp;
   picture: string | null;
   email: string | null;
 }
@@ -34,85 +46,106 @@ interface EventDetail {
   description: string | null;
   type: string;
   location: string | null;
+  travelBufferMins: number | null;
   startAt: number;
   endAt: number | null;
   allDay: boolean;
   status: "active" | "cancelled" | "trashed";
   createdBy: string;
-  attendees: Attendee[];
   createdAt: number;
   updatedAt: number;
-  googleCalendarEventId?: string | null;
 }
 
-interface CalendarSyncState {
-  status?: string;
-  message?: string;
-  googleCalendarEventId?: string | null;
+/**
+ * The API returns attendees as a SIBLING of event, not nested inside it.
+ * This page used to type them onto EventDetail and read `ev.attendees`, which
+ * is always undefined at runtime — `undefined.length` white-screened the whole
+ * page. api<T>() is an unchecked cast, so TypeScript could not catch it and no
+ * test rendered the component. Model the envelope exactly instead.
+ */
+interface EventDetailResponse {
+  event: EventDetail;
+  attendees: Attendee[];
+  rsvpSummary: Record<Rsvp, number>;
+  canEdit: boolean;
+  documents: { id: string; title: string; category: string }[];
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  gathering: "Gathering",
-  appointment: "Appointment",
-  milestone: "Milestone",
-  other: "Event",
+const RSVP_LABEL: Record<Rsvp, string> = {
+  accepted: "Going",
+  declined: "Not going",
+  tentative: "Maybe",
+  invited: "No reply",
 };
+
+const RSVP_TONE: Record<Rsvp, "success" | "danger" | "warning" | "neutral"> = {
+  accepted: "success",
+  declined: "danger",
+  tentative: "warning",
+  invited: "neutral",
+};
+
+function attendeeLabel(a: Attendee): string {
+  return a.name ?? a.displayName ?? a.email ?? "Member";
+}
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
-  const calendarFromSave = (location.state as { calendar?: CalendarSyncState } | null)
-    ?.calendar;
-  const autoSyncTried = useRef(false);
+  const { user, activeFamily } = useAuth();
+  const { format: formatType, find: findType } = useLabels(
+    activeFamily?.id,
+    "event_type",
+  );
+  const [actionDraft, setActionDraft] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkTitle, setLinkTitle] = useState("");
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["events", id],
-    queryFn: async () => {
-      // API may return attendees nested on `event` or as a sibling key.
-      const res = await api<{
-        event: EventDetail & { attendees?: Attendee[] };
-        attendees?: Attendee[];
-      }>(`/events/${id}`);
-      const attendees = res.event.attendees ?? res.attendees ?? [];
-      return { event: { ...res.event, attendees } };
-    },
+    queryFn: () => api<EventDetailResponse>(`/events/${id}`),
     enabled: Boolean(id),
   });
 
-  const syncCalendar = useMutation({
-    mutationFn: () =>
-      api<{
-        event: EventDetail;
-        calendar: CalendarSyncState;
-      }>(`/events/${id}/sync-calendar`, { method: "POST" }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["events", id] });
-    },
+  const { data: notesData } = useQuery({
+    queryKey: ["notes", "event", id, activeFamily?.id],
+    queryFn: () =>
+      api<{ notes: { id: string; title: string; body: string }[] }>(
+        `/notes?familyId=${activeFamily!.id}&eventId=${id}`,
+      ),
+    enabled: Boolean(id && activeFamily),
   });
 
-  // After OAuth return (?sync=1) or a save that couldn't write Calendar, push once.
-  useEffect(() => {
-    if (!data?.event || autoSyncTried.current || syncCalendar.isPending) return;
-    const wantsSync = searchParams.get("sync") === "1";
-    const saveMissed =
-      calendarFromSave?.status === "needs_reconnect" ||
-      calendarFromSave?.status === "skipped_no_token" ||
-      calendarFromSave?.status === "needs_api_enabled";
-    if (!wantsSync && !saveMissed) return;
-    if (data.event.googleCalendarEventId && !wantsSync) return;
-    autoSyncTried.current = true;
-    if (wantsSync) {
-      const next = new URLSearchParams(searchParams);
-      next.delete("sync");
-      setSearchParams(next, { replace: true });
-    }
-    syncCalendar.mutate();
-    // Intentionally once per mount when the trigger is present.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is unstable
-  }, [data?.event, calendarFromSave, searchParams, setSearchParams]);
+  const { data: linksData } = useQuery({
+    queryKey: ["links", "event", id, activeFamily?.id],
+    queryFn: () =>
+      api<{
+        links: {
+          id: string;
+          kind: string;
+          url: string | null;
+          title: string | null;
+        }[];
+      }>(
+        `/links?familyId=${activeFamily!.id}&targetType=event&targetId=${id}`,
+      ),
+    enabled: Boolean(id && activeFamily),
+  });
+
+  // Answering an invitation is always the attendee's own right, so this is not
+  // gated on canEdit — a member who may not move the event can still say
+  // whether they are coming.
+  const rsvpMutation = useMutation({
+    mutationFn: (status: Rsvp) =>
+      api(`/events/${id}/rsvp`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["events"] });
+    },
+  });
 
   const cancelMutation = useMutation({
     mutationFn: () => api(`/events/${id}/cancel`, { method: "POST" }),
@@ -126,6 +159,65 @@ export function EventDetailPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["events"] });
       navigate("/calendar", { replace: true });
+    },
+  });
+
+  const actionItemsMutation = useMutation({
+    mutationFn: (titles: string[]) =>
+      api(`/events/${id}/action-items`, {
+        method: "POST",
+        body: JSON.stringify({ titles }),
+      }),
+    onSuccess: () => {
+      setActionDraft("");
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  const followUpMutation = useMutation({
+    mutationFn: () =>
+      api(`/events/${id}/follow-up`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+  });
+
+  const meetingNoteMutation = useMutation({
+    mutationFn: () =>
+      api<{ note: { id: string } }>("/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId: activeFamily!.id,
+          kind: "meeting",
+          eventId: id,
+          title: `Notes: ${data?.event.title ?? "Meeting"}`,
+          visibility: "family",
+          body: "",
+        }),
+      }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["notes"] });
+      if (res.note?.id) navigate(`/notes/${res.note.id}`);
+    },
+  });
+
+  const addLinkMutation = useMutation({
+    mutationFn: () =>
+      api("/links", {
+        method: "POST",
+        body: JSON.stringify({
+          familyId: activeFamily!.id,
+          kind: linkUrl.includes("youtu") ? "youtube" : "url",
+          targetType: "event",
+          targetId: id,
+          url: linkUrl.trim(),
+          title: linkTitle.trim() || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      setLinkUrl("");
+      setLinkTitle("");
+      void qc.invalidateQueries({ queryKey: ["links"] });
     },
   });
 
@@ -145,38 +237,30 @@ export function EventDetailPage() {
   }
 
   const ev = data?.event;
-  if (isError || !ev) {
-    return (
-      <>
-        <AppBar title="Event" back />
-        <Page className="space-y-4">
-          <Card className="space-y-3 p-4">
-            <p className="text-sm font-semibold text-fg">Couldn’t open this event</p>
-            <p className="text-sm text-fg-muted">
-              {error instanceof Error ? error.message : "It may have been deleted, or the link is stale."}
-            </p>
-            <Button variant="secondary" fullWidth onClick={() => navigate("/calendar", { replace: true })}>
-              Back to calendar
-            </Button>
-          </Card>
-        </Page>
-      </>
-    );
-  }
+  if (!ev) return null;
+
+  const attendees = data?.attendees ?? [];
+  const summary = data?.rsvpSummary;
+  const canEdit = data?.canEdit ?? false;
+  const documents = data?.documents ?? [];
+  const meetingNotes = notesData?.notes ?? [];
+  const links = linksData?.links ?? [];
+  // Which row is mine? Only a real user account can answer for itself.
+  const me = attendees.find((a) => a.userId === user?.id);
 
   const colors = eventTypeColor(ev.type);
-  const attendees = ev.attendees ?? [];
+  const typeMeta = findType(ev.type);
 
   return (
     <>
       <AppBar
-        title={TYPE_LABELS[ev.type] ?? "Event"}
+        title={formatType(ev.type) || "Event"}
         back
         trailing={
-          ev.status === "active" ? (
+          ev.status === "active" && canEdit ? (
             <button
               onClick={() => navigate(`/calendar/events/${id}/edit`)}
-              className="flex size-9 items-center justify-center rounded-xl text-fg-muted hover:text-fg"
+              className="lq-press flex size-10 items-center justify-center rounded-full text-fg-muted hover:bg-white/8 hover:text-fg"
               aria-label="Edit event"
             >
               <Pencil className="size-4" />
@@ -189,9 +273,16 @@ export function EventDetailPage() {
         <Card className="p-4">
           <div className="flex items-start gap-3">
             <div
-              className={`flex size-10 items-center justify-center rounded-xl ${colors.bg} ${colors.text} shrink-0`}
+              className={`lq lq-flat lq-tint flex size-10 shrink-0 items-center justify-center rounded-full ${colors.text}`}
+              style={{ ["--lq-tint" as string]: colors.tint }}
             >
-              <CalendarDays className="size-5" />
+              {typeMeta ? (
+                <span className="text-lg" aria-hidden="true">
+                  {typeMeta.emoji}
+                </span>
+              ) : (
+                <CalendarDays className="size-5" />
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
@@ -215,6 +306,12 @@ export function EventDetailPage() {
             </div>
           )}
 
+          {ev.travelBufferMins != null && ev.travelBufferMins > 0 && (
+            <p className="mt-2 text-xs text-fg-subtle">
+              Leave ~{ev.travelBufferMins} min early
+            </p>
+          )}
+
           {ev.description && (
             <p className="mt-3 text-sm text-fg-muted leading-relaxed">
               {ev.description}
@@ -222,48 +319,34 @@ export function EventDetailPage() {
           )}
         </Card>
 
-        <Card className="space-y-3 p-4">
-          <p className="text-xs font-semibold text-fg-muted">Google Calendar</p>
-          <p
-            className={
-              (syncCalendar.data?.calendar?.status ?? calendarFromSave?.status) === "synced" ||
-              ev.googleCalendarEventId
-                ? "text-sm text-success"
-                : "text-sm text-warning"
-            }
-          >
-            {syncCalendar.data?.calendar?.message
-              ?? calendarFromSave?.message
-              ?? (ev.googleCalendarEventId
-                ? "This event is on your Google Calendar."
-                : "Not on Google Calendar yet. Connect Calendar once in Settings — saves then write automatically.")}
-          </p>
-          {(syncCalendar.data?.calendar?.status === "needs_reconnect"
-            || syncCalendar.data?.calendar?.status === "needs_api_enabled"
-            || syncCalendar.data?.calendar?.status === "skipped_no_token"
-            || syncCalendar.data?.calendar?.status === "failed"
-            || calendarFromSave?.status === "needs_reconnect"
-            || calendarFromSave?.status === "needs_api_enabled"
-            || calendarFromSave?.status === "skipped_no_token"
-            || calendarFromSave?.status === "failed"
-            || !ev.googleCalendarEventId) && (
-            <a
-              href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(`/calendar/events/${ev.id}?sync=1`)}`}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-vault-600/90 px-4 text-sm font-semibold text-white"
-            >
-              <CalendarDays className="size-4" />
-              Connect Google Calendar
-            </a>
-          )}
-          <Button
-            variant="secondary"
-            fullWidth
-            loading={syncCalendar.isPending}
-            onClick={() => syncCalendar.mutate()}
-          >
-            Sync to Google Calendar now
-          </Button>
-        </Card>
+        {/* Your invitation — shown only if you are actually on the guest list */}
+        {me && ev.status === "active" && (
+          <section className="space-y-2">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              Are you going?
+            </h3>
+            <Card className="p-3">
+              <div className="flex gap-2">
+                {(["accepted", "tentative", "declined"] as const).map((s) => (
+                  <Button
+                    key={s}
+                    variant={me.rsvp === s ? "primary" : "ghost"}
+                    fullWidth
+                    disabled={rsvpMutation.isPending}
+                    onClick={() => rsvpMutation.mutate(s)}
+                  >
+                    {RSVP_LABEL[s]}
+                  </Button>
+                ))}
+              </div>
+              {me.rsvp === "invited" && (
+                <p className="mt-2 text-xs text-fg-subtle">
+                  You have not replied yet.
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
 
         {/* Attendees */}
         {attendees.length > 0 && (
@@ -271,18 +354,26 @@ export function EventDetailPage() {
             <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
               <Users className="size-3.5" />
               Attendees ({attendees.length})
+              {summary && summary.accepted > 0 && (
+                <span className="font-normal normal-case">
+                  · {summary.accepted} going
+                </span>
+              )}
             </h3>
             <Card className="p-3">
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-2.5">
                 {attendees.map((a) => (
                   <div key={a.memberId} className="flex items-center gap-2">
                     <Avatar
-                      name={a.name}
+                      name={attendeeLabel(a)}
                       email={a.email}
                       src={a.picture}
                       className="size-8"
                     />
-                    <span className="text-sm text-fg">{a.name ?? a.email ?? "Member"}</span>
+                    <span className="flex-1 truncate text-sm text-fg">
+                      {attendeeLabel(a)}
+                    </span>
+                    <Badge tone={RSVP_TONE[a.rsvp]}>{RSVP_LABEL[a.rsvp]}</Badge>
                   </div>
                 ))}
               </div>
@@ -290,8 +381,155 @@ export function EventDetailPage() {
           </section>
         )}
 
-        {/* Actions */}
-        {ev.status === "active" && (
+        {/* Linked documents */}
+        {documents.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <FileText className="size-3.5" />
+              Documents
+            </h3>
+            <Card className="divide-y divide-white/5 p-1">
+              {documents.map((d) => (
+                <Link
+                  key={d.id}
+                  to={`/documents/${d.id}`}
+                  className="lq-press flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-fg"
+                >
+                  <span className="truncate flex-1">{d.title}</span>
+                  <Badge tone="neutral">{d.category}</Badge>
+                </Link>
+              ))}
+            </Card>
+          </section>
+        )}
+
+        {/* Meeting notes */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <NotebookPen className="size-3.5" />
+            Meeting notes
+          </h3>
+          <Card className="space-y-2 p-3">
+            {meetingNotes.length === 0 ? (
+              <p className="text-xs text-fg-subtle">No notes yet.</p>
+            ) : (
+              meetingNotes.map((n) => (
+                <Link
+                  key={n.id}
+                  to={`/notes/${n.id}`}
+                  className="block text-sm text-fg underline-offset-2 hover:underline"
+                >
+                  {n.title.trim() || "Untitled note"}
+                </Link>
+              ))
+            )}
+            {activeFamily && (
+              <Button
+                variant="ghost"
+                fullWidth
+                leadingIcon={<NotebookPen className="size-4" />}
+                loading={meetingNoteMutation.isPending}
+                onClick={() => meetingNoteMutation.mutate()}
+              >
+                New meeting note
+              </Button>
+            )}
+          </Card>
+        </section>
+
+        {/* Action items → tasks */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <CheckSquare className="size-3.5" />
+            Action items
+          </h3>
+          <Card className="space-y-2 p-3">
+            <textarea
+              value={actionDraft}
+              onChange={(e) => setActionDraft(e.target.value)}
+              placeholder={"One task per line\ne.g. Book follow-up\nShare report"}
+              rows={3}
+              className={`${inputCls} resize-none`}
+            />
+            <Button
+              variant="secondary"
+              fullWidth
+              loading={actionItemsMutation.isPending}
+              onClick={() => {
+                const titles = actionDraft
+                  .split(/\r?\n/)
+                  .map((l) => l.trim())
+                  .filter(Boolean);
+                if (titles.length) actionItemsMutation.mutate(titles);
+              }}
+            >
+              Convert to tasks
+            </Button>
+            {actionItemsMutation.isSuccess && (
+              <p className="text-xs text-success">Tasks created and linked.</p>
+            )}
+          </Card>
+        </section>
+
+        {/* Links / YouTube */}
+        <section className="space-y-2">
+          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <Link2 className="size-3.5" />
+            Links &amp; videos
+          </h3>
+          <Card className="space-y-2 p-3">
+            {links.map((l) => (
+              <a
+                key={l.id}
+                href={l.url ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-sm text-vault-300"
+              >
+                {l.title || l.url}
+              </a>
+            ))}
+            <input
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://…"
+              className={inputCls}
+            />
+            <input
+              type="text"
+              value={linkTitle}
+              onChange={(e) => setLinkTitle(e.target.value)}
+              placeholder="Label (optional)"
+              className={inputCls}
+            />
+            <Button
+              variant="ghost"
+              fullWidth
+              disabled={!linkUrl.trim()}
+              loading={addLinkMutation.isPending}
+              onClick={() => addLinkMutation.mutate()}
+            >
+              Save link
+            </Button>
+          </Card>
+        </section>
+
+        {/* Actions — calendars are opted in on create (default-checked). */}
+
+        <Button
+          variant="ghost"
+          fullWidth
+          loading={followUpMutation.isPending}
+          onClick={() => followUpMutation.mutate()}
+        >
+          Send follow-up to attendees
+        </Button>
+        {followUpMutation.isSuccess && (
+          <p className="px-1 text-xs text-success">Follow-up sent.</p>
+        )}
+
+        {ev.status === "active" && canEdit && (
           <section className="space-y-2 pt-2">
             <Button
               variant="ghost"

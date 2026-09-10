@@ -144,7 +144,7 @@ function SecretField({
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             rows={4}
-            className="w-full resize-none rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-danger/40 focus:border-danger focus:outline-none font-mono"
+            className="lq-field w-full resize-none rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-danger/40 focus:border-danger focus:outline-none font-mono"
           />
         ) : (
           <input
@@ -198,7 +198,7 @@ function MetaField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+        className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-white/10 focus:border-vault-400/40 focus:outline-none"
       />
     </div>
   );

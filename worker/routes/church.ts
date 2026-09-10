@@ -51,7 +51,7 @@ function outstandingByFund(
 churchRoutes.get("/snapshot", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (!contributionsConfigured(c.env)) {
@@ -156,7 +156,7 @@ const settleSchema = settleFieldsSchema.refine(
 churchRoutes.post("/settle", requireSession, zv(settleSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (!contributionsConfigured(c.env)) {

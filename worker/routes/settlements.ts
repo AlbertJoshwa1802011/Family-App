@@ -198,7 +198,7 @@ settlementRoutes.get("/summary", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -247,7 +247,7 @@ settlementRoutes.get("/destinations", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -299,7 +299,7 @@ settlementRoutes.post(
     const userId = c.get("userId")!;
     const data = c.req.valid("json");
 
-    const membership = await requireFamilyMember(c, data.familyId);
+    const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
     if (membership instanceof Response) return membership;
 
     const db = getDb(c.env);
@@ -380,7 +380,7 @@ settlementRoutes.patch(
       .get();
     if (!dest) return c.json({ error: "not_found" }, 404);
 
-    const membership = await requireFamilyMember(c, dest.familyId);
+    const membership = await requireFamilyMember(c, dest.familyId, "member", "expenses");
     if (membership instanceof Response) return membership;
 
     if (dest.createdBy !== userId && membership.role === "member") {
@@ -454,7 +454,7 @@ settlementRoutes.delete("/destinations/:id", requireSession, async (c) => {
     .get();
   if (!dest) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, dest.familyId);
+  const membership = await requireFamilyMember(c, dest.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (dest.createdBy !== userId && membership.role === "member") {
@@ -498,7 +498,7 @@ settlementRoutes.get("/movements", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -540,7 +540,7 @@ settlementRoutes.post(
     const userId = c.get("userId")!;
     const data = c.req.valid("json");
 
-    const membership = await requireFamilyMember(c, data.familyId);
+    const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
     if (membership instanceof Response) return membership;
 
     const db = getDb(c.env);
@@ -621,7 +621,7 @@ settlementRoutes.get("/movements/:id", requireSession, async (c) => {
     .get();
   if (!movement) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, movement.familyId);
+  const membership = await requireFamilyMember(c, movement.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const rows = await loadFamilyMovements(db, movement.familyId);
@@ -651,7 +651,7 @@ settlementRoutes.patch(
       .get();
     if (!movement) return c.json({ error: "not_found" }, 404);
 
-    const membership = await requireFamilyMember(c, movement.familyId);
+    const membership = await requireFamilyMember(c, movement.familyId, "member", "expenses");
     if (membership instanceof Response) return membership;
 
     if (movement.createdBy !== userId && membership.role === "member") {
@@ -736,7 +736,7 @@ settlementRoutes.delete("/movements/:id", requireSession, async (c) => {
     .get();
   if (!movement) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, movement.familyId);
+  const membership = await requireFamilyMember(c, movement.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   if (movement.createdBy !== userId && membership.role === "member") {

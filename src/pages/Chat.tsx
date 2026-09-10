@@ -42,13 +42,6 @@ function dayKey(unixSec: number): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-/**
- * Family chat — iMessage / WhatsApp-style liquid bubbles.
- *
- * Restored onto production main with the current liquid-* recipe (the older
- * `lq` modifiers). Keeps primary nav at five tabs; Chat is reached from
- * Account menu, Home apps, and Family.
- */
 export function Chat() {
   const { user, activeFamily } = useAuth();
   const qc = useQueryClient();
@@ -107,9 +100,9 @@ export function Chat() {
   return (
     <>
       <AppBar title={`${activeFamily?.name ?? "Family"} chat`} />
-      {/* Full-height column under AppBar; clears mobile bottom tab (~5.5rem)
-          and uses less offset on laptop where the side nav replaces tabs. */}
-      <div className="mx-auto flex h-[calc(100dvh-9.5rem)] w-full max-w-2xl flex-col px-4 md:h-[calc(100dvh-5.5rem)] md:max-w-3xl md:px-6">
+      {/* Full-height column: scrollable thread + composer, clearing the fixed
+          bottom nav (~4.5rem) and the sticky app bar (3.5rem). */}
+      <div className="mx-auto flex h-[calc(100dvh-10rem)] max-w-md flex-col px-4">
         <div className="flex-1 space-y-1 overflow-y-auto py-4 pb-2">
           {isLoading ? (
             <div className="space-y-3" aria-busy="true">
@@ -123,8 +116,8 @@ export function Chat() {
           ) : messages.length === 0 ? (
             <EmptyState
               icon={MessageCircle}
-              title="Say hello"
-              description="This is your family's private space. Messages are only visible to family members. Tip: @Name notifies someone."
+              title="Say hi 👋"
+              description="This is your family's private space. Messages are only visible to family members."
             />
           ) : (
             messages.map((m, i) => {
@@ -162,10 +155,10 @@ export function Chat() {
                     )}
                     <div
                       className={cn(
-                        "max-w-[75%] rounded-[22px] px-3.5 py-2",
+                        "max-w-[75%] rounded-bubble px-3.5 py-2",
                         mine
-                          ? "liquid-bubble liquid-primary rounded-br-md"
-                          : "liquid-bubble liquid-flat rounded-bl-md text-fg",
+                          ? "lq lq-primary rounded-br-md"
+                          : "lq lq-flat rounded-bl-md text-fg",
                       )}
                     >
                       {!mine && !sameAuthorAsPrev && (
@@ -193,10 +186,9 @@ export function Chat() {
                     </div>
                     {mine && !m.deleted && (
                       <button
-                        type="button"
                         onClick={() => remove.mutate(m.id)}
                         aria-label="Delete message"
-                        className="mb-1 hidden text-fg-subtle group-hover:block hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
+                        className="mb-1 hidden text-fg-subtle group-hover:block hover:text-danger"
                       >
                         <Trash2 className="size-3.5" />
                       </button>
@@ -211,7 +203,7 @@ export function Chat() {
 
         <form
           onSubmit={handleSend}
-          className="flex items-center gap-2 border-t border-white/5 py-3"
+          className="flex items-center gap-2 py-3"
         >
           <input
             type="text"
@@ -220,13 +212,13 @@ export function Chat() {
             placeholder="Message your family…"
             aria-label="Message"
             maxLength={4000}
-            className="liquid-field min-h-11 flex-1 rounded-full px-4 text-base text-fg placeholder:text-fg-subtle focus:outline-none sm:text-sm"
+            className="lq lq-field min-h-11 flex-1 rounded-full px-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
           <button
             type="submit"
             disabled={!draft.trim() || send.isPending}
             aria-label="Send message"
-            className="liquid-bubble liquid-raised liquid-primary liquid-press flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
+            className="lq lq-raised lq-primary lq-press flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
           >
             <SendHorizontal className="size-5" />
           </button>

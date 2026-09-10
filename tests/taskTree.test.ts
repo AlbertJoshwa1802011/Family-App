@@ -11,8 +11,13 @@ import {
   dueStatus,
   flattenForest,
   formatTaskPath,
+  groupForestByPriority,
   isTreeView,
+  nextPriority,
   searchTasks,
+  sortForest,
+  sortTasks,
+  withDoneChildrenUnderOpenParents,
   wouldCreateCycle,
   type TaskRecord,
 } from "../src/lib/taskTree";
@@ -70,27 +75,26 @@ describe("task tree graph", () => {
   it("attaches child / done-child counts from the unfiltered family list", () => {
     const counted = attachChildCounts(all);
     const byId = Object.fromEntries(counted.map((t) => [t.id, t]));
-    expect(byId.r?.childCount).toBe(2);
-    expect(byId.r?.doneChildCount).toBe(0);
-    expect(byId.a?.childCount).toBe(2);
-    expect(byId.a?.doneChildCount).toBe(1);
-    expect(byId.a1?.childCount).toBe(0);
+    expect(byId.r.childCount).toBe(2);
+    expect(byId.r.doneChildCount).toBe(0);
+    expect(byId.a.childCount).toBe(2);
+    expect(byId.a.doneChildCount).toBe(1);
+    expect(byId.a1.childCount).toBe(0);
   });
 
   it("builds a nested forest and flattens it in display order", () => {
     const forest = buildForest(attachChildCounts(all));
     expect(forest).toHaveLength(1);
-    expect(forest[0]?.id).toBe("r");
-    expect(forest[0]?.children.map((c) => c.id)).toEqual(["a", "b"]);
-    expect(forest[0]?.children[0]?.children.map((c) => c.id)).toEqual(["a1", "a2"]);
+    expect(forest[0].id).toBe("r");
+    expect(forest[0].children.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(forest[0].children[0].children.map((c) => c.id)).toEqual(["a1", "a2"]);
     expect(flattenForest(forest).map((n) => n.id)).toEqual(["r", "a", "a1", "a2", "b"]);
     expect(flattenForest(forest).map((n) => n.depth)).toEqual([0, 1, 2, 2, 1]);
   });
 
-  it("promotes leftover open children to roots when the parent is missing from the filtered set", () => {
-    const openOnly = attachChildCounts(all).filter(
-      (t) => t.status === "open" && t.id !== "a" && t.id !== "r",
-    );
+  it("promotes orphaned subtasks to roots when the parent is missing from the filtered set", () => {
+    // To-do view dropped the completed parent `a2` and also `a` — leftover `a1` must stay visible.
+    const openOnly = attachChildCounts(all).filter((t) => t.status === "open" && t.id !== "a" && t.id !== "r");
     const forest = buildForest(openOnly);
     expect(forest.map((n) => n.id).sort()).toEqual(["a1", "b"].sort());
     expect(forest.every((n) => n.depth === 0)).toBe(true);
@@ -100,7 +104,6 @@ describe("task tree graph", () => {
 describe("task views", () => {
   const nowSecs = 1_800_000_000;
   const todayIso = "2026-09-05";
-  const tooOld = 15 * 86_400;
   const tasks = attachChildCounts([
     task({
       id: "open-high",
@@ -140,8 +143,8 @@ describe("task views", () => {
       id: "old-done",
       title: "Ancient",
       status: "done",
-      completedAt: nowSecs - tooOld,
-      createdAt: nowSecs - tooOld,
+      completedAt: nowSecs - RECENT_TOO_OLD(),
+      createdAt: nowSecs - RECENT_TOO_OLD(),
     }),
     task({
       id: "archived",
@@ -157,6 +160,10 @@ describe("task views", () => {
     }),
   ]);
 
+  function RECENT_TOO_OLD() {
+    return 15 * 86_400;
+  }
+
   const opts = { nowSecs, todayIso, myMemberId: "me" as string | null };
 
   it("todo hides completed and archived, keeping only open work", () => {
@@ -165,6 +172,42 @@ describe("task views", () => {
     expect(ids).toContain("fresh");
     expect(ids).not.toContain("done");
     expect(ids).not.toContain("archived");
+  });
+
+  it("includeDoneChildren keeps completed subtasks under an open parent, not done roots", () => {
+    const family = attachChildCounts([
+      task({ id: "pack", title: "Pack bags" }),
+      task({ id: "socks", title: "Socks", parentTaskId: "pack", status: "done" }),
+      task({ id: "charger", title: "Charger", parentTaskId: "pack" }),
+      task({ id: "solo-done", title: "Finished root", status: "done" }),
+      task({
+        id: "grand",
+        title: "USB-C",
+        parentTaskId: "socks",
+        status: "done",
+      }),
+    ]);
+    const ids = applyTaskView(family, {
+      ...opts,
+      view: "todo",
+      includeDoneChildren: true,
+    }).map((t) => t.id);
+    expect(ids).toContain("pack");
+    expect(ids).toContain("charger");
+    expect(ids).toContain("socks");
+    expect(ids).toContain("grand");
+    expect(ids).not.toContain("solo-done");
+  });
+
+  it("withDoneChildrenUnderOpenParents is a no-op when the parent is also done", () => {
+    const family = attachChildCounts([
+      task({ id: "r", title: "Done project", status: "done" }),
+      task({ id: "c", title: "Leftover", parentTaskId: "r", status: "done" }),
+      task({ id: "open", title: "Still going" }),
+    ]);
+    const viewed = family.filter((t) => t.status === "open");
+    const merged = withDoneChildrenUnderOpenParents(family, viewed);
+    expect(merged.map((t) => t.id)).toEqual(["open"]);
   });
 
   it("completed is newest-finished first and excludes open work", () => {
@@ -176,7 +219,7 @@ describe("task views", () => {
 
   it("recent is last-14-days, newest first, and skips archived", () => {
     const ids = applyTaskView(tasks, { ...opts, view: "recent" }).map((t) => t.id);
-    expect(ids[0]).toBe("later");
+    expect(ids[0]).toBe("later"); // createdAt = nowSecs - 10, newest
     expect(ids).toContain("fresh");
     expect(ids).not.toContain("old-done");
     expect(ids).not.toContain("archived");
@@ -195,7 +238,7 @@ describe("task views", () => {
     expect(ids).toContain("overdue");
     expect(ids).toContain("open-high");
     expect(ids).not.toContain("later");
-    expect(ids[0]).toBe("overdue");
+    expect(ids[0]).toBe("overdue"); // earlier due date first
   });
 
   it("mine is open tasks assigned to the current member", () => {
@@ -222,10 +265,11 @@ describe("dueStatus + view metadata", () => {
     expect(dueStatus(null)).toBeNull();
   });
 
-  it("todo and mine render as trees; other views are work queues", () => {
+  it("todo and mine nest; priority stays a flat API sort", () => {
     expect(isTreeView("todo")).toBe(true);
     expect(isTreeView("mine")).toBe(true);
-    expect(isTreeView("completed")).toBe(false);
+    expect(isTreeView("completed")).toBe(true);
+    expect(isTreeView("due")).toBe(true);
     expect(isTreeView("priority")).toBe(false);
   });
 
@@ -244,5 +288,72 @@ describe("dueStatus + view metadata", () => {
     expect(depthOf(chain, "n5")).toBe(5);
     expect(childDepthOf(chain, "n5")).toBe(6);
     expect(childDepthOf(chain, "n5") > MAX_TASK_DEPTH).toBe(true);
+  });
+});
+
+describe("sort + board grouping", () => {
+  const family = attachChildCounts([
+    task({
+      id: "a",
+      title: "Alpha",
+      priority: "low",
+      dueDate: "2026-09-10",
+      createdAt: 100,
+    }),
+    task({
+      id: "b",
+      title: "Bravo",
+      priority: "high",
+      dueDate: "2026-09-20",
+      createdAt: 300,
+    }),
+    task({
+      id: "c",
+      title: "Charlie",
+      priority: "high",
+      createdAt: 200,
+    }),
+    task({ id: "d", title: "Delta", parentTaskId: "b", createdAt: 400 }),
+    task({
+      id: "e",
+      title: "Echo",
+      parentTaskId: "b",
+      createdAt: 50,
+      dueDate: "2026-09-01",
+    }),
+  ]);
+
+  it("sorts by due date, then date added, then priority", () => {
+    expect(sortTasks(family, "due").map((t) => t.id).slice(0, 3)).toEqual([
+      "e",
+      "a",
+      "b",
+    ]);
+    expect(sortTasks(family, "added_desc").map((t) => t.id)[0]).toBe("d");
+    expect(sortTasks(family, "added_asc").map((t) => t.id)[0]).toBe("e");
+    expect(sortTasks(family, "priority").map((t) => t.id).slice(0, 2)).toEqual([
+      "b",
+      "c",
+    ]);
+  });
+
+  it("sorts nested children, not only roots", () => {
+    const forest = sortForest(buildForest(family), "due");
+    const bravo = forest.find((n) => n.id === "b")!;
+    expect(bravo.children.map((c) => c.id)).toEqual(["e", "d"]);
+  });
+
+  it("groups board columns by root priority and keeps nested children on the card", () => {
+    const cols = groupForestByPriority(sortForest(buildForest(family), "due"));
+    expect(cols.high.map((n) => n.id)).toEqual(["b", "c"]);
+    expect(cols.high[0].children.map((c) => c.id)).toEqual(["e", "d"]);
+    expect(cols.low.map((n) => n.id)).toEqual(["a"]);
+    expect(cols.medium).toEqual([]);
+  });
+
+  it("cycles priority high → medium → low → high", () => {
+    expect(nextPriority("high")).toBe("medium");
+    expect(nextPriority("medium")).toBe("low");
+    expect(nextPriority("low")).toBe("high");
   });
 });

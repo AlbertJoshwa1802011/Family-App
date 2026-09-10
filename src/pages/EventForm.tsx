@@ -6,18 +6,10 @@ import { Page } from "../components/ui/Page";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
-import { Skeleton } from "../components/ui/Skeleton";
+import { TypePicker } from "../components/ui/TypePicker";
+import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-
-type EventType = "gathering" | "appointment" | "milestone" | "other";
-
-const EVENT_TYPES: { value: EventType; label: string }[] = [
-  { value: "gathering", label: "Gathering" },
-  { value: "appointment", label: "Appointment" },
-  { value: "milestone", label: "Milestone" },
-  { value: "other", label: "Other" },
-];
 
 interface Member {
   id: string;
@@ -27,170 +19,172 @@ interface Member {
   picture: string | null;
 }
 
-interface EventPayload {
+interface FormState {
   title: string;
-  type: EventType;
+  type: string;
+  date: string; // yyyy-mm-dd
+  allDay: boolean;
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  location: string;
+  travelBufferMins: string; // minutes as string for input; empty = unset
+  description: string;
+  attendeeMemberIds: string[];
+  documentIds: string[];
+  /** Default on — push to Google Calendar on save. */
+  syncGoogleCalendar: boolean;
+  /** Default on — email .ics + open Add-to-Calendar for Apple. */
+  syncAppleCalendar: boolean;
+}
+
+interface ScheduleConflict {
+  eventId: string;
+  title: string;
   startAt: number;
   endAt: number | null;
   allDay: boolean;
-  location: string | null;
-  description: string | null;
-  attendees?: { memberId: string }[];
+  memberIds: string[];
 }
 
-interface FormState {
+interface DocOption {
+  id: string;
   title: string;
-  type: EventType;
-  date: string;
-  allDay: boolean;
-  startTime: string;
-  endTime: string;
-  location: string;
-  description: string;
-  attendeeMemberIds: string[];
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
 }
 
 function toUnixSeconds(date: string, time: string): number {
   return Math.floor(new Date(`${date}T${time || "00:00"}`).getTime() / 1000);
 }
 
-/** All-day dates are calendar days, stored as UTC midnight to match GCal/ICS. */
-function utcMidnightSeconds(date: string): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return toUnixSeconds(date, "00:00");
-  return Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 1000);
-}
-
-function formFromEvent(ev: EventPayload, attendees: { memberId: string }[]): FormState {
-  const start = new Date(ev.startAt * 1000);
-  const end = ev.endAt ? new Date(ev.endAt * 1000) : null;
-  const y = ev.allDay ? start.getUTCFullYear() : start.getFullYear();
-  const mo = ev.allDay ? start.getUTCMonth() : start.getMonth();
-  const d = ev.allDay ? start.getUTCDate() : start.getDate();
-  return {
-    title: ev.title,
-    type: ev.type,
-    date: `${y}-${pad(mo + 1)}-${pad(d)}`,
-    allDay: ev.allDay,
-    startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
-    endTime: end ? `${pad(end.getHours())}:${pad(end.getMinutes())}` : "10:00",
-    location: ev.location ?? "",
-    description: ev.description ?? "",
-    attendeeMemberIds: attendees.map((a) => a.memberId),
-  };
-}
-
 export function EventForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { activeFamily } = useAuth();
 
-  const existingQ = useQuery({
-    queryKey: ["events", id, "form"],
-    queryFn: () =>
-      api<{ event: EventPayload; attendees: { memberId: string }[] }>(`/events/${id}`),
+  const [form, setForm] = useState<FormState>({
+    title: "",
+    type: "other",
+    date: new Date().toISOString().slice(0, 10),
+    allDay: false,
+    startTime: "09:00",
+    endTime: "10:00",
+    location: "",
+    travelBufferMins: "",
+    description: "",
+    attendeeMemberIds: [],
+    documentIds: [],
+    syncGoogleCalendar: true,
+    syncAppleCalendar: true,
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [hydrated, setHydrated] = useState(false);
+  const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
+
+  // Edit mode: hydrate the form once from the existing event.
+  useQuery({
+    queryKey: ["event", id, "form"],
+    queryFn: async () => {
+      const res = await api<{
+        event: {
+          title: string;
+          type: string;
+          startAt: number;
+          endAt: number | null;
+          allDay: boolean;
+          location: string | null;
+          travelBufferMins: number | null;
+          description: string | null;
+        };
+        attendees: { memberId: string }[];
+        documents: DocOption[];
+      }>(`/events/${id}`);
+      if (!hydrated) {
+        const ev = res.event;
+        const start = new Date(ev.startAt * 1000);
+        const end = ev.endAt ? new Date(ev.endAt * 1000) : null;
+        const pad = (n: number) => String(n).padStart(2, "0");
+        setForm({
+          title: ev.title,
+          type: ev.type,
+          date: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+          allDay: ev.allDay,
+          startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+          endTime: end
+            ? `${pad(end.getHours())}:${pad(end.getMinutes())}`
+            : "10:00",
+          location: ev.location ?? "",
+          travelBufferMins:
+            ev.travelBufferMins != null ? String(ev.travelBufferMins) : "",
+          description: ev.description ?? "",
+          attendeeMemberIds: res.attendees.map((a) => a.memberId),
+          documentIds: (res.documents ?? []).map((d) => d.id),
+          syncGoogleCalendar: true,
+          syncAppleCalendar: true,
+        });
+        setHydrated(true);
+      }
+      return res;
+    },
     enabled: isEdit,
   });
 
-  if (isEdit && existingQ.isLoading) {
-    return (
-      <>
-        <AppBar title="Edit event" back />
-        <Page>
-          <Card className="space-y-3 p-4">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-2/3" />
-            <Skeleton className="h-10 w-1/2" />
-          </Card>
-        </Page>
-      </>
-    );
-  }
-
-  if (isEdit && (existingQ.isError || !existingQ.data?.event)) {
-    return (
-      <>
-        <AppBar title="Edit event" back />
-        <Page>
-          <Card className="space-y-2 p-4">
-            <p className="text-sm font-semibold text-fg">Couldn’t load this event</p>
-            <p className="text-sm text-fg-muted">
-              {existingQ.error instanceof Error
-                ? existingQ.error.message
-                : "It may have been deleted."}
-            </p>
-          </Card>
-        </Page>
-      </>
-    );
-  }
-
-  const existing = existingQ.data ?? null;
-  return (
-    <EventFormFields
-      key={existing?.event ? id : "new"}
-      id={id}
-      existing={existing}
-    />
-  );
-}
-
-function EventFormFields({
-  id,
-  existing,
-}: {
-  id: string | undefined;
-  existing: { event: EventPayload; attendees: { memberId: string }[] } | null;
-}) {
-  const isEdit = Boolean(id);
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  const { activeFamilyId, families } = useAuth();
-  const [today] = useState(() => new Date().toISOString().slice(0, 10));
-
-  const [form, setForm] = useState<FormState>(() => {
-    if (existing?.event) {
-      const attendees = existing.event.attendees ?? existing.attendees ?? [];
-      return formFromEvent(existing.event, attendees);
-    }
-    return {
-      title: "",
-      type: "other",
-      date: today,
-      allDay: false,
-      startTime: "09:00",
-      endTime: "10:00",
-      location: "",
-      description: "",
-      attendeeMemberIds: [],
-    };
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
+  // Fetch family members for attendee picker.
+  // MUST be scoped to the active family: a user who belongs to two families was
+  // previously shown the first family's members, and the create then failed
+  // server-side with invalid_member_ids. familyId is in the query key too, so
+  // switching families does not serve a stale picker from cache.
   const { data: membersData } = useQuery({
-    queryKey: ["family-members"],
-    queryFn: () => api<{ members: Member[] }>("/families/me/members"),
+    queryKey: ["family-members", activeFamily?.id],
+    queryFn: () =>
+      api<{ members: Member[] }>(`/families/me/members?familyId=${activeFamily!.id}`),
+    enabled: Boolean(activeFamily),
   });
   const members = membersData?.members ?? [];
+
+  const { data: docsData } = useQuery({
+    queryKey: ["documents", activeFamily?.id, "event-form"],
+    queryFn: () =>
+      api<{ documents: DocOption[] }>(
+        `/documents?familyId=${activeFamily!.id}`,
+      ),
+    enabled: Boolean(activeFamily),
+  });
+  const documents = docsData?.documents ?? [];
 
   const mutation = useMutation({
     mutationFn: (payload: object) =>
       isEdit
-        ? api(`/events/${id}`, { method: "PATCH", body: JSON.stringify(payload) })
-        : api("/events", { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: (data: unknown) => {
+        ? api<{
+            event: { id: string };
+            conflicts: ScheduleConflict[];
+            appleCalendar?: boolean;
+          }>(`/events/${id}`, { method: "PATCH", body: JSON.stringify(payload) })
+        : api<{
+            event: { id: string };
+            conflicts: ScheduleConflict[];
+            appleCalendar?: boolean;
+          }>("/events", { method: "POST", body: JSON.stringify(payload) }),
+    onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: ["events"] });
-      const res = data as {
-        event?: { id?: string };
-        calendar?: { status?: string; message?: string };
+      const go = () => {
+        const evId = data.event?.id;
+        if (!isEdit && data.appleCalendar && evId) {
+          window.location.assign(`/api/events/${evId}/ics`);
+          return;
+        }
+        navigate(evId ? `/calendar/events/${evId}` : "/calendar", {
+          replace: true,
+        });
       };
-      navigate(res.event?.id ? `/calendar/events/${res.event.id}` : "/calendar", {
-        replace: true,
-        state: res.calendar ? { calendar: res.calendar } : undefined,
-      });
+      const list = data.conflicts ?? [];
+      if (list.length > 0) {
+        setConflicts(list);
+        // Stay on the form briefly so the advisory banner is visible, then go.
+        window.setTimeout(go, 1200);
+        return;
+      }
+      go();
     },
   });
 
@@ -209,32 +203,38 @@ function EventFormFields({
     e.preventDefault();
     if (!validate()) return;
 
-    const targetFamilyId = activeFamilyId || families[0]?.id;
-    if (!targetFamilyId && !isEdit) {
-      setErrors((prev) => ({
-        ...prev,
-        title: "No active family found. Please create a family first.",
-      }));
-      return;
-    }
-
-    const startAt = form.allDay
-      ? utcMidnightSeconds(form.date)
-      : toUnixSeconds(form.date, form.startTime);
+    const startAt = toUnixSeconds(form.date, form.allDay ? "00:00" : form.startTime);
     const endAt = form.allDay
       ? undefined
       : toUnixSeconds(form.date, form.endTime);
 
+    const bufferRaw = form.travelBufferMins.trim();
+    const travelBufferMins =
+      bufferRaw === ""
+        ? isEdit
+          ? null
+          : undefined
+        : Math.max(0, Math.min(24 * 60, Number.parseInt(bufferRaw, 10) || 0));
+
     mutation.mutate({
-      familyId: targetFamilyId || "",
+      // POST /events requires familyId (server-side membership check).
+      ...(isEdit ? {} : { familyId: activeFamily!.id }),
       title: form.title.trim(),
       type: form.type,
       startAt,
       endAt,
       allDay: form.allDay,
       location: form.location.trim() || undefined,
+      travelBufferMins,
       description: form.description.trim() || undefined,
       attendeeMemberIds: form.attendeeMemberIds,
+      documentIds: form.documentIds,
+      ...(!isEdit
+        ? {
+            syncGoogleCalendar: form.syncGoogleCalendar,
+            syncAppleCalendar: form.syncAppleCalendar,
+          }
+        : {}),
     });
   }
 
@@ -247,8 +247,17 @@ function EventFormFields({
     set(
       "attendeeMemberIds",
       form.attendeeMemberIds.includes(memberId)
-        ? form.attendeeMemberIds.filter((mid) => mid !== memberId)
+        ? form.attendeeMemberIds.filter((id) => id !== memberId)
         : [...form.attendeeMemberIds, memberId],
+    );
+  }
+
+  function toggleDocument(docId: string) {
+    set(
+      "documentIds",
+      form.documentIds.includes(docId)
+        ? form.documentIds.filter((id) => id !== docId)
+        : [...form.documentIds, docId],
     );
   }
 
@@ -256,21 +265,8 @@ function EventFormFields({
     <>
       <AppBar title={isEdit ? "Edit event" : "New event"} back />
       <Page className="space-y-4">
-        <Card className="space-y-2 p-4">
-          <p className="text-sm text-fg-muted">
-            After you{" "}
-            <span className="font-medium text-fg">Connect Google Calendar</span>{" "}
-            once, every save writes the event to your Google Calendar inside the
-            app — no leaving Family Vault.
-          </p>
-          <a
-            href={`/api/auth/google/start?connect=calendar&returnTo=${encodeURIComponent(isEdit && id ? `/calendar/events/${id}/edit` : "/calendar/events/new")}`}
-            className="text-xs font-medium text-vault-400"
-          >
-            Connect Google Calendar
-          </a>
-        </Card>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
+          {/* Title */}
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">
               Title <span className="text-danger">*</span>
@@ -280,33 +276,25 @@ function EventFormFields({
               value={form.title}
               onChange={(e) => set("title", e.target.value)}
               placeholder="e.g. Dad's doctor appointment"
-              className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+              className={inputCls}
             />
             {errors.title && (
               <p className="mt-1 text-xs text-danger">{errors.title}</p>
             )}
           </Card>
 
+          {/* Type */}
           <Card className="p-4">
-            <p className="text-xs font-semibold text-fg-muted mb-2">Type</p>
-            <div className="flex flex-wrap gap-2">
-              {EVENT_TYPES.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => set("type", value)}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-                    form.type === value
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <TypePicker
+              domain="event_type"
+              familyId={activeFamily?.id}
+              value={form.type}
+              onChange={(type) => set("type", type)}
+              title="Type"
+            />
           </Card>
 
+          {/* Date & Time */}
           <Card className="p-4 space-y-3">
             <div>
               <label className="block text-xs font-semibold text-fg-muted mb-1.5">
@@ -316,7 +304,7 @@ function EventFormFields({
                 type="date"
                 value={form.date}
                 onChange={(e) => set("date", e.target.value)}
-                className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                className={inputCls}
               />
               {errors.date && (
                 <p className="mt-1 text-xs text-danger">{errors.date}</p>
@@ -346,7 +334,7 @@ function EventFormFields({
                     type="time"
                     value={form.startTime}
                     onChange={(e) => set("startTime", e.target.value)}
-                    className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                    className={inputCls}
                   />
                 </div>
                 <div>
@@ -357,7 +345,7 @@ function EventFormFields({
                     type="time"
                     value={form.endTime}
                     onChange={(e) => set("endTime", e.target.value)}
-                    className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg border border-line focus:border-vault-500 focus:outline-none"
+                    className={inputCls}
                   />
                   {errors.endTime && (
                     <p className="mt-1 text-xs text-danger">{errors.endTime}</p>
@@ -367,19 +355,41 @@ function EventFormFields({
             )}
           </Card>
 
-          <Card className="p-4">
-            <label className="block text-xs font-semibold text-fg-muted mb-1.5">
-              Location (optional)
-            </label>
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => set("location", e.target.value)}
-              placeholder="e.g. City Hospital, Room 4"
-              className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
-            />
+          {/* Location */}
+          <Card className="p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                Location (optional)
+              </label>
+              <input
+                type="text"
+                value={form.location}
+                onChange={(e) => set("location", e.target.value)}
+                placeholder="e.g. City Hospital, Room 4"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-fg-muted mb-1.5">
+                Travel buffer (minutes)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1440}
+                inputMode="numeric"
+                value={form.travelBufferMins}
+                onChange={(e) => set("travelBufferMins", e.target.value)}
+                placeholder="e.g. 30"
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-fg-subtle">
+                Advisory leave-by reminder — no Maps routing yet.
+              </p>
+            </div>
           </Card>
 
+          {/* Description */}
           <Card className="p-4">
             <label className="block text-xs font-semibold text-fg-muted mb-1.5">
               Notes (optional)
@@ -389,10 +399,36 @@ function EventFormFields({
               onChange={(e) => set("description", e.target.value)}
               placeholder="Any extra details…"
               rows={3}
-              className="w-full resize-none rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-line focus:border-vault-500 focus:outline-none"
+              className={`${inputCls} resize-none`}
             />
           </Card>
 
+          {/* Linked documents */}
+          {documents.length > 0 && (
+            <Card className="p-4">
+              <p className="text-xs font-semibold text-fg-muted mb-3">
+                Related documents
+              </p>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {documents.map((d) => (
+                  <label
+                    key={d.id}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.documentIds.includes(d.id)}
+                      onChange={() => toggleDocument(d.id)}
+                      className="size-4 rounded accent-vault-500"
+                    />
+                    <span className="text-sm text-fg truncate">{d.title}</span>
+                  </label>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Attendees */}
           {members.length > 0 && (
             <Card className="p-4">
               <p className="text-xs font-semibold text-fg-muted mb-3">
@@ -423,8 +459,61 @@ function EventFormFields({
                 ))}
               </div>
               <p className="mt-2 text-xs text-fg-subtle">
-                You and tagged members get an email when this event is saved.
+                Tagged members are notified as soon as you save, and again if
+                you move or cancel the event.
               </p>
+            </Card>
+          )}
+
+          {conflicts.length > 0 && (
+            <Card className="border border-warning/40 p-4">
+              <p className="text-sm font-semibold text-warning">
+                Scheduling conflict (advisory)
+              </p>
+              <ul className="mt-2 space-y-1 text-xs text-fg-muted">
+                {conflicts.map((c) => (
+                  <li key={c.eventId}>
+                    Overlaps “{c.title}” for a shared attendee
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {/* Calendars — default checked; no separate “connect” buttons. */}
+          {!isEdit && (
+            <Card className="space-y-3 p-4">
+              <p className="text-xs font-semibold text-fg-muted">
+                Add to my calendars
+              </p>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncGoogleCalendar}
+                  onChange={(e) => set("syncGoogleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Google Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Pushed automatically when you save
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.syncAppleCalendar}
+                  onChange={(e) => set("syncAppleCalendar", e.target.checked)}
+                  className="mt-0.5 size-4 rounded accent-vault-500"
+                />
+                <span>
+                  <span className="block text-sm text-fg">Apple Calendar</span>
+                  <span className="block text-xs text-fg-subtle">
+                    Opens Add to Calendar on iPhone after save
+                  </span>
+                </span>
+              </label>
             </Card>
           )}
 

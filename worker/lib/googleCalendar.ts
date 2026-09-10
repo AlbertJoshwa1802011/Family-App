@@ -1,261 +1,226 @@
 /**
- * Google Calendar write-sync for family events.
+ * Google Calendar API helpers.
  *
- * Uses the signed-in user's OAuth tokens (KV refresh + cached access).
- * Create/update always attempt a Calendar API write in-app — never via
- * external Google TEMPLATE redirects. Delete/cancel remove the remote event
- * from the creator's primary calendar.
+ * Family Vault is the source of truth. We push create/update/cancel into each
+ * recipient's primary calendar using the Calendar Events API. Best-effort —
+ * callers must never fail a D1 write because Google Calendar is unreachable.
  */
+
 import type { Env } from "../types";
-import type { Db } from "../db/client";
-import { schema } from "../db/client";
-import { eq } from "drizzle-orm";
 import {
-  GOOGLE_SCOPES,
-  classifyGoogleApiError,
-  clearUserGoogleAccessCache,
-  dropGrantedScope,
-  getUserGoogleAccessToken,
-  scopesKey,
-  userHasScope,
-} from "./google";
+  clearGoogleAccessTokenCache,
+  getGoogleAccessToken,
+  GoogleAuthError,
+} from "./googleAuth";
 
-const CAL_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 
-export type CalendarSyncStatus =
-  | "synced"
-  | "skipped_no_token"
-  | "needs_reconnect"
-  | "needs_api_enabled"
-  | "failed";
+export class GoogleCalendarError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+    public readonly insufficientScope = false,
+  ) {
+    super(message);
+    this.name = "GoogleCalendarError";
+  }
+}
 
-export interface CalendarEventInput {
+export interface FamilyVaultEventForGCal {
   id: string;
   title: string;
   description: string | null;
   location: string | null;
   startAt: number;
   endAt: number | null;
-  allDay: boolean;
-  googleCalendarEventId: string | null;
+  allDay: boolean | null;
+  status: "active" | "cancelled" | "trashed";
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
+export interface GCalEventBody {
+  summary: string;
+  description?: string;
+  location?: string;
+  start: { date?: string; dateTime?: string };
+  end: { date?: string; dateTime?: string };
+  status?: "confirmed" | "cancelled";
+  source?: { title: string; url: string };
+  extendedProperties?: { private: Record<string, string> };
 }
 
-function utcDate(secs: number): string {
-  const d = new Date(secs * 1000);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+function unixToIsoZ(secs: number): string {
+  return new Date(secs * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function rfc3339(secs: number): string {
-  return new Date(secs * 1000).toISOString();
+/** UTC calendar date yyyy-mm-dd from unix seconds. */
+function unixToUtcDate(secs: number): string {
+  return new Date(secs * 1000).toISOString().slice(0, 10);
 }
 
-function toGcalBody(ev: CalendarEventInput): Record<string, unknown> {
-  const allDay = Boolean(ev.allDay);
-  const endSecs = ev.endAt && ev.endAt > ev.startAt ? ev.endAt : ev.startAt + 3600;
-  if (allDay) {
-    const start = utcDate(ev.startAt);
-    const endDay = new Date(Date.UTC(
-      Number(start.slice(0, 4)),
-      Number(start.slice(5, 7)) - 1,
-      Number(start.slice(8, 10)) + 1,
-    ));
-    return {
-      summary: ev.title,
-      description: ev.description ?? undefined,
-      location: ev.location ?? undefined,
-      start: { date: start },
-      end: { date: utcDate(Math.floor(endDay.getTime() / 1000)) },
-    };
-  }
-  return {
+/** Google all-day DTEND is exclusive — next calendar day after `iso`. */
+function nextUtcDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+export function buildGCalEventBody(
+  ev: FamilyVaultEventForGCal,
+  appUrl: string,
+): GCalEventBody {
+  const link = `${appUrl.replace(/\/$/, "")}/calendar/events/${ev.id}`;
+  const descriptionParts = [
+    ev.description?.trim() || null,
+    `Family Vault: ${link}`,
+  ].filter(Boolean);
+
+  const body: GCalEventBody = {
     summary: ev.title,
-    description: ev.description ?? undefined,
-    location: ev.location ?? undefined,
-    start: { dateTime: rfc3339(ev.startAt) },
-    end: { dateTime: rfc3339(endSecs) },
+    description: descriptionParts.join("\n\n"),
+    status: ev.status === "cancelled" ? "cancelled" : "confirmed",
+    source: { title: "Family Vault", url: link },
+    extendedProperties: {
+      private: { familyVaultEventId: ev.id },
+    },
+    start: {},
+    end: {},
   };
+  if (ev.location) body.location = ev.location;
+
+  if (ev.allDay) {
+    const startDate = unixToUtcDate(ev.startAt);
+    const endDate = ev.endAt
+      ? nextUtcDate(unixToUtcDate(ev.endAt))
+      : nextUtcDate(startDate);
+    body.start = { date: startDate };
+    body.end = { date: endDate };
+  } else {
+    const start = unixToIsoZ(ev.startAt);
+    const end = unixToIsoZ(ev.endAt ?? ev.startAt + 3600);
+    body.start = { dateTime: start };
+    body.end = { dateTime: end };
+  }
+
+  return body;
 }
 
-/** Convert an https ICS feed URL into a webcal:// URL for Apple Calendar. */
-export function toWebcalUrl(httpsUrl: string): string {
-  return httpsUrl.replace(/^https:/i, "webcal:").replace(/^http:/i, "webcal:");
-}
-
-export function calendarStatusMessage(status: CalendarSyncStatus): string {
-  switch (status) {
-    case "synced":
-      return "Saved to your Google Calendar automatically.";
-    case "skipped_no_token":
-      return "Connect Google Calendar in Settings once — new events then save to Google automatically.";
-    case "needs_reconnect":
-      return "Google Calendar permission expired. Tap Connect Google Calendar in the app, accept access, then save again.";
-    case "needs_api_enabled":
-      return "Enable Google Calendar API on the Cloud project (docs/OPS.md §6), then reconnect Calendar in Settings.";
-    case "failed":
-      return "Could not write to Google Calendar. Tap Sync to retry, or reconnect Calendar in Settings.";
+async function withAccessToken<T>(
+  env: Env,
+  userId: string,
+  fn: (token: string) => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn(await getGoogleAccessToken(env, userId));
+  } catch (e) {
+    // Stale cached token or scope change — clear cache and retry once.
+    if (
+      e instanceof GoogleCalendarError &&
+      (e.statusCode === 401 || e.insufficientScope)
+    ) {
+      await clearGoogleAccessTokenCache(env, userId);
+      return await fn(await getGoogleAccessToken(env, userId));
+    }
+    if (e instanceof GoogleAuthError) {
+      throw new GoogleCalendarError(e.message, e.statusCode);
+    }
+    throw e;
   }
 }
 
-async function gcalFetch(
-  token: string,
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  return fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
+function classifyCalendarError(status: number, body: string): GoogleCalendarError {
+  const insufficient =
+    status === 403 &&
+    (/insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT|Insufficient Permission/i.test(
+      body,
+    ) ||
+      /Request had insufficient authentication scopes/i.test(body));
+  return new GoogleCalendarError(
+    `Google Calendar API ${status}: ${body}`,
+    status,
+    insufficient,
+  );
+}
+
+export async function insertGoogleCalendarEvent(
+  env: Env,
+  userId: string,
+  body: GCalEventBody,
+  calendarId = "primary",
+): Promise<string> {
+  return withAccessToken(env, userId, async (token) => {
+    const res = await fetch(
+      `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      throw classifyCalendarError(res.status, await res.text());
+    }
+    const json = (await res.json()) as { id: string };
+    return json.id;
   });
 }
 
-export interface CalendarSyncResult {
-  status: CalendarSyncStatus;
-  googleCalendarEventId: string | null;
-  message: string;
-}
-
-function result(
-  status: CalendarSyncStatus,
-  googleCalendarEventId: string | null,
-): CalendarSyncResult {
-  return {
-    status,
-    googleCalendarEventId,
-    message: calendarStatusMessage(status),
-  };
-}
-
-async function withFreshToken(
+export async function patchGoogleCalendarEvent(
   env: Env,
   userId: string,
-  write: (token: string) => Promise<Response>,
-): Promise<{ res: Response; token: string } | { error: CalendarSyncStatus }> {
-  let token = await getUserGoogleAccessToken(env, userId);
-  if (!token) return { error: "skipped_no_token" };
-
-  let res = await write(token);
-  // Stale cached access token (often minted for Drive before calendar.events)
-  // returns 401 or insufficient-scope 403 — clear and retry once from refresh.
-  if (res.status === 401 || res.status === 403) {
-    const peek = await res.clone().text();
-    const kind = classifyGoogleApiError(res.status, peek);
-    if (kind === "auth") {
-      await clearUserGoogleAccessCache(env, userId);
-      token = await getUserGoogleAccessToken(env, userId);
-      if (!token) return { error: "skipped_no_token" };
-      res = await write(token);
-    }
-  }
-  return { res, token };
-}
-
-export async function upsertGoogleCalendarEvent(
-  env: Env,
-  db: Db,
-  userId: string,
-  ev: CalendarEventInput,
-): Promise<CalendarSyncResult> {
-  try {
-    const input: CalendarEventInput = { ...ev, allDay: Boolean(ev.allDay) };
-
-    const scopesKnown = Boolean(await env.KV.get(scopesKey(userId)));
-    if (
-      scopesKnown &&
-      !(await userHasScope(env, userId, GOOGLE_SCOPES.calendarEvents))
-    ) {
-      return result("needs_reconnect", input.googleCalendarEventId);
-    }
-
-    const body = JSON.stringify(toGcalBody(input));
-
-    const outcome = await withFreshToken(env, userId, async (accessToken) => {
-      if (input.googleCalendarEventId) {
-        let res = await gcalFetch(
-          accessToken,
-          `${CAL_API}/${encodeURIComponent(input.googleCalendarEventId)}`,
-          { method: "PATCH", body },
-        );
-        if (res.status === 404) {
-          res = await gcalFetch(accessToken, CAL_API, { method: "POST", body });
-        }
-        return res;
-      }
-      return gcalFetch(accessToken, CAL_API, { method: "POST", body });
-    });
-
-    if ("error" in outcome) {
-      return result(outcome.error, input.googleCalendarEventId);
-    }
-
-    const { res } = outcome;
-    if (res.status === 401 || res.status === 403) {
-      const errBody = await res.text();
-      const kind = classifyGoogleApiError(res.status, errBody);
-      console.error(`[gcal] upsert ${res.status}: ${errBody.slice(0, 200)}`);
-      if (kind === "api_disabled") {
-        return result("needs_api_enabled", input.googleCalendarEventId);
-      }
-      // Live token lacks calendar — drop the stale KV flag so Settings matches.
-      await dropGrantedScope(env, userId, GOOGLE_SCOPES.calendarEvents);
-      return result("needs_reconnect", input.googleCalendarEventId);
-    }
+  googleEventId: string,
+  body: GCalEventBody,
+  calendarId = "primary",
+): Promise<void> {
+  return withAccessToken(env, userId, async (token) => {
+    const res = await fetch(
+      `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
     if (!res.ok) {
-      console.error(`[gcal] upsert ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return result("failed", input.googleCalendarEventId);
+      // Gone — treat as missing so the caller can re-insert.
+      if (res.status === 404) {
+        throw new GoogleCalendarError("Google event not found", 404);
+      }
+      throw classifyCalendarError(res.status, await res.text());
     }
-    const created = (await res.json()) as { id?: string };
-    const remoteId = created.id ?? input.googleCalendarEventId;
-    if (remoteId && remoteId !== input.googleCalendarEventId) {
-      await db
-        .update(schema.events)
-        .set({ googleCalendarEventId: remoteId })
-        .where(eq(schema.events.id, input.id));
-    }
-    return result("synced", remoteId ?? null);
-  } catch (err) {
-    console.error("[gcal] upsert failed:", err);
-    return result("failed", ev.googleCalendarEventId);
-  }
+  });
 }
 
-/**
- * Delete the Google Calendar copy. Prefer the event *creator's* userId — the
- * event lives on their primary calendar. Returns true when remote is gone
- * (or never existed / already 404).
- */
 export async function deleteGoogleCalendarEvent(
   env: Env,
   userId: string,
-  googleCalendarEventId: string | null,
-): Promise<boolean> {
-  if (!googleCalendarEventId) return true;
+  googleEventId: string,
+  calendarId = "primary",
+): Promise<void> {
   try {
-    const outcome = await withFreshToken(env, userId, (accessToken) =>
-      gcalFetch(
-        accessToken,
-        `${CAL_API}/${encodeURIComponent(googleCalendarEventId)}`,
-        { method: "DELETE" },
-      ),
-    );
-    if ("error" in outcome) {
-      console.error(`[gcal] delete skipped: ${outcome.error}`);
-      return false;
+    await withAccessToken(env, userId, async (token) => {
+      const res = await fetch(
+        `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(googleEventId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      // 404/410 = already gone — success for our purposes.
+      if (!res.ok && res.status !== 404 && res.status !== 410) {
+        throw classifyCalendarError(res.status, await res.text());
+      }
+    });
+  } catch (e) {
+    if (e instanceof GoogleAuthError || e instanceof GoogleCalendarError) {
+      // Best-effort cleanup — log and continue so D1 sync rows can still drop.
+      console.warn(`Google Calendar delete skipped for ${userId}:`, e.message);
+      return;
     }
-    const { res } = outcome;
-    if (res.ok || res.status === 404) return true;
-    console.error(`[gcal] delete ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    return false;
-  } catch (err) {
-    console.error("[gcal] delete failed:", err);
-    return false;
+    throw e;
   }
 }
-
-export { toGcalBody };

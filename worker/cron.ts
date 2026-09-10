@@ -4,16 +4,25 @@ import { getDb, type Db } from "./db/client";
 import { schema } from "./db/client";
 import {
   REMINDER_SCAN_DAYS,
+  TASK_WINDOWS,
   daysUntilIso,
   daysUntilUnix,
   dueReminderWindow,
   eventReminderText,
   expiryReminderText,
   parseWindows,
+  taskReminderText,
+  withDayOfWindow,
 } from "./lib/reminders";
 import { createNotification } from "./lib/notify";
-import { reminderEmailHtml, sendEmail } from "./lib/email";
-import { upcomingLifeEvents, type LifeEventCandidate } from "./lib/lifeEvents";
+import { sendEmail } from "./lib/email";
+import { reminderEmail } from "./lib/emailTemplates";
+
+function urgencyFor(daysUntil: number): "danger" | "warning" | "info" {
+  if (daysUntil <= 7) return "danger";
+  if (daysUntil <= 30) return "warning";
+  return "info";
+}
 
 /** ISO yyyy-mm-dd `daysAhead` days from the instant `nowMs` (UTC). */
 function isoDaysAhead(nowMs: number, daysAhead: number): string {
@@ -23,7 +32,6 @@ function isoDaysAhead(nowMs: number, daysAhead: number): string {
 /** A family member who is a real, notifiable user. */
 interface Recipient {
   userId: string;
-  /** Where mail actually goes: the reminder override if set, else the login address. */
   email: string;
   windows: number[];
   emailEnabled: boolean;
@@ -42,7 +50,6 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
       email: schema.users.email,
       windowsJson: schema.reminderPrefs.windowsJson,
       emailEnabled: schema.reminderPrefs.emailEnabled,
-      reminderEmail: schema.reminderPrefs.reminderEmail,
     })
     .from(schema.familyMembers)
     .innerJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
@@ -57,18 +64,49 @@ async function loadRecipients(db: Db, familyId: string): Promise<Recipient[]> {
 
   return rows.map((r) => ({
     userId: r.userId,
-    // Deliver to the configured inbox when the member set one; the Google
-    // sign-in address is only the fallback.
-    email: r.reminderEmail ?? r.email,
+    email: r.email,
     windows: parseWindows(r.windowsJson),
     // No prefs row → email defaults ON (matches reminder_prefs.emailEnabled default).
     emailEnabled: r.emailEnabled ?? true,
   }));
 }
 
+/**
+ * User ids of an event's non-declined attendees, or null when the event has no
+ * attendee rows at all (meaning "the whole family"). Dependents contribute no
+ * user id, so an event only for a child returns an empty set — nobody to email,
+ * which is correct: their guardians see it on the shared calendar.
+ */
+async function attendeeUserIdsFor(
+  db: Db,
+  eventId: string,
+): Promise<Set<string> | null> {
+  const rows = await db
+    .select({
+      userId: schema.familyMembers.userId,
+      rsvp: schema.eventAttendees.rsvp,
+    })
+    .from(schema.eventAttendees)
+    .innerJoin(
+      schema.familyMembers,
+      eq(schema.eventAttendees.memberId, schema.familyMembers.id),
+    )
+    .where(eq(schema.eventAttendees.eventId, eventId));
+
+  if (rows.length === 0) return null; // no guest list → family-wide
+
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (r.rsvp === "declined") continue;
+    if (r.userId) ids.add(r.userId);
+  }
+  return ids;
+}
+
 interface RunStats {
   docsScanned: number;
   eventsScanned: number;
+  tasksScanned: number;
   inAppSent: number;
   emailsSent: number;
 }
@@ -83,6 +121,11 @@ interface RunStats {
  *     in-app notification + (when enabled) a Resend email.
  *  3. Record reminders_log rows per channel for idempotent dedupe.
  *  4. Same for upcoming events via event_reminders_log.
+ *  5. Open tasks with a due date: dedicated windows [7, 2, 0] via
+ *     task_reminders_log. Assigned tasks notify the assignee (when they have
+ *     an account); unassigned / dependent-assigned tasks notify the family.
+ *  6. Document reminders always include day-of (window 0) so an "expires
+ *     today" email still fires when the user never opens the app.
  *
  * Every subject is wrapped in try/catch so one bad row can't abort the run.
  */
@@ -92,7 +135,13 @@ export async function runExpiryReminders(env: Env): Promise<void> {
   const horizon = isoDaysAhead(nowMs, REMINDER_SCAN_DAYS);
   const appUrl = env.APP_URL ?? "";
 
-  const stats: RunStats = { docsScanned: 0, eventsScanned: 0, inAppSent: 0, emailsSent: 0 };
+  const stats: RunStats = {
+    docsScanned: 0,
+    eventsScanned: 0,
+    tasksScanned: 0,
+    inAppSent: 0,
+    emailsSent: 0,
+  };
   const recipientCache = new Map<string, Recipient[]>();
 
   async function recipientsFor(familyId: string): Promise<Recipient[]> {
@@ -130,7 +179,9 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           : all;
 
       for (const r of recipients) {
-        const window = dueReminderWindow(daysUntil, r.windows);
+        // Day-of is mandatory for documents — lead-time prefs must not suppress
+        // the "expires today" email when the user is offline.
+        const window = dueReminderWindow(daysUntil, withDayOfWindow(r.windows));
         if (window === null) continue;
         const text = expiryReminderText(doc.title, daysUntil);
         const link = `/documents/${doc.id}`;
@@ -167,11 +218,12 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: reminderEmail({
               heading: text.title,
               body: text.body,
               ctaLabel: "View document",
               ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
             }),
           });
           if (ok) stats.emailsSent++;
@@ -201,7 +253,21 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     try {
       const daysUntil = daysUntilUnix(ev.startAt, nowMs);
       if (daysUntil < 0) continue; // past events don't remind
-      const recipients = await recipientsFor(ev.familyId);
+      // System renew markers are driven by the document-expiry pipeline —
+      // skipping here avoids a duplicate "Today: Renew: …" email.
+      if (ev.source === "document_expiry") continue;
+
+      // Attendee-scoped: an event with a named guest list concerns those people,
+      // not the whole household — mirrors how private documents only remind
+      // their owner. An event with NO attendees is a family-wide affair and
+      // still reminds everyone. Declined attendees are dropped: saying no ends
+      // the obligation. Dependents have no account, so they resolve to nobody.
+      const all = await recipientsFor(ev.familyId);
+      const attendeeUserIds = await attendeeUserIdsFor(db, ev.id);
+      const recipients =
+        attendeeUserIds === null
+          ? all
+          : all.filter((r) => attendeeUserIds.has(r.userId));
 
       for (const r of recipients) {
         const window = dueReminderWindow(daysUntil, r.windows);
@@ -241,11 +307,12 @@ export async function runExpiryReminders(env: Env): Promise<void> {
           const ok = await sendEmail(env, {
             to: r.email,
             subject: text.title,
-            html: reminderEmailHtml({
+            html: reminderEmail({
               heading: text.title,
               body: text.body,
               ctaLabel: "View event",
               ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
             }),
           });
           if (ok) stats.emailsSent++;
@@ -257,9 +324,95 @@ export async function runExpiryReminders(env: Env): Promise<void> {
     }
   }
 
+  // ── Tasks ─────────────────────────────────────────────────────────────────────
+  const dueTasks = await db
+    .select()
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.status, "open"),
+        isNotNull(schema.tasks.dueDate),
+        lte(schema.tasks.dueDate, horizon),
+      ),
+    );
+
+  for (const task of dueTasks) {
+    stats.tasksScanned++;
+    try {
+      const daysUntil = daysUntilIso(task.dueDate!, nowMs);
+      if (daysUntil === null) continue;
+      const window = dueReminderWindow(daysUntil, TASK_WINDOWS);
+      if (window === null) continue;
+
+      const all = await recipientsFor(task.familyId);
+      let recipients = all;
+      if (task.assignedToMemberId) {
+        const assignee = await db
+          .select({ userId: schema.familyMembers.userId })
+          .from(schema.familyMembers)
+          .where(eq(schema.familyMembers.id, task.assignedToMemberId))
+          .get();
+        if (assignee?.userId) {
+          recipients = all.filter((r) => r.userId === assignee.userId);
+        }
+      }
+
+      const text = taskReminderText(task.title, daysUntil);
+      const link = "/tasks";
+
+      for (const r of recipients) {
+        if (
+          await recordReminderOnce(db, "task_in_app", {
+            taskId: task.id,
+            userId: r.userId,
+            windowDays: window,
+            channel: "in_app",
+          })
+        ) {
+          await createNotification(db, {
+            userId: r.userId,
+            familyId: task.familyId,
+            type: "task",
+            title: text.title,
+            body: text.body,
+            link,
+          });
+          stats.inAppSent++;
+        }
+
+        if (
+          r.emailEnabled &&
+          r.email &&
+          (await recordReminderOnce(db, "task_email", {
+            taskId: task.id,
+            userId: r.userId,
+            windowDays: window,
+            channel: "email",
+          }))
+        ) {
+          const ok = await sendEmail(env, {
+            to: r.email,
+            subject: text.title,
+            html: reminderEmail({
+              heading: text.title,
+              body: text.body,
+              ctaLabel: "View tasks",
+              ctaUrl: `${appUrl}${link}`,
+              urgency: urgencyFor(daysUntil),
+            }),
+          });
+          if (ok) stats.emailsSent++;
+          else await unrecordReminder(db, "task_email", task.id, r.userId, window);
+        }
+      }
+    } catch (err) {
+      console.error(`[cron] task ${task.id} reminder failed:`, err);
+    }
+  }
+
   console.log(
     `[cron] reminders done: docs=${stats.docsScanned} events=${stats.eventsScanned} ` +
-      `in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
+      `tasks=${stats.tasksScanned} in_app=${stats.inAppSent} emails=${stats.emailsSent}`,
   );
 }
 
@@ -275,6 +428,20 @@ type EventLog = {
   windowDays: number;
   channel: "in_app" | "email";
 };
+type TaskLog = {
+  taskId: string;
+  userId: string;
+  windowDays: number;
+  channel: "in_app" | "email";
+};
+
+type ReminderKind =
+  | "doc_in_app"
+  | "doc_email"
+  | "event_in_app"
+  | "event_email"
+  | "task_in_app"
+  | "task_email";
 
 /**
  * Atomically claims a (subject, user, window, channel) slot in the dedupe log.
@@ -284,8 +451,8 @@ type EventLog = {
  */
 async function recordReminderOnce(
   db: Db,
-  kind: "doc_in_app" | "doc_email" | "event_in_app" | "event_email",
-  log: DocLog | EventLog,
+  kind: ReminderKind,
+  log: DocLog | EventLog | TaskLog,
 ): Promise<boolean> {
   if (kind.startsWith("doc")) {
     const l = log as DocLog;
@@ -294,6 +461,21 @@ async function recordReminderOnce(
       .values({
         id: crypto.randomUUID(),
         documentId: l.documentId,
+        userId: l.userId,
+        windowDays: l.windowDays,
+        channel: l.channel,
+      })
+      .onConflictDoNothing()
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
+  }
+  if (kind.startsWith("task")) {
+    const l = log as TaskLog;
+    const res = await db
+      .insert(schema.taskRemindersLog)
+      .values({
+        id: crypto.randomUUID(),
+        taskId: l.taskId,
         userId: l.userId,
         windowDays: l.windowDays,
         channel: l.channel,
@@ -320,7 +502,7 @@ async function recordReminderOnce(
 /** Removes an email dedupe row so a failed send is retried next run. */
 async function unrecordReminder(
   db: Db,
-  kind: "doc_email" | "event_email",
+  kind: "doc_email" | "event_email" | "task_email",
   subjectId: string,
   userId: string,
   windowDays: number,
@@ -336,6 +518,17 @@ async function unrecordReminder(
           eq(schema.remindersLog.channel, "email"),
         ),
       );
+  } else if (kind === "task_email") {
+    await db
+      .delete(schema.taskRemindersLog)
+      .where(
+        and(
+          eq(schema.taskRemindersLog.taskId, subjectId),
+          eq(schema.taskRemindersLog.userId, userId),
+          eq(schema.taskRemindersLog.windowDays, windowDays),
+          eq(schema.taskRemindersLog.channel, "email"),
+        ),
+      );
   } else {
     await db
       .delete(schema.eventRemindersLog)
@@ -348,145 +541,4 @@ async function unrecordReminder(
         ),
       );
   }
-}
-
-const LIFE_EVENT_WINDOWS = [7, 1, 0];
-const LIFE_EVENT_SCAN_DAYS = 7;
-
-/**
- * Birthday / anniversary emails for the next 7 days.
- * One email per (member, kind, year, window, channel) via life_event_reminders_log.
- */
-export async function runLifeEventReminders(env: Env): Promise<void> {
-  const db = getDb(env);
-  const nowMs = Date.now();
-  const appUrl = env.APP_URL ?? "";
-  let emailsSent = 0;
-
-  const members = await db
-    .select({
-      id: schema.familyMembers.id,
-      familyId: schema.familyMembers.familyId,
-      displayName: schema.familyMembers.displayName,
-      dateOfBirth: schema.familyMembers.dateOfBirth,
-      anniversaryDate: schema.familyMembers.anniversaryDate,
-      userName: schema.users.name,
-      status: schema.familyMembers.status,
-    })
-    .from(schema.familyMembers)
-    .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
-    .where(eq(schema.familyMembers.status, "active"));
-
-  const byFamily = new Map<string, typeof members>();
-  for (const m of members) {
-    const list = byFamily.get(m.familyId) ?? [];
-    list.push(m);
-    byFamily.set(m.familyId, list);
-  }
-
-  for (const [familyId, famMembers] of byFamily) {
-    const candidates = upcomingLifeEvents(
-      famMembers.map((m) => ({
-        id: m.id,
-        name: m.displayName || m.userName || "Family member",
-        dateOfBirth: m.dateOfBirth,
-        anniversaryDate: m.anniversaryDate,
-      })),
-      nowMs,
-      LIFE_EVENT_SCAN_DAYS,
-    );
-    if (candidates.length === 0) continue;
-
-    let recipients: Recipient[];
-    try {
-      recipients = await loadRecipients(db, familyId);
-    } catch (err) {
-      console.error(`[cron] life-event recipients for ${familyId} failed:`, err);
-      continue;
-    }
-
-    for (const ev of candidates) {
-      const window = dueReminderWindow(ev.daysUntil, LIFE_EVENT_WINDOWS);
-      if (window === null) continue;
-
-      for (const r of recipients) {
-        if (!r.emailEnabled) continue;
-        try {
-          const claimed = await recordLifeEventOnce(db, {
-            memberId: ev.memberId,
-            userId: r.userId,
-            kind: ev.kind,
-            occurrenceYear: ev.occurrenceYear,
-            windowDays: window,
-            channel: "email",
-          });
-          if (!claimed) continue;
-
-          const kindLabel = ev.kind === "birthday" ? "birthday" : "anniversary";
-          const when =
-            ev.daysUntil === 0
-              ? "today"
-              : ev.daysUntil === 1
-                ? "tomorrow"
-                : `in ${ev.daysUntil} days`;
-          const ok = await sendEmail(env, {
-            to: r.email,
-            subject: `${ev.name}'s ${kindLabel} is ${when}`,
-            html: reminderEmailHtml({
-              heading: `${ev.name}'s ${kindLabel}`,
-              body: `${ev.name}'s ${kindLabel} is ${when} (${ev.nextDate}). Any gift commitment?`,
-              ctaLabel: "Open Money",
-              ctaUrl: appUrl ? `${appUrl}/money` : "https://familyvault.app/money",
-            }),
-          });
-          if (ok) emailsSent++;
-          else {
-            await db
-              .delete(schema.lifeEventRemindersLog)
-              .where(
-                and(
-                  eq(schema.lifeEventRemindersLog.memberId, ev.memberId),
-                  eq(schema.lifeEventRemindersLog.userId, r.userId),
-                  eq(schema.lifeEventRemindersLog.kind, ev.kind),
-                  eq(schema.lifeEventRemindersLog.occurrenceYear, ev.occurrenceYear),
-                  eq(schema.lifeEventRemindersLog.windowDays, window),
-                  eq(schema.lifeEventRemindersLog.channel, "email"),
-                ),
-              );
-          }
-        } catch (err) {
-          console.error(`[cron] life-event ${ev.memberId} email failed:`, err);
-        }
-      }
-    }
-  }
-
-  console.log(`[cron] life-event reminders done: emails=${emailsSent}`);
-}
-
-async function recordLifeEventOnce(
-  db: Db,
-  log: {
-    memberId: string;
-    userId: string;
-    kind: LifeEventCandidate["kind"];
-    occurrenceYear: number;
-    windowDays: number;
-    channel: "in_app" | "email";
-  },
-): Promise<boolean> {
-  const res = await db
-    .insert(schema.lifeEventRemindersLog)
-    .values({
-      id: crypto.randomUUID(),
-      memberId: log.memberId,
-      userId: log.userId,
-      kind: log.kind,
-      occurrenceYear: log.occurrenceYear,
-      windowDays: log.windowDays,
-      channel: log.channel,
-    })
-    .onConflictDoNothing()
-    .run();
-  return (res.meta?.changes ?? 0) > 0;
 }

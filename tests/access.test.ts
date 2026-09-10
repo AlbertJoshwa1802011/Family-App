@@ -1,25 +1,19 @@
 /**
- * Closed signup: access requests, grants, and platform-admin approvals.
+ * Closed signup: demo requests, access grants, and super_admin approvals.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { app } from "../worker/index";
 import { sha256Hex } from "../worker/lib/crypto";
 import {
   canSignIn,
-  isBootstrapAdminEmail,
+  ensureBootstrapSuperAdmin,
   normalizeEmail,
 } from "../worker/lib/appAccess";
 import {
   accessApprovedEmail,
   demoRequestNotifyEmail,
   demoRequestReceivedEmail,
-} from "../worker/lib/accessEmails";
-import {
-  PRODUCTION_APP_ORIGIN,
-  absoluteAppUrl,
-} from "../worker/lib/publicUrl";
+} from "../worker/lib/emailTemplates";
 import { getDb } from "../worker/db/client";
 import {
   createTestEnv,
@@ -29,16 +23,16 @@ import {
   type TestEnv,
 } from "./helpers/testEnv";
 
-function seedPlatformAdmin(
+function seedSuperAdmin(
   env: TestEnv,
   email = "admin@familyvault.app",
 ): { userId: string; cookie: string; email: string } {
-  const user = seedUser(env.sqlite, { email, name: "Platform Admin" });
+  const user = seedUser(env.sqlite, { email, name: "Super Admin" });
   env.sqlite
     .prepare(
-      "INSERT INTO platform_admins (user_id, level, granted_by) VALUES (?, 'superadmin', ?)",
+      "INSERT INTO app_role_assignments (id, user_id, role) VALUES (?, ?, 'super_admin')",
     )
-    .run(user.id, user.id);
+    .run(crypto.randomUUID(), user.id);
   return { userId: user.id, cookie: seedSession(env.sqlite, user.id), email };
 }
 
@@ -46,16 +40,11 @@ describe("app access helpers", () => {
   let t: TestEnv;
 
   beforeEach(() => {
-    t = createTestEnv();
+    t = createTestEnv({ SUPER_ADMIN_EMAILS: "boss@example.com" });
   });
 
   it("normalizes emails", () => {
     expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
-  });
-
-  it("recognizes bootstrap admin emails", () => {
-    expect(isBootstrapAdminEmail("albertjoshrock101@gmail.com")).toBe(true);
-    expect(isBootstrapAdminEmail("stranger@example.com")).toBe(false);
   });
 
   it("denies brand-new users without a grant", async () => {
@@ -67,10 +56,10 @@ describe("app access helpers", () => {
     expect(res).toEqual({ ok: false, reason: "access_denied" });
   });
 
-  it("allows bootstrap admin emails", async () => {
+  it("allows bootstrap SUPER_ADMIN_EMAILS", async () => {
     const db = getDb(t.env);
     const res = await canSignIn(db, t.env, {
-      email: "AlbertJoshRock101@gmail.com",
+      email: "Boss@Example.com",
       googleSub: "sub-boss",
     });
     expect(res).toEqual({ ok: true });
@@ -112,33 +101,41 @@ describe("app access helpers", () => {
     });
     expect(res).toEqual({ ok: true });
   });
+
+  it("ensureBootstrapSuperAdmin assigns the role once", async () => {
+    const user = seedUser(t.sqlite, { email: "boss@example.com" });
+    const db = getDb(t.env);
+    await ensureBootstrapSuperAdmin(db, t.env, user.id, user.email);
+    await ensureBootstrapSuperAdmin(db, t.env, user.id, user.email);
+    const rows = t.sqlite
+      .prepare(
+        "SELECT role FROM app_role_assignments WHERE user_id = ?",
+      )
+      .all(user.id) as { role: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].role).toBe("super_admin");
+  });
 });
 
 describe("POST /api/access/demo-requests", () => {
   let t: TestEnv;
-  const sent: { to: string; subject: string; html?: string; text?: string }[] = [];
+  const sent: { to: string; subject: string }[] = [];
 
   beforeEach(() => {
     sent.length = 0;
     t = createTestEnv({
+      SUPER_ADMIN_EMAILS: "admin@familyvault.app",
       ACCESS_NOTIFY_EMAIL: "admin@familyvault.app",
       RESEND_API_KEY: "test-key",
     });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        const raw = String(init?.body ?? "{}");
-        try {
-          const body = JSON.parse(raw) as {
-            to: string;
-            subject: string;
-            html?: string;
-            text?: string;
-          };
-          if (body.to && body.subject) sent.push(body);
-        } catch {
-          // Gmail RFC822 bodies are not JSON
-        }
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          to: string;
+          subject: string;
+        };
+        sent.push({ to: body.to, subject: body.subject });
         return new Response("{}", { status: 200 });
       }),
     );
@@ -178,44 +175,6 @@ describe("POST /api/access/demo-requests", () => {
       "admin@familyvault.app",
       "priya@acme.com",
     ]);
-
-    const adminMail = sent.find((s) => s.to === "admin@familyvault.app");
-    expect(adminMail?.html).toContain("Approve access");
-    expect(adminMail?.html).toContain(
-      `${t.env.APP_URL}/api/access/review/approve/`,
-    );
-    expect(adminMail?.html).toContain(
-      `${t.env.APP_URL}/api/access/review/reject/`,
-    );
-    expect(adminMail?.html).not.toMatch(/href="\/access/);
-    expect(adminMail?.text).toContain("/api/access/review/approve/");
-  });
-
-  it("falls back to the production origin when APP_URL is empty", async () => {
-    t = createTestEnv({
-      APP_URL: "",
-      ACCESS_NOTIFY_EMAIL: "admin@familyvault.app",
-      RESEND_API_KEY: "test-key",
-    });
-    const res = await app.request(
-      "/api/access/demo-requests",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Priya",
-          email: "priya@acme.com",
-          company: "Acme",
-        }),
-      },
-      t.env,
-    );
-    expect(res.status).toBe(201);
-    const adminMail = sent.find((s) => s.to === "admin@familyvault.app");
-    expect(adminMail?.html).toContain(
-      `${PRODUCTION_APP_ORIGIN}/api/access/review/approve/`,
-    );
-    expect(adminMail?.html).toMatch(/^[\s\S]*href="https:\/\//);
   });
 
   it("rejects invalid payloads with validation_error", async () => {
@@ -234,30 +193,11 @@ describe("POST /api/access/demo-requests", () => {
     expect(body.issues.length).toBeGreaterThan(0);
   });
 
-  it("requires company (name/email alone are not enough)", async () => {
-    const res = await app.request(
-      "/api/access/demo-requests",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
-      },
-      t.env,
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("validation_error");
-  });
-
   it("dedupes a second pending request for the same email", async () => {
     const payload = {
       method: "POST" as const,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Priya",
-        email: "priya@acme.com",
-        company: "Acme",
-      }),
+      body: JSON.stringify({ name: "Priya", email: "priya@acme.com" }),
     };
     await app.request("/api/access/demo-requests", payload, t.env);
     const res = await app.request("/api/access/demo-requests", payload, t.env);
@@ -277,7 +217,10 @@ describe("access review + admin approve", () => {
   let requestId: string;
 
   beforeEach(async () => {
-    t = createTestEnv({ RESEND_API_KEY: "test-key" });
+    t = createTestEnv({
+      SUPER_ADMIN_EMAILS: "admin@familyvault.app",
+      RESEND_API_KEY: "test-key",
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("{}", { status: 200 })),
@@ -323,61 +266,6 @@ describe("access review + admin approve", () => {
     expect(demo.status).toBe("approved");
   });
 
-  it("approves via GET email link without Origin (Gmail click)", async () => {
-    const res = await app.request(
-      `/api/access/review/approve/${reviewToken}`,
-      { method: "GET" },
-      t.env,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toMatch(/text\/html/);
-    expect(res.headers.get("cache-control")).toBe("no-store");
-    const html = await res.text();
-    expect(html).toContain("Access approved");
-    expect(html).not.toContain("<script");
-
-    const grant = t.sqlite
-      .prepare("SELECT status FROM access_grants WHERE email = ?")
-      .get("sam@acme.com") as { status: string };
-    expect(grant.status).toBe("approved");
-  });
-
-  it("approves the legacy SPA query-string email URL on GET /access/review", async () => {
-    const res = await app.request(
-      `/access/review?token=${encodeURIComponent(reviewToken)}&action=approve`,
-      { method: "GET" },
-      t.env,
-    );
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("Access approved");
-    const grant = t.sqlite
-      .prepare("SELECT status FROM access_grants WHERE email = ?")
-      .get("sam@acme.com") as { status: string };
-    expect(grant.status).toBe("approved");
-  });
-
-  it("treats a second GET on the same token as already handled, not an error page", async () => {
-    await app.request(`/api/access/review/approve/${reviewToken}`, {}, t.env);
-    const res = await app.request(
-      `/api/access/review/approve/${reviewToken}`,
-      {},
-      t.env,
-    );
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("Already handled");
-  });
-
-  it("returns HTML 404 for an unknown GET token, not JSON", async () => {
-    const res = await app.request(
-      "/api/access/review/approve/totally-wrong-token-xx",
-      {},
-      t.env,
-    );
-    expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toMatch(/text\/html/);
-    expect(await res.text()).toContain("invalid or has expired");
-  });
-
   it("rejects unknown tokens with 404", async () => {
     const res = await app.request(
       "/api/access/review",
@@ -391,9 +279,10 @@ describe("access review + admin approve", () => {
     expect(res.status).toBe(404);
   });
 
-  it("allows platform admin to approve in-app and forbids plain members", async () => {
-    const admin = seedPlatformAdmin(t);
+  it("allows super_admin to approve in-app and forbids plain members", async () => {
+    const admin = seedSuperAdmin(t);
     const family = seedFamily(t.sqlite, admin.userId);
+    // Plain member in some family
     const member = seedUser(t.sqlite, { email: "member@example.com" });
     t.sqlite
       .prepare(
@@ -423,75 +312,94 @@ describe("access review + admin approve", () => {
       t.env,
     );
     expect(ok.status).toBe(200);
-    const grant = t.sqlite
+
+    const list = await app.request(
+      "/api/access/admin/demo-requests?status=approved",
+      { headers: { Cookie: admin.cookie } },
+      t.env,
+    );
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as { requests: { email: string }[] };
+    expect(listBody.requests.some((r) => r.email === "sam@acme.com")).toBe(true);
+  });
+
+  it("direct grant + revoke roundtrip", async () => {
+    const admin = seedSuperAdmin(t);
+    const grantRes = await app.request(
+      "/api/access/admin/grants",
+      {
+        method: "POST",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "newhire@acme.com", note: "Team" }),
+      },
+      t.env,
+    );
+    expect(grantRes.status).toBe(201);
+
+    const revokeRes = await app.request(
+      "/api/access/admin/grants/revoke",
+      {
+        method: "POST",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "newhire@acme.com" }),
+      },
+      t.env,
+    );
+    expect(revokeRes.status).toBe(200);
+
+    const row = t.sqlite
       .prepare("SELECT status FROM access_grants WHERE email = ?")
-      .get("sam@acme.com") as { status: string };
-    expect(grant.status).toBe("approved");
+      .get("newhire@acme.com") as { status: string };
+    expect(row.status).toBe("revoked");
+  });
+
+  it("GET /auth/me returns appRoles for super_admin", async () => {
+    const admin = seedSuperAdmin(t);
+    const res = await app.request(
+      "/api/auth/me",
+      { headers: { Cookie: admin.cookie } },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      user: { email: string; appRoles: string[] };
+    };
+    expect(body.user.email).toBe("admin@familyvault.app");
+    expect(body.user.appRoles).toContain("super_admin");
   });
 });
 
 describe("access email templates", () => {
-  it("includes approve/reject links for the admin notify mail", () => {
+  it("notify email escapes content and includes approve/reject URLs", () => {
     const html = demoRequestNotifyEmail({
-      name: "Priya",
-      email: "priya@acme.com",
-      company: "Acme",
-      message: "Hello",
-      approveUrl: "https://fam.connect-cloud.workers.dev/api/access/review/approve/a",
-      rejectUrl: "https://fam.connect-cloud.workers.dev/api/access/review/reject/a",
-      adminUrl: "https://app/admin/access",
+      name: `<script>x</script>`,
+      email: "a@b.com",
+      company: `Tom & Co`,
+      message: `"hi"`,
+      approveUrl: "https://vault.example/access/review?token=a&action=approve",
+      rejectUrl: "https://vault.example/access/review?token=a&action=reject",
+      adminUrl: "https://vault.example/admin",
     });
-    expect(html).toContain("Approve access");
-    expect(html).toContain("/api/access/review/approve/");
-    expect(html).toContain("/api/access/review/reject/");
-    expect(html).toContain("priya@acme.com");
-    expect(html).toContain("https://fam.connect-cloud.workers.dev/api/access/review/approve/a");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("Tom &amp; Co");
+    expect(html).toContain("action=approve");
+    expect(html).toContain("action=reject");
+    expect(html).toContain("<table role=\"presentation\"");
+    expect(html).not.toMatch(/<link|src=/);
   });
 
-  it("renders requester confirmation and approval copy", () => {
-    expect(
-      demoRequestReceivedEmail({ name: "Priya", appUrl: "https://app/login" }),
-    ).toContain("We got your request");
-    expect(
-      accessApprovedEmail({ name: "Priya", loginUrl: "https://app/login" }),
-    ).toContain("Sign in with Google");
-  });
-});
-
-describe("unknown access path", () => {
-  it("returns JSON 404 not_found", async () => {
-    const t = createTestEnv();
-    const res = await app.request("/api/access/nope", {}, t.env);
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("not_found");
-  });
-});
-
-describe("access email URL wiring", () => {
-  it("never emits a relative origin for email buttons", () => {
-    expect(absoluteAppUrl({ APP_URL: "" })).toBe(PRODUCTION_APP_ORIGIN);
-    expect(absoluteAppUrl({ APP_URL: "https://fam.connect-cloud.workers.dev/" })).toBe(
-      PRODUCTION_APP_ORIGIN,
-    );
-    expect(absoluteAppUrl({ APP_URL: "http://localhost:5173" })).toBe(
-      "http://localhost:5173",
-    );
-    expect(
-      absoluteAppUrl(
-        { APP_URL: "http://localhost:5173" },
-        "https://fam.connect-cloud.workers.dev/api/access/demo-requests",
-      ),
-    ).toBe(PRODUCTION_APP_ORIGIN);
-    expect(
-      absoluteAppUrl({ APP_URL: "" }, "http://localhost/api/access/demo-requests"),
-    ).toBe(PRODUCTION_APP_ORIGIN);
-  });
-
-  it("keeps Worker-first routing for the email landing path", () => {
-    const wrangler = readFileSync(join(__dirname, "..", "wrangler.jsonc"), "utf8");
-    expect(wrangler).toMatch(/"run_worker_first":\s*\[\s*"\/api\/\*"\s*,\s*"\/access\/review"\s*\]/);
-    const vite = readFileSync(join(__dirname, "..", "vite.config.ts"), "utf8");
-    expect(vite).toContain("/^\\/access\\/review/");
+  it("received + approved templates render safely", () => {
+    const received = demoRequestReceivedEmail({
+      name: "Priya",
+      appUrl: "https://vault.example/login",
+    });
+    expect(received).toContain("Priya");
+    const approved = accessApprovedEmail({
+      name: "Priya",
+      loginUrl: "https://vault.example/login",
+    });
+    expect(approved).toContain("Sign in with Google");
+    expect(approved).toContain("https://vault.example/login");
   });
 });

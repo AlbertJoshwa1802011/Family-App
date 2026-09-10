@@ -1,123 +1,144 @@
 /**
- * Minimal iCalendar (RFC 5545) builder for family events.
- * Used for per-event downloads and the subscribable feed.
+ * iCalendar (RFC 5545) generation for calendar-app integration.
+ * Pure functions — no I/O — so they're unit-testable.
  */
 
-export interface IcsEvent {
-  uid: string;
-  title: string;
-  description?: string | null;
-  location?: string | null;
-  startAt: number;
-  endAt?: number | null;
-  allDay: boolean;
-  status?: "active" | "cancelled";
-}
-
-export interface IcsAllDayItem {
-  uid: string;
-  title: string;
-  startDate: string; // yyyy-mm-dd
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function icsEscape(s: string): string {
-  return s
+function icsEscape(text: string): string {
+  return text
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
+    .replace(/\r?\n/g, "\\n");
 }
 
+/** Unix seconds → ICS UTC datetime (yyyymmddThhmmssZ). */
+function icsDateTime(unixSecs: number): string {
+  return new Date(unixSecs * 1000)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
+}
+
+/** ISO yyyy-mm-dd → ICS all-day date (yyyymmdd). */
+function icsDate(isoDate: string): string {
+  return isoDate.replace(/-/g, "");
+}
+
+/** UTC yyyy-mm-dd from unix seconds. */
+function unixToUtcDate(secs: number): string {
+  return new Date(secs * 1000).toISOString().slice(0, 10);
+}
+
+/** Exclusive next-day date for all-day DTEND. */
+function nextUtcDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+/** Fold long lines at 75 octets per RFC 5545 §3.1 (simple char-based fold). */
 function fold(line: string): string {
   if (line.length <= 75) return line;
   const parts: string[] = [];
   let rest = line;
   parts.push(rest.slice(0, 75));
   rest = rest.slice(75);
-  while (rest.length > 74) {
+  while (rest.length > 0) {
     parts.push(" " + rest.slice(0, 74));
     rest = rest.slice(74);
   }
-  if (rest.length) parts.push(" " + rest);
   return parts.join("\r\n");
 }
 
-function utcStamp(secs: number): string {
-  const d = new Date(secs * 1000);
-  return (
-    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}` +
-    `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
-  );
+export interface IcsEvent {
+  uid: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  startAt: number; // unix seconds
+  endAt?: number | null;
+  allDay: boolean;
+  cancelled?: boolean;
+  /** Monotonic edit counter — Apple/Google use this to replace stale copies. */
+  sequence?: number;
+  /** Unix seconds; written as LAST-MODIFIED. */
+  updatedAt?: number;
 }
 
-function allDayStamp(iso: string): string {
-  return iso.replace(/-/g, "");
+export interface IcsAllDayItem {
+  uid: string;
+  title: string;
+  date: string; // ISO yyyy-mm-dd
+  description?: string | null;
 }
 
-function eventBlock(ev: IcsEvent, nowSecs: number): string {
+function vevent(ev: IcsEvent, nowSecs: number): string[] {
   const lines = [
     "BEGIN:VEVENT",
-    `UID:${ev.uid}@familyvault`,
-    `DTSTAMP:${utcStamp(nowSecs)}`,
+    `UID:${icsEscape(ev.uid)}`,
+    `DTSTAMP:${icsDateTime(nowSecs)}`,
     `SUMMARY:${icsEscape(ev.title)}`,
   ];
+
   if (ev.allDay) {
-    const start = new Date(ev.startAt * 1000);
-    const startIso = `${start.getUTCFullYear()}-${pad(start.getUTCMonth() + 1)}-${pad(start.getUTCDate())}`;
-    const endSecs = ev.endAt && ev.endAt > ev.startAt ? ev.endAt : ev.startAt + 86400;
-    const end = new Date(endSecs * 1000);
-    const endIso = `${end.getUTCFullYear()}-${pad(end.getUTCMonth() + 1)}-${pad(end.getUTCDate())}`;
-    lines.push(`DTSTART;VALUE=DATE:${allDayStamp(startIso)}`);
-    lines.push(`DTEND;VALUE=DATE:${allDayStamp(endIso)}`);
+    const day = unixToUtcDate(ev.startAt);
+    const endDay = ev.endAt ? nextUtcDate(unixToUtcDate(ev.endAt)) : nextUtcDate(day);
+    lines.push(`DTSTART;VALUE=DATE:${icsDate(day)}`);
+    lines.push(`DTEND;VALUE=DATE:${icsDate(endDay)}`);
   } else {
-    lines.push(`DTSTART:${utcStamp(ev.startAt)}`);
-    lines.push(`DTEND:${utcStamp(ev.endAt && ev.endAt > ev.startAt ? ev.endAt : ev.startAt + 3600)}`);
+    lines.push(`DTSTART:${icsDateTime(ev.startAt)}`);
+    lines.push(`DTEND:${icsDateTime(ev.endAt ?? ev.startAt + 3600)}`);
   }
+
   if (ev.location) lines.push(`LOCATION:${icsEscape(ev.location)}`);
   if (ev.description) lines.push(`DESCRIPTION:${icsEscape(ev.description)}`);
-  if (ev.status === "cancelled") lines.push("STATUS:CANCELLED");
+  if (ev.cancelled) lines.push("STATUS:CANCELLED");
+  lines.push(`SEQUENCE:${Math.max(0, ev.sequence ?? 0)}`);
+  lines.push(`LAST-MODIFIED:${icsDateTime(ev.updatedAt ?? nowSecs)}`);
+
   lines.push("END:VEVENT");
-  return lines.map(fold).join("\r\n");
+  return lines;
 }
 
-function expiryBlock(item: IcsAllDayItem, nowSecs: number): string {
-  const next = new Date(item.startDate + "T00:00:00Z");
-  next.setUTCDate(next.getUTCDate() + 1);
-  const endIso = `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
-  const lines = [
+function veventAllDay(item: IcsAllDayItem, nowSecs: number): string[] {
+  return [
     "BEGIN:VEVENT",
-    `UID:${item.uid}@familyvault`,
-    `DTSTAMP:${utcStamp(nowSecs)}`,
+    `UID:${icsEscape(item.uid)}`,
+    `DTSTAMP:${icsDateTime(nowSecs)}`,
     `SUMMARY:${icsEscape(item.title)}`,
-    `DTSTART;VALUE=DATE:${allDayStamp(item.startDate)}`,
-    `DTEND;VALUE=DATE:${allDayStamp(endIso)}`,
+    `DTSTART;VALUE=DATE:${icsDate(item.date)}`,
+    `DTEND;VALUE=DATE:${icsDate(nextUtcDate(item.date))}`,
+    ...(item.description ? [`DESCRIPTION:${icsEscape(item.description)}`] : []),
+    "SEQUENCE:0",
+    `LAST-MODIFIED:${icsDateTime(nowSecs)}`,
     "END:VEVENT",
   ];
-  return lines.map(fold).join("\r\n");
 }
 
 export function buildCalendar(opts: {
+  name: string;
   events: IcsEvent[];
-  expiries?: IcsAllDayItem[];
+  allDayItems?: IcsAllDayItem[];
   nowSecs?: number;
-  name?: string;
+  /** Hint clients to re-fetch often (Apple Calendar / Google subscribed feeds). */
+  refreshMinutes?: number;
 }): string {
-  const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
-  const blocks = [
+  const now = opts.nowSecs ?? Math.floor(Date.now() / 1000);
+  const refresh = Math.max(5, opts.refreshMinutes ?? 15);
+  const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Family Vault//EN",
     "CALSCALE:GREGORIAN",
-    `X-WR-CALNAME:${icsEscape(opts.name ?? "Family Vault")}`,
-    ...opts.events.map((e) => eventBlock(e, nowSecs)),
-    ...(opts.expiries ?? []).map((e) => expiryBlock(e, nowSecs)),
-    "END:VCALENDAR",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icsEscape(opts.name)}`,
+    // RFC 7986 + Google's X-PUBLISHED-TTL — ask clients to poll often.
+    `REFRESH-INTERVAL;VALUE=DURATION:PT${refresh}M`,
+    `X-PUBLISHED-TTL:PT${refresh}M`,
   ];
-  return blocks.join("\r\n") + "\r\n";
-}
 
-export { icsEscape };
+  for (const ev of opts.events) lines.push(...vevent(ev, now));
+  for (const item of opts.allDayItems ?? []) lines.push(...veventAllDay(item, now));
+
+  lines.push("END:VCALENDAR");
+  return lines.map(fold).join("\r\n") + "\r\n";
+}

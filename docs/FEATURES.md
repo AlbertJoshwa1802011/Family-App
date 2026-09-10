@@ -10,21 +10,35 @@ Living reference for what is built, what is planned, and what gaps remain. Read 
 |---|---|---|
 | Phase 0 | ✅ Complete | Scaffold, schema, route stubs, UI shell, security headers |
 | Phase 0.5 | ✅ Complete | Calendar/Events/Tasks/Contacts schema + API stubs + frontend |
-| Phase 1 | ⏳ Planned | Real Google OAuth, sessions, family CRUD, invites |
-| Phase 2 | ⏳ Planned | Document upload/download via Google Drive, full CRUD |
-| Phase 2.5 | ⏳ Planned | Connect Events/Tasks/Contacts stubs to D1 + auth |
-| Phase 3 | ⏳ Planned | Reminders, notifications, cron |
-| Phase 4 | ⏳ Planned | PWA offline, biometric lock, search |
-| Phase 5 | ⏳ Planned | Hardening, a11y, E2E tests, authz matrix |
+| Phase 1 | ✅ Complete | Real Google OAuth, sessions, family CRUD, invites (email-bound) |
+| Phase 2 | ✅ Complete | Document CRUD + Drive proxy + private-visibility enforcement + full frontend flows |
+| Phase 2.5 | ✅ Complete | Events/Tasks/Contacts on D1 + auth, wired frontend (composers, forms) |
+| Phase 3 | ✅ Complete | Reminder cron (range + dedupe), in-app notifications, Resend email, prefs |
+| Phase 5 (partial) | ✅ Complete | CSRF Origin/Referer checks, KV rate limiting, authz-matrix tests, real-D1 integration suite |
+| Premium batch | ✅ Complete | Family chat + @mentions, tag-to-remind, dependents + member profiles, search + AI categories, ICS calendar feed, HTML email reports + weekly digest, Instagram-style nav |
+| Assistant + expenses | ✅ Complete | In-app Gemini assistant (Claude fallback; D1 context + tools), family expenses, task due-date emails at 7/2/1 days |
+| Money settlements | ✅ Complete | Fund ledger (received → in hand → settled to destinations like Mom/Church) on the Money page |
+| Phase 4 | ⏳ Planned | PWA offline, biometric lock, full-text search |
+| Phase 5 (rest) | ⏳ Planned | a11y pass, E2E browser tests, component tests |
 | Phase 6 | ⏳ Planned | WhatsApp reminders, push, OCR, shared Drive |
+| Workspace intelligence | ✅ Complete | Meeting loop (notes/action-items/follow-ups), related docs + tags, travel buffer, resource links (YouTube/URL), conflict UI |
+
+See `docs/TESTING.md` for the test process/catalog and `docs/DEPLOYMENT.md` for
+the deployment runbook. Roles/segmentation roadmap: `docs/PLAN.md`.
 
 ---
 
-## 2. Database Schema (21 tables, 4 migrations)
+## 2. Database Schema (36 tables, 17 migrations)
 
 Schema source of truth: `worker/db/schema.ts`.  
 Migrations: `0000` (13 tables), `0001` (events cluster), `0002` (utility tables),
-`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents).
+`0003` (family_members → nullable user_id + member_type/display_name/date_of_birth for dependents),
+`0004` (chat_messages + digest_log), `0005` (nested tasks: parent_task_id, priority, completed_at),
+`0006` (expenses + assistant_messages + task_reminders_log), `0010` (settlement_destinations + money_movements),
+`0011` (notebooks + notes), `0012` (member module access), `0013` (resource_links + travel buffer + meeting notes), `0014` (family_labels — custom types/categories with emoji),
+`0015` (reminder windows day-of + document calendar renew markers),
+`0016` (event_google_sync — Google Calendar push mapping),
+`0017` (location_sharing_prefs + location_points — opt-in travel trail).
 Validate any new migration with `python3 scripts/validate_migrations.py`.
 
 ### All Tables
@@ -48,94 +62,129 @@ Validate any new migration with `python3 scripts/validate_migrations.py`.
 | `event_attendees` | Tagged family members per event (CASCADE) | 0001 |
 | `event_documents` | Linked documents per event (CASCADE) | 0001 |
 | `event_reminders_log` | Dedupe for event cron reminders (separate from doc reminders) | 0001 |
-| `tasks` | Family to-dos, assignable, linked to doc/event | 0002 |
+| `event_google_sync` | Maps each Family Vault event → per-user Google Calendar event id | 0016 |
+| `location_sharing_prefs` | Per-member opt-in for location sharing | 0017 |
+| `location_points` | GPS breadcrumbs for travel trails | 0017 |
+| `tasks` | Family to-dos with nested subtasks, priority, complete/archive | 0002 + 0005 |
 | `contacts` | Emergency contacts per family | 0002 |
-| `notebooks` | Note folders (Bible Study, Journal, …) | 0020 |
-| `notes` | Free-form notes (private/family, soft-delete trash) | 0020 |
+| `notebooks` | Note folders (Bible Study, Journal, …) | 0011 |
+| `notes` | Free-form notes (private/family, soft-delete trash) | 0011 |
 | `member_health` | Blood type, allergies, medications per member | 0002 |
 | `document_comments` | Threaded comments on documents (soft-delete) | 0002 |
+| `digest_log` | Dedupe for Monday weekly digest | 0004 |
+| `chat_messages` | Family chat (soft-delete) | 0004 |
+| `expenses` | Family spending log (integer cents) | 0006 |
+| `settlement_destinations` | Named settlement tracks (Mom, Church, …) | 0010 |
+| `money_movements` | Fund ledger: received into pot / settled to a destination | 0010 |
+| `task_reminders_log` | Dedupe for task due-date reminders | 0006 |
+| `assistant_messages` | Per-user assistant thread | 0006 |
+| `resource_links` | YouTube / URL / photo refs on events/tasks/notes/docs | 0013 |
+| `family_labels` | Family-scoped custom type/category chips + emoji | 0014 |
 
 ### Key Design Decisions
 
 - **All timestamps**: Unix epoch integers (seconds) via `DEFAULT (unixepoch())`. Exception: expiry/issued/due dates are ISO `yyyy-mm-dd` text (calendar dates, not instants).
-- **Events `type` vs `status`**: `type` = what kind (`gathering|appointment|milestone|other`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Events `type` vs `status`**: `type` = what kind (built-ins `gathering|appointment|milestone|other` plus family customs via `family_labels`). `status` = lifecycle (`active|cancelled|trashed`). Never conflate — cancelled events stay visible (with strikethrough), trashed events are filtered out.
+- **Custom labels**: classification fields (event type, document/expense category, note kind, contact relationship) accept free slugs; `family_labels` stores family-created options with emoji. Lifecycle/authz enums stay fixed.
 - **`event_reminders_log` is separate from `reminders_log`**: Different unique constraint keys (`event_id` vs `document_id`); ON DELETE cascade targets differ. Cron handles both independently.
 - **Tasks use ON DELETE SET NULL for FKs**: Deleting a document/event/member does not cascade-delete tasks — the task survives with null FKs. Handle null `relatedDocumentId` gracefully in UI.
+- **Nested tasks**: `parent_task_id` self-FK, max depth 5 (root = 0). D1 cascades are advisory — deleting a task explicitly deletes its descendants in app code. Completing a **root** sets `completed_at` and hides it from To-do / Due / Mine; leftover open subtasks are promoted to roots. Completing a **subtask** keeps it nested (checked, faded) under its still-open parent so the checklist stays readable. `priority` is `low|medium|high` (default medium). The Tasks screen has List and Board layouts plus Due / Newest / Oldest / Priority sort.
 - **D1 FK cascades are advisory**: D1 does not persistently honor `PRAGMA foreign_keys=ON`. Explicit multi-statement deletes are required in app code for correctness (see ARCHITECTURE.md).
-- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|other`; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
+- **Notes**: Apple Notes–style folders (`notebooks`) + `notes`. Default visibility is **private** (owner/admin only, same filter as documents). Soft-delete via `deleted_at` (Recently Deleted); second delete is permanent. Deleting a notebook explicitly nulls `notes.notebook_id`. `kind` = `general|bible|journal|meeting|other`; optional `event_id` for meeting notes; optional `note_date` (yyyy-mm-dd) for daily/Bible study.
 
 ---
 
 ## 3. API Surface
 
-All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all `/api/*`. Unknown `/api/*` paths return `{ error: "not_found" }` JSON 404.
+All routes live under `/api` and are **fully implemented against D1**.
+Middleware on `/api/*`: `requestId` → `logger` → `secureHeaders` → **CSRF
+Origin/Referer check on mutations** → 1 MiB `bodyLimit`. Unknown `/api/*`
+paths return `{ error: "not_found" }` JSON 404. Every route below (except
+`/health`, OAuth, and the capability-URL calendar feed) requires a session;
+family-scoped routes verify active membership; document routes additionally
+enforce private visibility (`isDocHiddenFrom`, 404 not 403). RL = KV rate limit.
 
-### Route Status Legend
-- **Stub-200**: Returns empty data (e.g. `{ events: [] }`)
-- **Stub-501**: Returns `{ error: "not_implemented", phase: N }`
-- **Val-501**: Zod validation wired; stub returns 501 on valid input; 400 on invalid
-- **Real**: Actually queries D1 and returns live data
-
-| Method | Path | Status | Phase |
-|---|---|---|---|
-| GET | `/health` | Real | 0 |
-| GET | `/auth/me` | Stub-200 (`user:null`) | 0 |
-| POST | `/auth/google/start` | Stub-501 | 1 |
-| GET | `/auth/google/callback` | Stub-501 | 1 |
-| POST | `/auth/logout` | Stub-200 (`ok:true`) | 0 |
-| GET | `/families` | Stub-200 | 1 |
-| POST | `/families` | Val-501 | 1 |
-| GET | `/families/:id` | Stub-501 | 1 |
-| GET | `/families/:id/members` | Stub-200 | 1 |
-| GET | `/families/me/members` | Stub-200 | 1 |
-| PATCH | `/families/:id/members/:mid` | Val-501 | 1 |
-| POST | `/families/:id/invites` | Val-501 | 1 |
-| POST | `/invites/:token/accept` | Stub-501 | 1 |
-| GET | `/families/:id/activity` | Stub-200 | 5 |
-| GET | `/documents` | Stub-200 | 2 |
-| POST | `/documents` | Val-501 | 2 |
-| GET | `/documents/:id` | Stub-501 | 2 |
-| PATCH | `/documents/:id` | Val-501 | 2 |
-| DELETE | `/documents/:id` | Stub-501 | 2 |
-| POST | `/documents/:id/files` | Stub-501 | 2 |
-| GET | `/documents/:id/files/:fid/download` | Stub-501 | 2 |
-| GET | `/documents/:id/comments` | Stub-200 | 2 |
-| POST | `/documents/:id/comments` | Val-501 | 2 |
-| DELETE | `/documents/:id/comments/:cid` | Stub-501 | 2 |
-| GET | `/notifications` | Stub-200 | 3 |
-| POST | `/notifications/:id/read` | Stub-200 | 3 |
-| GET | `/events` | Stub-200 | 2.5 |
-| POST | `/events` | Val-501 | 2.5 |
-| GET | `/events/:id` | Stub-501 | 2.5 |
-| PATCH | `/events/:id` | Val-501 | 2.5 |
-| DELETE | `/events/:id` | Stub-501 | 2.5 |
-| POST | `/events/:id/cancel` | Stub-501 | 2.5 |
-| POST | `/events/:id/attendees` | Val-501 | 2.5 |
-| DELETE | `/events/:id/attendees/:memberId` | Stub-501 | 2.5 |
-| GET | `/tasks` | Stub-200 | 2.5 |
-| POST | `/tasks` | Val-501 | 2.5 |
-| GET | `/tasks/:id` | Stub-501 | 2.5 |
-| PATCH | `/tasks/:id` | Val-501 | 2.5 |
-| DELETE | `/tasks/:id` | Stub-501 | 2.5 |
-| GET | `/contacts` | Stub-200 | 2.5 |
-| POST | `/contacts` | Val-501 | 2.5 |
-| GET | `/contacts/:id` | Stub-501 | 2.5 |
-| PATCH | `/contacts/:id` | Val-501 | 2.5 |
-| DELETE | `/contacts/:id` | Stub-501 | 2.5 |
-| GET/POST | `/notes/notebooks` · PATCH/DELETE `/notes/notebooks/:id` | Real | — |
-| GET/POST | `/notes` · GET/PATCH/DELETE `/notes/:id` · POST `/notes/:id/restore` | Real | — |
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/health` | liveness |
+| GET | `/auth/me` | user (+ `appRoles`) + families (null when signed out) |
+| GET/POST | `/auth/google/start` | PKCE + state in KV · GET 302s to Google (phones) · POST `{ url }` · RL 10/min/IP |
+| GET | `/auth/google/callback` | token exchange, jose ID-token verify, **closed-signup gate**, session cookie · RL 10/min/IP |
+| POST | `/auth/logout` | revokes session server-side |
+| POST | `/access/demo-requests` | public demo request → email admin + requester · RL 5/h/IP |
+| POST | `/access/review` | tokenized approve/reject from email link · RL 20/h/IP |
+| GET | `/access/admin/demo-requests` | list demo requests · **super_admin** |
+| POST | `/access/admin/demo-requests/:id/approve\|reject` | in-app review · **super_admin** |
+| GET/POST | `/access/admin/grants` · POST `/access/admin/grants/revoke` | invite/revoke app access by email · **super_admin** |
+| GET/POST | `/families` | list / create (creator = owner) |
+| GET | `/families/:id` · `/families/:id/members` · `/families/me/members` | details / member lists |
+| POST | `/families/:id/members` | add **dependent** (admin+) |
+| PATCH | `/families/:id/members/:mid` | role change / remove (admin+; owner protected) |
+| POST | `/families/:id/invites` | email-bound single-use token + HTML invite email · admin+ · RL 20/h |
+| POST | `/families/invites/:token/accept` | accepting account's email must match |
+| GET | `/families/:id/activity` | audit feed w/ actor names |
+| GET | `/documents?familyId&q&member` | visibility-filtered list + search + per-member filter |
+| POST | `/documents` | create (subjectMemberId family-scope-validated) |
+| POST | `/documents/suggest-category` | heuristics → Claude (if `ANTHROPIC_API_KEY`) · RL 30/min |
+| GET/PATCH/DELETE | `/documents/:id` | get / update (null clears) / soft-trash |
+| POST | `/documents/:id/remind` | tag a member → notification + email · RL 20/h |
+| POST | `/documents/:id/files/upload-url` | Drive resumable URL · RL 30/min |
+| GET/POST | `/documents/:id/files` | version list / record after Drive upload |
+| GET | `/documents/:id/files/:fid/download` | streaming proxy, `attachment` + nosniff, CSRF-checked GET |
+| GET/POST | `/documents/:id/comments` · DELETE `.../:cid` | comments (soft-delete; author or admin+) |
+| GET | `/documents/:id/related` | advisory related-doc ranking (visibility filtered) |
+| GET/POST | `/tags?familyId` · PUT `/tags/documents/:docId` | family tags + replace document tag set |
+| GET/POST/DELETE | `/links` (+`/:id`) | YouTube/URL/photo resource links on event/task/note/document |
+| GET/POST | `/labels?familyId&domain` · PATCH/DELETE `/labels/:id` | family type/category chips + emoji (builtins merged with customs) · RL 30/min on create |
+| GET | `/notifications?unreadOnly` | inbox + unread count |
+| POST | `/notifications/:id/read` · `/notifications/read-all` | mark read |
+| GET/PUT | `/notifications/prefs` | email/push toggles + lead-time windows |
+| GET/POST | `/events?familyId&from&to` | range list / create (attendees+docs family-scope-validated; optional `travelBufferMins`) |
+| GET/PATCH/DELETE | `/events/:id` | detail w/ attendees + linked `documents` / update (incl. `documentIds` replace + travel buffer) / trash |
+| POST | `/events/:id/cancel` | cancelled stays visible |
+| POST | `/events/:id/action-items` | create tasks linked via `relatedEventId` |
+| POST | `/events/:id/follow-up` | in-app `meeting_followup` to attendees (not actor) |
+| GET | `/events/:id/ics` | optional .ics (Apple); Google Calendar is API-pushed on save |
+| POST/DELETE | `/events/:id/attendees(/:memberId)` | manage attendees |
+| GET/POST | `/tasks` · GET/PATCH/DELETE `/tasks/:id` | nested tasks (parent/priority/complete; assignee/related family-scope-validated; null clears). List views: `todo` `priority` `due` `recent` `mine` `completed`. `?q=` search includes ancestors |
+| GET/POST | `/contacts` · GET/PATCH/DELETE `/contacts/:id` | emergency contacts |
+| GET/POST | `/notes/notebooks` · PATCH/DELETE `/notes/notebooks/:id` | note folders; DELETE unfiles notes |
+| GET/POST | `/notes` · GET/PATCH/DELETE `/notes/:id` · POST `/notes/:id/restore` | notebook notes (private visibility filtered; soft-delete trash; `?q` `?kind` `?notebookId` `?trashed=1`) |
+| GET/POST/DELETE | `/chat` (+`/:id`) | family chat: paginated, @mentions notify, soft-delete · RL 60/min |
+| GET/POST | `/expenses?familyId` · GET/PATCH/DELETE `/expenses/:id` | spending log (amount in major units; stored as cents) |
+| GET/PUT | `/locations/prefs?familyId` | opt-in location sharing (required before points are accepted) |
+| POST | `/locations/points` | batch GPS breadcrumbs (max 100) · RL 120/min · requires sharing on |
+| GET | `/locations/track?familyId&userId&week=` | trail points for a week (0=this UTC week) or `from`/`to` |
+| GET | `/locations/stats?familyId&userId&week=` | km, trips, stops, daily breakdown (haversine) |
+| GET | `/locations/members?familyId` | who is sharing + last known point (only when opted in) |
+| GET | `/money/summary?familyId` | settlement balances (available / settled / inHand) + destinations + movements |
+| GET/POST | `/money/destinations` · PATCH/DELETE `/money/destinations/:id` | named settlement tracks; DELETE archives if used |
+| GET/POST | `/money/movements` · GET/PATCH/DELETE `/money/movements/:id` | received / settled ledger entries |
+| GET/POST | `/assistant?familyId` | private Gemini assistant (Claude fallback); D1 snapshot + tools · RL 20/10min · needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` |
+| POST | `/calendar/feed-token` | mint/rotate capability URL (optional Apple/Outlook subscribe) |
+| GET | `/calendar/feed/:token.ics` | subscribable feed (events + expiries); Google Calendar is primarily **pushed** via Calendar API on event create/update/cancel |
 
 ### Zod Validation Rules (Critical Constraints)
 
-**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` enum `["gathering","appointment","milestone","other"]`; `attendeeMemberIds` array.
+**POST /events:** `title` min 1/max 200; `startAt` positive integer; `endAt` must be ≥ `startAt` (cross-field refine); `type` slug (built-ins + family customs via `/labels`); `attendeeMemberIds` array.
 
-**POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `status` (update only) enum `["open","done","archived"]`.
+**POST /tasks:** `title` min 1/max 300; `dueDate` regex `^\d{4}-\d{2}-\d{2}$` (zero-padded); `priority` enum `["low","medium","high"]` (default medium); `parentTaskId` must belong to the same family; nesting deeper than 5 returns `max_task_depth`. **PATCH:** `status` enum `["open","done","archived"]` (done sets `completedAt`, reopen clears it); `parentTaskId` null promotes to root; cycle → `task_cycle`.
 
 **POST /contacts:** `name` min 1/max 200; `phone` regex allows `+`, digits, spaces, `-`, `(`, `)`, `.`; `email` must be valid or empty string.
 
-**POST /documents:** `familyId` required; `title` min 1/max 300; `visibility` enum `["family","private"]`; `expiryDate`/`issuedDate` regex `^\d{4}-\d{2}-\d{2}$`.
+**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` slug (built-ins `general|bible|journal|other` + customs); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
 
-**POST /notes:** `title` max 200 (default `""`); `body` max 100000 (default `""`); `kind` enum `general|bible|journal|other` (default general); `visibility` `family|private` (default **private**); `noteDate` yyyy-mm-dd or null; `notebookId` must belong to the same family → else `invalid_notebook_id`. **DELETE** soft-trashes; DELETE again permanently removes. **POST /notes/:id/restore** undeletes.
+**POST /expenses:** `amount` positive number (major units, stored as cents); `currency` `/^[A-Z]{3}$/` default INR; `category` slug (built-ins + customs); `spentOn` yyyy-mm-dd.
+
+**POST /labels:** `familyId`; `domain` `event_type|document_category|expense_category|note_kind|contact_relationship`; `label` 1–40; `emoji` 1–16; optional `slug`. Max 50 customs per domain.
+
+**PUT /locations/prefs:** `familyId`; `enabled` boolean. **POST /locations/points:** `points[]` of `{lat,lng,recordedAt}` (optional accuracy/speed/heading); max 100; rejected unless sharing enabled → `403 location_sharing_disabled`. Track/stats for another member require that member's sharing to be on → otherwise `403`.
+
+**POST /money/destinations:** `name` 1–80 chars; `kind` enum `person|organization|other` (default other). Duplicate active names in the same family → `409 destination_exists`.
+
+**POST /money/movements:** `type` `received|settled`; `amount` positive major units; `movedOn` yyyy-mm-dd; `destinationId` **required** when settled, **forbidden** when received. Cross-family destination → `400 invalid_destination_id`. Balances: `available = Σ received`, `settled = Σ settled`, `inHand = available − settled`.
+
+**POST /assistant:** `familyId` required; `message` min 1 / max 2000. Returns 503 `ai_not_configured` without `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`. Gemini is preferred when both are set. GET includes `provider: "gemini" | "anthropic" | null`.
 
 ---
 
@@ -154,22 +203,37 @@ All routes live under `/api`. Middleware: `logger()` + `secureHeaders()` on all 
 | `/calendar/events/:id` | `EventDetailPage` | Yes |
 | `/calendar/events/:id/edit` | `EventForm` | Yes |
 | `/tasks` | `Tasks` | Yes |
+| `/tasks/:id` | `TaskDetailPage` | Yes |
 | `/contacts` | `Contacts` | Yes |
 | `/notes` | `Notes` | Yes |
 | `/notes/:id` | `NoteDetailPage` | Yes |
+| `/chat` | `Chat` | Yes |
+| `/assistant` | `Assistant` | Yes |
+| `/expenses` | `Expenses` (Money: Settlements + Expenses) | Yes |
+| `/locations` | `Locations` (opt-in trail + weekly km/stats) | Yes |
 | `/family` | `FamilyPage` | Yes |
 | `/settings` | `Settings` | Yes |
 | `*` | `NotFound` | No |
 
-### Bottom Navigation
+### Bottom Navigation (Instagram-style)
 
-5 tabs: Home → Docs → Calendar → Family → Settings. Active state: `text-vault-300` + `strokeWidth 2.4`. Inactive: `text-fg-subtle` + `strokeWidth 1.8`. Tasks (`/tasks`), Notes (`/notes`), and Contacts (`/contacts`) are reached from the Dashboard Apps grid (keeps the nav at 5 items).
+5 tabs: **Home → Docs → Chat → Activity → Family**. Activity carries a live
+unread badge (30s polling of `/notifications?unreadOnly=1`). Settings is behind
+the gear on the Family tab (profile-style); Calendar, Tasks, Contacts, Money and the Assistant are in
+the Dashboard "Quick access" grid (including Location). A **sparkles icon in the AppBar** on every
+family screen opens the assistant as a sheet (stay on the current page). Active state: `text-vault-300` +
+`strokeWidth 2.4`; inactive: `text-fg-subtle` + `strokeWidth 1.8`.
 
 ### Key Libraries
 
 - **`src/lib/eventTime.ts`**: `formatEventDate`, `formatEventTime`, `formatMonthYear`, `eventMonthKey`, `eventTypeColor`
 - **`src/lib/expiry.ts`**: `expiryStatus` — UTC-based, tone thresholds: ≤0d danger, ≤7d danger, ≤30d warning, >30d success
 - **`src/lib/api.ts`**: Same-origin fetch wrapper; throws `ApiError`; 204 → `undefined`
+- **`src/lib/taskTree.ts`**: nested-task forest, views (`todo` `due` `recent` `mine` `completed`), client sorts (`due` `added_desc` `added_asc` `priority`), and `withDoneChildrenUnderOpenParents` so completed subtasks stay visible under an open parent. List vs Board is UI-only; API `view=priority` is unchanged.
+
+### Tasks UI
+
+`/tasks` is a nested checklist. **To do** (default) shows only in-progress work; completed roots live under the **Completed** filter. Layout segmented control: **List** (tree rails + first-level expanded) and **Board** (High / Medium / Low columns, subtasks nested inside each card; tap the flag to cycle priority). Sort chips apply to both layouts. Search expands matching branches.
 
 ### Date.now() in Render Rule
 
@@ -183,51 +247,46 @@ ESLint rule `react-hooks/purity` will flag `Date.now()` in render as impure. The
 
 ## 5. The 5 Most Critical Missing Features
 
-### 5.1 Per-Document Private Visibility Enforcement ⚠️ SECURITY-CRITICAL
+### 5.1 Per-Document Private Visibility Enforcement ✅ ENFORCED + TESTED
 
-**Schema:** `documents.visibility` (`family|private`) exists.  
-**API:** Not enforced in any current stub. When Phase 2 implements list/get/download, it MUST filter:
-```sql
-WHERE (visibility = 'family' OR owner_user_id = :current_user OR role IN ('owner','admin'))
-```
-**Risk:** Without this, a `member`-role user can read another member's private documents (passport, medical, financial). This is a PII leak.  
-**Phase:** Phase 2 (must not ship document endpoints without this).  
-**Test needed:** Authz-matrix test asserting member cannot fetch another member's private document.
+**Implemented:** `visibilityWhere()` filters every list; `isDocHiddenFrom()`
+guards get/update/delete/download/comments/file-list/upload-url/file-record.
+Hidden docs return **404** (never 403) so existence isn't revealed.
+**Tested:** `tests/authz-matrix.test.ts` covers the full matrix (member vs
+doc-owner vs admin vs owner vs non-member) across all surfaces.
 
-### 5.2 Member Profiles with Per-Member Document View
+### 5.2 Member Profiles with Per-Member Document View ✅ DONE
 
-**Schema:** `documents.subject_member_id` exists for per-member document assignment.  
-**Gap:** `FamilyPage` was an empty state; it now shows a member list UI but requires real data from Phase 1 (`GET /families/:id/members`). Per-member document filtering (`WHERE subject_member_id = :memberId`) has no UI surface.  
-**What to build in Phase 1:** Real member list endpoint → click member → profile page → their documents  
-**Also needed:** `member_health` table has no API or UI yet (health notes per member)
+Member list links to `/family/members/:id` (profile + that member's documents
+via `GET /documents?member=`); DocumentForm has a "Belongs to" picker
+(`subjectMemberId`, family-scope-validated). **Still open:** `member_health`
+table has no API or UI yet (health notes per member).
 
-### 5.3 Document Comments
+### 5.3 Document Comments ✅ DONE
 
-**Schema:** `document_comments` fully defined (soft-delete, compound index).  
-**API:** `GET/POST /documents/:id/comments` and `DELETE /documents/:id/comments/:cid` are stubbed but not connected to D1.  
-**UI:** `DocumentDetail` has no comments section.  
-**Phase:** Phase 2 — implement alongside document detail UI.
+API live (`GET/POST /documents/:id/comments`, `DELETE .../:cid`, soft-delete,
+author-or-admin delete, visibility-gated) + comments section on DocumentDetail.
 
-### 5.4 Activity Feed Write Path
+### 5.4 Activity Feed Write Path ✅ DONE
 
-**Schema:** `audit_log` exists.  
-**Gap:** Nothing writes to `audit_log` yet. The read path (`GET /families/:id/activity`) is stubbed. But if Phase 2 document mutations don't call `insertAuditEvent()`, the audit log will be permanently empty for all early actions.  
-**Must-do in Phase 2:** Add `insertAuditEvent(db, { familyId, actorUserId, action, targetType, targetId })` helper and call it from: document create/upload/download/delete, family invite, member remove.  
-**Read path:** Phase 5.
+`insertAuditEvent()` is called from family/member/invite/document/event
+mutations; `GET /families/:id/activity` joins actor names and feeds the
+Family page "Recent activity" section. Keep adding audit calls to NEW mutations.
 
-### 5.5 Child / Non-User Family Members ✅ SCHEMA DONE
+### 5.5 Child / Non-User Family Members ✅ DONE
 
-**Resolved (migration 0003):** `family_members.user_id` is now **nullable**, plus new columns
-`member_type` (`user|dependent`), `display_name`, and `date_of_birth`. Dependents (children,
-elderly relatives without a Google account) can be represented; NULL user_ids are distinct in the
-unique index so multiple dependents coexist in one family.  
-**Still TODO (Phase 1 API/UI):** `POST /families/:id/members` to create a dependent (name only,
-no invite); member-list UI to add/manage dependents. The EventForm attendee picker already renders
-`name ?? email ?? "Member"`, so it works structurally once data flows.
+Migration 0003 (nullable `user_id`, `member_type`, `display_name`,
+`date_of_birth`) + `POST /families/:id/members` (admin+) + add-dependent UI on
+the Family page. Dependents appear in attendee pickers, "Belongs to", and
+member profiles; they are excluded from notification/mention delivery (no account).
 
 ---
 
 ## 6. Test Coverage Map
+
+**358 tests across 23 files** — see `docs/TESTING.md` for the authoritative
+catalog (contract, integration-on-real-D1, authz matrix, CSRF/rate-limit,
+pure-unit, stress). The table below is the historical Phase-0.5 snapshot.
 
 **136 tests across 5 files** (all passing as of Phase 0.5).
 

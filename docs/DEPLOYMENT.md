@@ -1,64 +1,135 @@
+# Family Vault — Deployment Guide
 
-## 5. Reminders, email and the scheduler
+Step-by-step path from this repo to a live Cloudflare Workers deployment, plus
+the CI/CD and operations checklist. The app is **one Worker**: SPA assets +
+`/api/*` + daily cron — a single deploy unit, no CORS.
 
-Reminders are driven entirely by the Worker's **Cron Trigger**
-(`wrangler.jsonc` → `triggers.crons`, currently `0 8 * * *` = 08:00 UTC daily).
-Cloudflare invokes `scheduled()` on that schedule whether or not anybody has
-opened the site, so a commitment configured months ago still emails on time.
-The daily run does three things:
+---
 
-1. `runExpiryReminders` — document expiries and upcoming events.
-2. `runCommitmentReminders` — materialises upcoming commitment due dates,
-   emails/notifies inside each commitment's lead time, and auto-logs the
-   expense for commitments marked "record automatically".
-3. `purgeExpiredSessions` — session cleanup.
+## 1. Prerequisites
 
-### Delivery address
+- Cloudflare account (Workers Paid recommended for D1 production limits).
+- Google Cloud project (OAuth consent screen + Web OAuth client).
+- Optional: Resend account for reminder emails.
+- `npx wrangler login` once on the deploying machine.
 
-Each member chooses where their reminders go, in **Money settings → Reminder
-emails**. Blank means "use the Google address I sign in with". The value is
-stored in `reminder_prefs.reminder_email`.
-
-To set it for a user directly:
+## 2. One-time provisioning
 
 ```bash
-npx wrangler d1 execute family-vault-db --remote --command \
-  "UPDATE reminder_prefs SET reminder_email='someone@example.com' WHERE user_id='<USER_ID>'"
+# 2.1 D1 database — paste the returned id into wrangler.jsonc d1_databases[0].database_id
+npx wrangler d1 create family-vault-db
+
+# 2.2 KV namespace — paste the id into wrangler.jsonc kv_namespaces[0].id
+npx wrangler kv namespace create KV
+
+# 2.3 Apply migrations to the remote database
+npx wrangler d1 migrations apply family-vault-db --remote
 ```
 
-(If the user has never opened notification settings there may be no row yet —
-saving once in the UI creates it.)
+### 2.4 Google OAuth client
+In Google Cloud Console → Credentials → OAuth client (Web application):
 
-### Sender address — important
+- Authorized redirect URI: `https://<your-domain>/api/auth/google/callback`
+- Scopes used: `openid email profile` +
+  `https://www.googleapis.com/auth/drive.file` (app-created Drive files) +
+  `https://www.googleapis.com/auth/calendar.events` (push Family Vault events
+  into each user's primary Google Calendar). Enable **Google Drive API** and
+  **Google Calendar API** on the GCP project. After adding Calendar scope,
+  existing users must sign out and sign back in once so Google re-consents.
 
-`EMAIL_FROM` **must be an address on a domain verified with Resend**. Email
-providers do not let you send *from* an arbitrary personal mailbox, so the
-signed-in Google address cannot be used as the sender; it is only ever the
-recipient. Until a domain is verified and `EMAIL_FROM` points at it, `sendEmail`
-will be rejected by Resend and reminders will not arrive.
+### 2.5 Secrets (never in wrangler.jsonc, never committed)
 
 ```bash
-npx wrangler secret put RESEND_API_KEY
-# EMAIL_FROM can be a var in wrangler.jsonc or a secret
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put SESSION_SECRET      # long random string
+npx wrangler secret put RESEND_API_KEY      # optional; email is a no-op without it
+npx wrangler secret put GEMINI_API_KEY      # optional; in-app family assistant
+                                            # (preferred over Anthropic when both set;
+                                            #  /api/assistant returns 503 without either)
+npx wrangler secret put ANTHROPIC_API_KEY   # optional; AI category suggestions
+                                            # + assistant fallback
+                                            # (heuristics still work without it)
 ```
 
-Without `RESEND_API_KEY` the mailer is a no-op: in-app notifications are still
-written, but no email is sent.
+Local dev equivalents go in `.dev.vars` (gitignored):
 
-## 6. The AI assistant
+```
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+SESSION_SECRET=dev-secret
+```
 
-The assistant is off unless `GEMINI_API_KEY` is set:
+### 2.6 Production vars
+In `wrangler.jsonc`, set `vars.APP_URL` to the public origin
+(e.g. `https://fam.connect-cloud.workers.dev`). APP_URL is used in emails
+and CSRF. Google OAuth `redirect_uri` follows the **request host** (so phone
+logins on this URL stay on this URL). Register that callback in Google Cloud:
+
+`https://fam.connect-cloud.workers.dev/api/auth/google/callback`
+
+## 3. Deploy
 
 ```bash
-npx wrangler secret put GEMINI_API_KEY
-# optional: GEMINI_MODEL, defaults to gemini-3.6-flash
+npm run typecheck && npm run lint && npm run test   # the gate
+npm run build                                        # dist/client + sw.js
+npx wrangler deploy                                  # uploads worker + assets + cron
 ```
 
-`GET /api/assistant/status` reports whether it is configured, and the UI hides
-the assistant button when it is not, so the feature never advertises itself
-before it can work.
+The cron trigger (`0 8 * * *` UTC) is registered automatically from
+`wrangler.jsonc`. Verify in the dashboard → Workers → family-vault → Triggers.
 
-Security note: the model never touches the database. It emits a tool name and
-arguments; the Worker executes that tool under the **signed-in user's** identity
-and family membership, applying the same visibility rules as the REST API. A
-crafted prompt therefore cannot read another member's private records.
+### 3.1 Post-deploy smoke test
+
+```bash
+curl -s https://<domain>/api/health                      # {"ok":true,...}
+curl -s https://<domain>/api/nope                        # {"error":"not_found"} (JSON, not HTML!)
+curl -s -X POST https://<domain>/api/families \
+  -H "Origin: https://evil.example" -d '{}'              # {"error":"csrf_rejected"}
+curl -sI https://<domain>/ | grep -i content-security    # CSP from public/_headers
+```
+
+Then sign in with Google in a browser, create a family, add a document with an
+expiry date, upload a file, and download it.
+
+## 4. CI/CD
+
+`.github/workflows/ci.yml` runs typecheck + lint + tests + migration validation
++ build on every push/PR.
+
+On every **push to `claude/family-vault-pwa-plan-TrvxG`** (including merges), the
+`deploy` job:
+
+1. Reconciles remote `d1_migrations` if schema objects already exist
+   (`scripts/reconcile_remote_migrations.mjs`) — fixes drift after partial applies
+2. Applies pending D1 migrations remotely (`wrangler d1 migrations apply … --remote`)
+3. Deploys the Worker + assets (`wrangler deploy`)
+4. Smokes `GET /api/health` and checks new API surfaces respond (not HTML 404)
+
+Requires repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + D1:Edit)
+and optionally `CLOUDFLARE_ACCOUNT_ID`.
+
+## 5. Operations
+
+| Concern | What to do |
+|---|---|
+| Logs | `npx wrangler tail` (observability is enabled in wrangler.jsonc) |
+| Cron health | Dashboard → Triggers → recent invocations; look for `[cron] reminders done:` lines |
+| D1 backups | `npx wrangler d1 export family-vault-db --remote --output backup.sql` (schedule externally) |
+| Drive token SPOF | If Drive calls start failing with `invalid_grant`, the family owner must sign in again (re-consent restores the refresh token) |
+| Secret rotation | `wrangler secret put` re-deploys with the new value atomically |
+| Rollback | `npx wrangler rollback` (previous deployment) |
+
+## 6. Environments
+
+For a staging environment, add a `staging` env block in `wrangler.jsonc` with
+its own D1/KV ids and `APP_URL`, then `npx wrangler deploy --env staging`.
+Keep the Google OAuth client's redirect list updated for each origin.
+
+## 7. Known pre-launch gaps (tracked in PRODUCTION_READINESS.md)
+
+- The `drive.file` durability spike (create → revoke → re-consent → still
+  readable) has not been run against a real Google account yet.
+- No E2E browser suite; see TESTING.md §4.
+- Purge cron for trashed docs' Drive bytes is not implemented (trash is
+  metadata-only today).

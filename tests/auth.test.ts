@@ -12,6 +12,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { app } from "../worker/index";
+import { createTestEnv } from "./helpers/testEnv";
+import { loginBounceHtml, requestOrigin, safeAppPath } from "../worker/lib/publicUrl";
 
 // ---------------------------------------------------------------------------
 // 1. /auth/me — unauthenticated path (no D1 needed since no cookie)
@@ -40,19 +42,45 @@ describe("1. GET /api/auth/me — no session", () => {
 // ---------------------------------------------------------------------------
 // 2. /auth/google/start — shape test without env
 // ---------------------------------------------------------------------------
-describe("2. GET /api/auth/google/start", () => {
-  it("redirects to login when GOOGLE_CLIENT_ID is not configured", async () => {
-    // Full-page GET must never leave phones on a JSON 404/503.
-    const res = await app.request("/api/auth/google/start", { method: "GET" });
-    expect([301, 302, 303, 307, 308]).toContain(res.status);
-    expect(res.headers.get("location") ?? "").toContain(
-      "/login?error=oauth_not_configured",
-    );
+describe("2. POST /api/auth/google/start", () => {
+  it("returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
+    // No env bindings → GOOGLE_CLIENT_ID is undefined
+    const res = await app.request("/api/auth/google/start", { method: "POST" });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("oauth_not_configured");
   });
 
-  it("redirects to Google OAuth when configured", async () => {
-    // Mock env would have GOOGLE_CLIENT_ID set; without it, we get login redirect above.
-    // Happy path covered in tests/mobile-oauth.test.ts with createTestEnv.
+  it("returns JSON with content-type header", async () => {
+    const res = await app.request("/api/auth/google/start", { method: "POST" });
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+});
+
+describe("GET /api/auth/google/start (phone full-page navigation)", () => {
+  it("redirects to login when OAuth is not configured (not a JSON 404)", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    expect(res.headers.get("location")).toContain("/login?error=oauth_not_configured");
+  });
+
+  it("302s to Google when configured", async () => {
+    const t = createTestEnv({ GOOGLE_CLIENT_ID: "test-client-id" });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "GET" },
+      t.env,
+    );
+    expect([301, 302, 303, 307, 308]).toContain(res.status);
+    const location = res.headers.get("location") ?? "";
+    expect(location.startsWith("https://accounts.google.com/")).toBe(true);
+    expect(location).toContain(
+      encodeURIComponent(
+        "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+      ),
+    );
   });
 });
 
@@ -73,6 +101,29 @@ describe("3. POST /api/auth/logout", () => {
     // Hono's deleteCookie sets Max-Age=0 or expires in the past
     expect(setCookie).toMatch(/sid/);
   });
+
+  it("clearing Set-Cookie matches the session cookie flags (Safari/iOS)", async () => {
+    const res = await app.request("/api/auth/logout", { method: "POST" });
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    // Browsers ignore a Max-Age=0 overwrite that omits Secure/SameSite/Path
+    // when the original sid was set with those flags.
+    expect(setCookie).toMatch(/sid=/i);
+    expect(setCookie).toMatch(/Max-Age=0/i);
+    expect(setCookie).toMatch(/Path=\//i);
+    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+  });
+
+  it("accepts an empty JSON object body (the SPA logout payload)", async () => {
+    const res = await app.request("/api/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -89,7 +140,6 @@ describe("4. Protected family routes return 401 without session", () => {
     { method: "POST",  path: "/api/families/fam-1/invites" },
     { method: "POST",  path: "/api/families/invites/some-token/accept" },
     { method: "GET",   path: "/api/families/fam-1/activity" },
-    { method: "GET",   path: "/api/families/me/activity" },
   ];
 
   for (const { method, path } of protectedRoutes) {
@@ -187,5 +237,57 @@ describe("9. GET /api/auth/google/callback error handling", () => {
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("missing_params");
+  });
+
+  it("callback error redirect stays on the host the phone actually opened", async () => {
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback?error=access_denied",
+    );
+    const location = res.headers.get("location") ?? "";
+    expect(location).toBe(
+      "https://fam.connect-cloud.workers.dev/login?error=access_denied",
+    );
+  });
+});
+
+describe("OAuth start uses the request origin (not a stale APP_URL)", () => {
+  it("puts the incoming host in Google redirect_uri", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "test-client-id",
+      APP_URL: "http://localhost:5173",
+    });
+    const res = await app.request(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/start",
+      { method: "POST" },
+      t.env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    const google = new URL(body.url);
+    expect(google.searchParams.get("redirect_uri")).toBe(
+      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
+    );
+  });
+});
+
+describe("publicUrl helpers", () => {
+  it("requestOrigin reads the Worker host", () => {
+    expect(
+      requestOrigin("https://fam.connect-cloud.workers.dev/api/auth/google/start"),
+    ).toBe("https://fam.connect-cloud.workers.dev");
+  });
+
+  it("safeAppPath rejects protocol-relative and empty junk", () => {
+    expect(safeAppPath("/")).toBe("/");
+    expect(safeAppPath("/tasks")).toBe("/tasks");
+    expect(safeAppPath("//evil.example")).toBe("/");
+    expect(safeAppPath("https://evil.example")).toBe("/");
+  });
+
+  it("login bounce is first-party HTML with no inline script", () => {
+    const html = loginBounceHtml("/");
+    expect(html).toContain('http-equiv="refresh"');
+    expect(html).toContain("url=/");
+    expect(html).not.toMatch(/<script/i);
   });
 });

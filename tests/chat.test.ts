@@ -45,7 +45,7 @@ async function send(cookie: string, body: string) {
 describe("family chat", () => {
   it("send → list roundtrip with author info, oldest-first", async () => {
     await send(owner.cookie, "Dinner at 7?");
-    await send(member.cookie, "I'll be there");
+    await send(member.cookie, "I'll be there 🎉");
 
     const res = await req("GET", `/api/chat?familyId=${familyId}`, member.cookie);
     expect(res.status).toBe(200);
@@ -54,7 +54,7 @@ describe("family chat", () => {
       hasMore: boolean;
     };
     expect(hasMore).toBe(false);
-    expect(messages.map((m) => m.body)).toEqual(["Dinner at 7?", "I'll be there"]);
+    expect(messages.map((m) => m.body)).toEqual(["Dinner at 7?", "I'll be there 🎉"]);
     expect(messages[0].authorName).toBe("Olive Owner");
     expect(messages[1].deleted).toBe(false);
   });
@@ -147,32 +147,20 @@ describe("family chat", () => {
     expect(p2.messages[0].body).toBe("msg 0");
   });
 
-  it("@mention notifies the tagged member (in-app)", async () => {
-    await send(owner.cookie, "@Milo please bring the passports");
-
-    const notifs = await req("GET", "/api/notifications", member.cookie);
-    expect(notifs.status).toBe(200);
-    const body = (await notifs.json()) as {
-      notifications: { type: string; title: string; link: string }[];
-    };
-    const mention = body.notifications.find((n) => n.type === "mention");
-    expect(mention).toBeTruthy();
-    expect(mention!.title.toLowerCase()).toContain("mentioned");
-    expect(mention!.link).toBe("/chat");
-  });
-});
-
-describe("findMentions helper", () => {
-  it("matches first name, full name, and @everyone", async () => {
-    // Import dynamically so the suite stays focused if the module moves.
-    const { findMentions } = await import("../worker/lib/mentions");
-    const members = [
-      { userId: "1", name: "Priya Patel", email: "p@x.com", emailEnabled: true },
-      { userId: "2", name: "Milo Member", email: "m@x.com", emailEnabled: true },
-    ];
-    expect(findMentions("hey @Priya", members).map((m) => m.userId)).toEqual(["1"]);
-    expect(findMentions("@Milo Member ping", members).map((m) => m.userId)).toEqual(["2"]);
-    expect(findMentions("@everyone dinner", members)).toHaveLength(2);
-    expect(findMentions("no tags here", members)).toHaveLength(0);
+  it("CSRF: cross-origin chat POST is rejected", async () => {
+    const res = await app.request(
+      "/api/chat",
+      {
+        method: "POST",
+        headers: {
+          Cookie: member.cookie,
+          "Content-Type": "application/json",
+          Origin: "https://evil.example",
+        },
+        body: JSON.stringify({ familyId, body: "forged" }),
+      },
+      t.env,
+    );
+    expect(res.status).toBe(403);
   });
 });

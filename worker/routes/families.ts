@@ -1,22 +1,25 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { insertAuditEvent, ACTIONS } from "../lib/audit";
+import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
-import { sendEmailDetailed } from "../lib/email";
-import { inviteEmail } from "../lib/accessEmails";
+import { sendEmail } from "../lib/email";
+import { inviteEmail } from "../lib/emailTemplates";
 import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
-import { absoluteAppUrl } from "../lib/publicUrl";
 import {
-  relabelFamilyCurrency,
-  totalRelabeled,
-} from "../lib/finance/relabelCurrency";
+  FAMILY_MODULES,
+  MODULE_META,
+  modulesFieldSchema,
+  parseModulesJson,
+  serializeModules,
+  type FamilyModule,
+} from "../lib/modules";
 
 export const familyRoutes = new Hono<HonoEnv>();
 
@@ -29,53 +32,34 @@ const createFamilySchema = z.object({
 const inviteSchema = z.object({
   email: z.string().trim().email().max(254),
   role: z.enum(["admin", "member"]).optional().default("member"),
+  /** Enabled modules for the invitee. Omitted = all modules. */
+  modules: modulesFieldSchema,
 });
 
 const updateMemberSchema = z
   .object({
     role: z.enum(["admin", "member"]).optional(),
     status: z.enum(["active", "removed"]).optional(),
+    /** Replace enabled modules. Omit to leave unchanged; null = restore all. */
+    modules: z.array(z.enum(FAMILY_MODULES)).max(FAMILY_MODULES.length).nullable().optional(),
   })
-  .refine((d) => d.role !== undefined || d.status !== undefined, {
-    message: "At least one of role or status must be provided",
-  });
-
-const FAMILY_CURRENCIES = [
-  "USD",
-  "EUR",
-  "GBP",
-  "INR",
-  "CAD",
-  "AUD",
-  "JPY",
-  "SGD",
-  "AED",
-  "CHF",
-  "NZD",
-  "HKD",
-] as const;
-
-const updateFamilySchema = z
-  .object({
-    defaultCurrency: z.enum(FAMILY_CURRENCIES).optional(),
-    name: z.string().min(1).max(200).optional(),
-    /** When changing defaultCurrency, also relabel existing money rows (no conversion). */
-    relabelExisting: z.boolean().optional(),
-  })
-  .refine((d) => d.defaultCurrency !== undefined || d.name !== undefined, {
-    message: "At least one of defaultCurrency or name must be provided",
-  });
-
-const relabelCurrencySchema = z.object({
-  from: z.enum(FAMILY_CURRENCIES),
-  to: z.enum(FAMILY_CURRENCIES),
-});
+  .refine(
+    (d) =>
+      d.role !== undefined || d.status !== undefined || d.modules !== undefined,
+    { message: "At least one of role, status, or modules must be provided" },
+  );
 
 function zv<T extends z.ZodType>(schema: T) {
   return zValidator("json", schema, (result, c) => {
     if (!result.success)
       return c.json({ error: "validation_error", issues: result.error.issues }, 400);
   });
+}
+
+function memberModulesPayload(modulesJson: string | null | undefined, role: string) {
+  const modules =
+    role === "owner" ? [...FAMILY_MODULES] : parseModulesJson(modulesJson);
+  return modules;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -134,7 +118,7 @@ familyRoutes.post("/", requireSession, zv(createFamilySchema), async (c) => {
   await insertAuditEvent(db, {
     familyId,
     actorUserId: userId,
-    action: ACTIONS.FAMILY_CREATED,
+    action: "family_created",
     targetType: "family",
     targetId: familyId,
   });
@@ -155,7 +139,12 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const db = getDb(c.env);
 
-  // Find user's first active family
+  // ?familyId= scopes the answer to a SPECIFIC family. Without it this returned
+  // whichever family the user happened to join first, so a member of two
+  // families got the wrong attendee picker and the event create then failed
+  // with invalid_member_ids. The param is optional to keep old clients working.
+  const requestedFamilyId = c.req.query("familyId");
+
   const membership = await db
     .select({ familyId: schema.familyMembers.familyId })
     .from(schema.familyMembers)
@@ -163,10 +152,14 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
       and(
         eq(schema.familyMembers.userId, userId),
         eq(schema.familyMembers.status, "active"),
+        ...(requestedFamilyId
+          ? [eq(schema.familyMembers.familyId, requestedFamilyId)]
+          : []),
       ),
     )
     .get();
 
+  // Asked about a family you are not an active member of → empty, never a peek.
   if (!membership) return c.json({ members: [] });
 
   const members = await db
@@ -176,7 +169,6 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
       memberType: schema.familyMembers.memberType,
       displayName: schema.familyMembers.displayName,
       dateOfBirth: schema.familyMembers.dateOfBirth,
-      anniversaryDate: schema.familyMembers.anniversaryDate,
       role: schema.familyMembers.role,
       status: schema.familyMembers.status,
       name: schema.users.name,
@@ -193,119 +185,6 @@ familyRoutes.get("/me/members", requireSession, async (c) => {
     );
 
   return c.json({ members });
-});
-
-// GET /families/me/dashboard-stats — retrieve aggregated family statistics.
-familyRoutes.get("/me/dashboard-stats", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
-
-  // Find user's first active family
-  const membership = await db
-    .select({ familyId: schema.familyMembers.familyId })
-    .from(schema.familyMembers)
-    .where(
-      and(
-        eq(schema.familyMembers.userId, userId),
-        eq(schema.familyMembers.status, "active"),
-      ),
-    )
-    .get();
-
-  if (!membership) {
-    return c.json({
-      documentCount: 0,
-      expiringCount: 0,
-      memberCount: 0,
-      storageBytes: 0,
-      tasksTotal: 0,
-      tasksCompleted: 0,
-    });
-  }
-
-  const familyId = membership.familyId;
-
-  // 1. Document Count
-  const docCountResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.documents)
-    .where(
-      and(
-        eq(schema.documents.familyId, familyId),
-        eq(schema.documents.status, "active"),
-      ),
-    )
-    .get();
-
-  // 2. Expiring soon Count (expiring in <= 30 days)
-  const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
-  const nowStr = now.toISOString().slice(0, 10);
-  const thirtyDaysStr = thirtyDaysLater.toISOString().slice(0, 10);
-
-  const expiringCountResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.documents)
-    .where(
-      and(
-        eq(schema.documents.familyId, familyId),
-        eq(schema.documents.status, "active"),
-        sql`${schema.documents.expiryDate} >= ${nowStr}`,
-        sql`${schema.documents.expiryDate} <= ${thirtyDaysStr}`,
-      ),
-    )
-    .get();
-
-  // 3. Family Members Count
-  const memberCountResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.familyMembers)
-    .where(
-      and(
-        eq(schema.familyMembers.familyId, familyId),
-        eq(schema.familyMembers.status, "active"),
-      ),
-    )
-    .get();
-
-  // 4. Storage Bytes (Sum sizeBytes of current active files)
-  const storageResult = await db
-    .select({ totalBytes: sql<number>`sum(${schema.files.sizeBytes})` })
-    .from(schema.files)
-    .innerJoin(schema.documents, eq(schema.files.documentId, schema.documents.id))
-    .where(
-      and(
-        eq(schema.documents.familyId, familyId),
-        eq(schema.documents.status, "active"),
-        eq(schema.files.isCurrent, true),
-        eq(schema.files.status, "active"),
-      ),
-    )
-    .get();
-
-  // 5. Tasks Stats (Total & Completed, excluding archived)
-  const tasksResult = await db
-    .select({
-      total: sql<number>`count(*)`,
-      completed: sql<number>`sum(case when ${schema.tasks.status} = 'done' then 1 else 0 end)`,
-    })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.familyId, familyId),
-        sql`${schema.tasks.status} != 'archived'`,
-      ),
-    )
-    .get();
-
-  return c.json({
-    documentCount: docCountResult?.count ?? 0,
-    expiringCount: expiringCountResult?.count ?? 0,
-    memberCount: memberCountResult?.count ?? 0,
-    storageBytes: storageResult?.totalBytes ?? 0,
-    tasksTotal: tasksResult?.total ?? 0,
-    tasksCompleted: tasksResult?.completed ?? 0,
-  });
 });
 
 // POST /invites/:token/accept — accept an invite using the plain token.
@@ -328,7 +207,8 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
   if (invite.expiresAt < now) return c.json({ error: "invite_expired" }, 410);
   if (invite.acceptedAt !== null) return c.json({ error: "invite_already_used" }, 409);
 
-  // Invites are email-bound. A leaked/forwarded link must not admit another account.
+  // Invites are email-bound (invites.email + hashed single-use token). Enforce
+  // that binding: a leaked/forwarded link must not admit a different account.
   const acceptingUser = await db
     .select({ email: schema.users.email })
     .from(schema.users)
@@ -337,7 +217,7 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
 
   if (
     !acceptingUser ||
-    normalizeEmail(acceptingUser.email) !== normalizeEmail(invite.email)
+    acceptingUser.email.toLowerCase() !== invite.email.toLowerCase()
   ) {
     return c.json({ error: "invite_email_mismatch" }, 403);
   }
@@ -363,6 +243,7 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
     memberType: "user",
     role: invite.role,
     status: "active",
+    modulesJson: invite.modulesJson,
   });
 
   await db
@@ -373,13 +254,32 @@ familyRoutes.post("/invites/:token/accept", requireSession, async (c) => {
   await insertAuditEvent(db, {
     familyId: invite.familyId,
     actorUserId: userId,
-    action: ACTIONS.MEMBER_JOINED,
+    action: "member_joined",
     targetType: "family",
     targetId: invite.familyId,
-    meta: { role: invite.role },
+    meta: {
+      role: invite.role,
+      modules: parseModulesJson(invite.modulesJson),
+    },
   });
 
-  return c.json({ ok: true, familyId: invite.familyId });
+  return c.json({
+    ok: true,
+    familyId: invite.familyId,
+    modules: parseModulesJson(invite.modulesJson),
+  });
+});
+
+// GET /families/modules — catalog of customizable modules (labels for admin UI).
+// Must be registered before /:id so "modules" is not swallowed as a family id.
+familyRoutes.get("/modules", requireSession, async (c) => {
+  return c.json({
+    modules: FAMILY_MODULES.map((id) => ({
+      id,
+      label: MODULE_META[id].label,
+      description: MODULE_META[id].description,
+    })),
+  });
 });
 
 // GET /families/:id — get family details (requires membership).
@@ -399,151 +299,6 @@ familyRoutes.get("/:id", requireSession, async (c) => {
   return c.json({ family });
 });
 
-// PATCH /families/:id — update family-level settings (currency, name).
-// Any active member may change currency. By default existing rows keep their
-// stored currency; pass relabelExisting:true to rewrite labels (no conversion).
-familyRoutes.patch("/:id", requireSession, zv(updateFamilySchema), async (c) => {
-  const { id: familyId } = c.req.param();
-  const updates = c.req.valid("json");
-  const userId = c.get("userId")!;
-
-  const memberOrError = await requireFamilyMember(c, familyId);
-  if (memberOrError instanceof Response) return memberOrError;
-
-  const db = getDb(c.env);
-  const before = await db
-    .select({ defaultCurrency: schema.families.defaultCurrency })
-    .from(schema.families)
-    .where(eq(schema.families.id, familyId))
-    .get();
-  if (!before) return c.json({ error: "not_found" }, 404);
-
-  const set: Partial<typeof schema.families.$inferInsert> = {};
-  if (updates.defaultCurrency !== undefined) set.defaultCurrency = updates.defaultCurrency;
-  if (updates.name !== undefined) set.name = updates.name;
-
-  if (Object.keys(set).length > 0) {
-    await db.update(schema.families).set(set).where(eq(schema.families.id, familyId));
-  }
-
-  let relabeled: Awaited<ReturnType<typeof relabelFamilyCurrency>> | undefined;
-  if (
-    updates.relabelExisting &&
-    updates.defaultCurrency &&
-    updates.defaultCurrency !== before.defaultCurrency
-  ) {
-    relabeled = await relabelFamilyCurrency(
-      db,
-      familyId,
-      before.defaultCurrency,
-      updates.defaultCurrency,
-    );
-    await insertAuditEvent(db, {
-      familyId,
-      actorUserId: userId,
-      action: ACTIONS.FAMILY_UPDATED,
-      targetType: "family",
-      targetId: familyId,
-      meta: {
-        currencyRelabel: {
-          from: before.defaultCurrency,
-          to: updates.defaultCurrency,
-          counts: relabeled,
-          total: totalRelabeled(relabeled),
-        },
-      },
-    });
-  }
-
-  const family = await db
-    .select()
-    .from(schema.families)
-    .where(eq(schema.families.id, familyId))
-    .get();
-
-  return c.json({ family, ...(relabeled ? { relabeled } : {}) });
-});
-
-// POST /families/:id/relabel-currency — fix mislabeled money rows in place.
-// Amounts are NOT converted. `to` must equal the family's current default
-// (change the default first via PATCH if needed). Use when commitments /
-// expenses were saved as USD while the family now uses INR.
-familyRoutes.post(
-  "/:id/relabel-currency",
-  requireSession,
-  zv(relabelCurrencySchema),
-  async (c) => {
-    const { id: familyId } = c.req.param();
-    const { from, to } = c.req.valid("json");
-    const userId = c.get("userId")!;
-
-    const memberOrError = await requireFamilyMember(c, familyId);
-    if (memberOrError instanceof Response) return memberOrError;
-
-    if (from === to) {
-      return c.json(
-        {
-          error: "validation_error",
-          issues: [
-            {
-              code: "custom",
-              path: ["from"],
-              message: "from and to must differ",
-            },
-          ],
-        },
-        400,
-      );
-    }
-
-    const db = getDb(c.env);
-    const family = await db
-      .select({
-        id: schema.families.id,
-        defaultCurrency: schema.families.defaultCurrency,
-      })
-      .from(schema.families)
-      .where(eq(schema.families.id, familyId))
-      .get();
-    if (!family) return c.json({ error: "not_found" }, 404);
-
-    if (to !== family.defaultCurrency) {
-      return c.json(
-        {
-          error: "validation_error",
-          issues: [
-            {
-              code: "custom",
-              path: ["to"],
-              message: `to must match family default (${family.defaultCurrency})`,
-            },
-          ],
-        },
-        400,
-      );
-    }
-
-    const relabeled = await relabelFamilyCurrency(db, familyId, from, to);
-    await insertAuditEvent(db, {
-      familyId,
-      actorUserId: userId,
-      action: ACTIONS.FAMILY_UPDATED,
-      targetType: "family",
-      targetId: familyId,
-      meta: {
-        currencyRelabel: {
-          from,
-          to,
-          counts: relabeled,
-          total: totalRelabeled(relabeled),
-        },
-      },
-    });
-
-    return c.json({ ok: true, from, to, relabeled, total: totalRelabeled(relabeled) });
-  },
-);
-
 // GET /families/:id/members — list all active members with user profile info.
 familyRoutes.get("/:id/members", requireSession, async (c) => {
   const { id: familyId } = c.req.param();
@@ -559,9 +314,9 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
       memberType: schema.familyMembers.memberType,
       displayName: schema.familyMembers.displayName,
       dateOfBirth: schema.familyMembers.dateOfBirth,
-      anniversaryDate: schema.familyMembers.anniversaryDate,
       role: schema.familyMembers.role,
       status: schema.familyMembers.status,
+      modulesJson: schema.familyMembers.modulesJson,
       createdAt: schema.familyMembers.createdAt,
       name: schema.users.name,
       email: schema.users.email,
@@ -571,8 +326,78 @@ familyRoutes.get("/:id/members", requireSession, async (c) => {
     .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
     .where(eq(schema.familyMembers.familyId, familyId));
 
-  return c.json({ members });
+  return c.json({
+    members: members.map((m) => ({
+      id: m.id,
+      userId: m.userId,
+      memberType: m.memberType,
+      displayName: m.displayName,
+      dateOfBirth: m.dateOfBirth,
+      role: m.role,
+      status: m.status,
+      createdAt: m.createdAt,
+      name: m.name,
+      email: m.email,
+      picture: m.picture,
+      modules: memberModulesPayload(m.modulesJson, m.role),
+    })),
+  });
 });
+
+// POST /families/:id/members — add a DEPENDENT member (child/elder without an
+// account). Real users join via invites; this is for people who can't log in.
+const addDependentSchema = z.object({
+  displayName: z.string().min(1).max(200),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be yyyy-mm-dd")
+    .optional(),
+});
+
+familyRoutes.post(
+  "/:id/members",
+  requireSession,
+  zv(addDependentSchema),
+  async (c) => {
+    const { id: familyId } = c.req.param();
+    const { displayName, dateOfBirth } = c.req.valid("json");
+    const userId = c.get("userId")!;
+
+    const callerOrError = await requireFamilyMember(c, familyId, "admin");
+    if (callerOrError instanceof Response) return callerOrError;
+
+    const db = getDb(c.env);
+    const memberId = crypto.randomUUID();
+
+    await db.insert(schema.familyMembers).values({
+      id: memberId,
+      familyId,
+      userId: null,
+      memberType: "dependent",
+      displayName,
+      dateOfBirth,
+      role: "member",
+      status: "active",
+    });
+
+    await insertAuditEvent(db, {
+      familyId,
+      actorUserId: userId,
+      action: "member_added",
+      targetType: "member",
+      targetId: memberId,
+      meta: { displayName, memberType: "dependent" },
+    });
+
+    const member = await db
+      .select()
+      .from(schema.familyMembers)
+      .where(eq(schema.familyMembers.id, memberId))
+      .get();
+
+    return c.json({ member }, 201);
+  },
+);
 
 // PATCH /families/:id/members/:mid — change a member's role or status (admin+ only).
 familyRoutes.patch(
@@ -608,9 +433,22 @@ familyRoutes.patch(
       return c.json({ error: "cannot_modify_owner" }, 403);
     }
 
-    const columnUpdates: Partial<Pick<typeof schema.familyMembers.$inferInsert, "role" | "status">> = {};
+    // Owner module access is always full — refuse attempts to restrict it.
+    if (target.role === "owner" && updates.modules !== undefined) {
+      return c.json({ error: "cannot_modify_owner" }, 403);
+    }
+
+    const columnUpdates: Partial<
+      Pick<typeof schema.familyMembers.$inferInsert, "role" | "status" | "modulesJson">
+    > = {};
     if (updates.role !== undefined) columnUpdates.role = updates.role;
     if (updates.status !== undefined) columnUpdates.status = updates.status;
+    if (updates.modules !== undefined) {
+      columnUpdates.modulesJson =
+        updates.modules === null
+          ? null
+          : serializeModules(updates.modules as FamilyModule[]);
+    }
 
     await db
       .update(schema.familyMembers)
@@ -620,10 +458,7 @@ familyRoutes.patch(
     await insertAuditEvent(db, {
       familyId,
       actorUserId: userId,
-      action:
-        updates.role !== undefined
-          ? ACTIONS.MEMBER_ROLE_CHANGED
-          : ACTIONS.MEMBER_UPDATED,
+      action: "member_updated",
       targetType: "member",
       targetId: memberId,
       meta: updates as Record<string, unknown>,
@@ -635,26 +470,33 @@ familyRoutes.patch(
       .where(eq(schema.familyMembers.id, memberId))
       .get();
 
-    return c.json({ member });
+    return c.json({
+      member: member
+        ? {
+            ...member,
+            modules: memberModulesPayload(member.modulesJson, member.role),
+          }
+        : null,
+    });
   },
 );
 
 // POST /families/:id/invites — create an invite (admin+ only).
-// Also grants app-level access for the email (closed signup) and emails the
-// join link when a mail transport is configured.
+// Also grants app-level access so closed signup doesn't block the invitee.
 familyRoutes.post(
   "/:id/invites",
   requireSession,
   zv(inviteSchema),
   async (c) => {
     const { id: familyId } = c.req.param();
-    const { email: rawEmail, role } = c.req.valid("json");
+    const { email: rawEmail, role, modules } = c.req.valid("json");
     const email = normalizeEmail(rawEmail);
     const userId = c.get("userId")!;
 
     const callerOrError = await requireFamilyMember(c, familyId, "admin");
     if (callerOrError instanceof Response) return callerOrError;
 
+    // Throttle invite creation per user — each invite is a mailable token.
     const limited = await checkRateLimit(c, `invite:${userId}`, {
       limit: 20,
       windowSecs: 3600,
@@ -663,11 +505,11 @@ familyRoutes.post(
 
     const db = getDb(c.env);
     const now = Math.floor(Date.now() / 1000);
+    const modulesJson = serializeModules(modules as FamilyModule[] | undefined);
 
     // Generate invite token and hash it for storage
     const token = crypto.randomUUID();
     const tokenHash = await sha256Hex(token);
-    const expiresAt = now + 7 * 24 * 3600;
 
     await db.insert(schema.invites).values({
       id: crypto.randomUUID(),
@@ -675,11 +517,12 @@ familyRoutes.post(
       email,
       tokenHash,
       role,
+      modulesJson,
       invitedBy: userId,
-      expiresAt,
+      expiresAt: now + 7 * 24 * 3600, // 7 days
     });
 
-    // Family invite ⇒ app access so closed signup does not block Google login.
+    // Family invite ⇒ app access (closed signup).
     await upsertAccessGrant(db, {
       email,
       grantedByUserId: userId,
@@ -689,56 +532,39 @@ familyRoutes.post(
     await insertAuditEvent(db, {
       familyId,
       actorUserId: userId,
-      action: ACTIONS.MEMBER_INVITED,
+      action: "invite_created",
       targetType: "invite",
-      meta: { email, role },
+      meta: { email, role, modules: parseModulesJson(modulesJson) },
     });
 
+    // Best-effort invite email (no-op without RESEND_API_KEY — the caller
+    // still gets the link to share manually).
     const [inviter, family] = await Promise.all([
-      db
-        .select({ name: schema.users.name })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
-        .get(),
-      db
-        .select({ name: schema.families.name })
-        .from(schema.families)
-        .where(eq(schema.families.id, familyId))
-        .get(),
+      db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+      db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
     ]);
-    const appUrl = absoluteAppUrl(c.env, c.req.url);
+    const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
     const inviteUrl = `${appUrl}/invite/${token}`;
-    const familyName = family?.name ?? "Family Vault";
-    const subject = `You're invited to ${familyName} on Family Vault`;
-    const sent = await sendEmailDetailed(
-      c.env,
-      {
-        to: email,
-        subject,
-        html: inviteEmail({
-          inviterName: inviter?.name ?? null,
-          familyName,
-          inviteUrl,
-        }),
-        text: [
-          `${inviter?.name ?? "A family member"} invited you to ${familyName}.`,
-          `Join: ${inviteUrl}`,
-          "This invite only works for this email address and expires in 7 days.",
-        ].join("\n"),
-      },
-      { fromUserId: userId, reminder: false },
-    );
+    const emailSent = await sendEmail(c.env, {
+      to: email,
+      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
+      html: inviteEmail({
+        inviterName: inviter?.name ?? null,
+        familyName: family?.name ?? "your family",
+        inviteUrl,
+      }),
+    });
 
     return c.json(
       {
         invite: {
           email,
           role,
-          expiresAt,
+          expiresAt: now + 7 * 24 * 3600,
           token,
           inviteUrl,
-          emailSent: sent.ok,
-          emailError: sent.ok ? undefined : sent.error,
+          emailSent,
+          modules: parseModulesJson(modulesJson),
         },
       },
       201,
@@ -746,128 +572,28 @@ familyRoutes.post(
   },
 );
 
-// GET /families/me/activity — dynamic redirect/resolution of user's active family activity feed.
-// Added to satisfy frontend queries to /families/me/activity.
-familyRoutes.get("/me/activity", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
-
-  // Find user's first active family
-  const membership = await db
-    .select({ familyId: schema.familyMembers.familyId, role: schema.familyMembers.role })
-    .from(schema.familyMembers)
-    .where(
-      and(
-        eq(schema.familyMembers.userId, userId),
-        eq(schema.familyMembers.status, "active"),
-      ),
-    )
-    .get();
-
-  if (!membership) {
-    return c.json({ activities: [], nextCursor: null });
-  }
-
-  const { familyId, role } = membership;
-  const cursor = c.req.query("cursor");
-  const limit = Math.min(parseInt(c.req.query("limit") ?? "50") || 50, 100);
-  const privileged = role === "owner" || role === "admin";
-
-  const conds = [eq(schema.auditLog.familyId, familyId)];
-  if (!privileged) {
-    conds.push(
-      or(
-        eq(schema.auditLog.visibility, "family"),
-        eq(schema.auditLog.actorUserId, userId),
-      )!,
-    );
-  }
-  if (cursor) {
-    const cur = parseInt(cursor);
-    if (!Number.isNaN(cur)) conds.push(lt(schema.auditLog.createdAt, cur));
-  }
-
-  const activities = await db
-    .select({
-      id: schema.auditLog.id,
-      action: schema.auditLog.action,
-      targetType: schema.auditLog.targetType,
-      targetId: schema.auditLog.targetId,
-      meta: schema.auditLog.meta,
-      severity: schema.auditLog.severity,
-      createdAt: schema.auditLog.createdAt,
-      actorUserId: schema.auditLog.actorUserId,
-      actorName: schema.users.name,
-      actorPicture: schema.users.picture,
-    })
-    .from(schema.auditLog)
-    .leftJoin(schema.users, eq(schema.auditLog.actorUserId, schema.users.id))
-    .where(and(...(conds as [(typeof conds)[0], ...typeof conds])))
-    .orderBy(desc(schema.auditLog.createdAt))
-    .limit(limit);
-
-  const nextCursor =
-    activities.length === limit
-      ? activities[activities.length - 1].createdAt
-      : null;
-
-  return c.json({ activities, nextCursor });
-});
-
-// GET /families/:id/activity — the family activity feed (keyset-paginated).
-// PRIVACY: members see family-visible activity + their own actions; owners/admins
-// see everything. The audit row's snapshotted `visibility` drives this without a
-// join back to the (possibly deleted) target — mirrors the documents predicate.
+// GET /families/:id/activity — surfaces audit_log entries for the family.
 familyRoutes.get("/:id/activity", requireSession, async (c) => {
   const { id: familyId } = c.req.param();
-  const me = c.get("userId")!;
 
   const memberOrError = await requireFamilyMember(c, familyId);
   if (memberOrError instanceof Response) return memberOrError;
 
   const db = getDb(c.env);
-  const cursor = c.req.query("cursor");
-  const limit = Math.min(parseInt(c.req.query("limit") ?? "50") || 50, 100);
-  const privileged =
-    memberOrError.role === "owner" || memberOrError.role === "admin";
-
-  const conds = [eq(schema.auditLog.familyId, familyId)];
-  if (!privileged) {
-    conds.push(
-      or(
-        eq(schema.auditLog.visibility, "family"),
-        eq(schema.auditLog.actorUserId, me),
-      )!,
-    );
-  }
-  if (cursor) {
-    const cur = parseInt(cursor);
-    if (!Number.isNaN(cur)) conds.push(lt(schema.auditLog.createdAt, cur));
-  }
-
   const activities = await db
     .select({
       id: schema.auditLog.id,
       action: schema.auditLog.action,
       targetType: schema.auditLog.targetType,
       targetId: schema.auditLog.targetId,
-      meta: schema.auditLog.meta,
-      severity: schema.auditLog.severity,
       createdAt: schema.auditLog.createdAt,
-      actorUserId: schema.auditLog.actorUserId,
       actorName: schema.users.name,
-      actorPicture: schema.users.picture,
     })
     .from(schema.auditLog)
     .leftJoin(schema.users, eq(schema.auditLog.actorUserId, schema.users.id))
-    .where(and(...(conds as [(typeof conds)[0], ...typeof conds])))
+    .where(eq(schema.auditLog.familyId, familyId))
     .orderBy(desc(schema.auditLog.createdAt))
-    .limit(limit);
+    .limit(50);
 
-  const nextCursor =
-    activities.length === limit
-      ? activities[activities.length - 1].createdAt
-      : null;
-
-  return c.json({ activities, nextCursor });
+  return c.json({ activities });
 });

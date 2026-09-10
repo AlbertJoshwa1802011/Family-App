@@ -31,7 +31,7 @@ chatRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "chat");
   if (membership instanceof Response) return membership;
 
   const beforeParam = c.req.query("before");
@@ -80,7 +80,7 @@ chatRoutes.post("/", requireSession, zv(sendMessageSchema), async (c) => {
   const userId = c.get("userId")!;
   const { familyId, body } = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "chat");
   if (membership instanceof Response) return membership;
 
   // Generous anti-spam guard; normal chatting never hits it.
@@ -156,7 +156,7 @@ chatRoutes.delete("/:id", requireSession, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  const membership = await requireFamilyMember(c, message.familyId);
+  const membership = await requireFamilyMember(c, message.familyId, "member", "chat");
   if (membership instanceof Response) return membership;
 
   if (message.userId !== userId && membership.role === "member") {

@@ -1,16 +1,44 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "../../lib/cn";
 
-/**
- * Liquid-bubble surface — frosted glass card used across Home / Vault / Docs /
- * Money / Family. Replaces the old flat `bg-surface` (white/gray) panels.
- *
- * Do not force `overflow-hidden` here — list cards that need clipped corners
- * opt in; focus rings and decorative blurs must be free to paint outside.
- */
+type Variant = "glass" | "flat" | "raised";
+
+const variants: Record<Variant, string> = {
+  /** Default liquid bubble — translucent, blurred, specular rim. */
+  glass: "lq",
+  /** Same look, no backdrop-filter. Use inside long scrolling lists. */
+  flat: "lq lq-flat",
+  /** Lifted bubble for hero/primary surfaces. */
+  raised: "lq lq-raised",
+};
+
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  variant?: Variant;
+  /** Adds the press/hover liquid response. For tappable cards. */
+  interactive?: boolean;
+  /** Tint the glass with a CSS color (any format `color-mix` accepts). */
+  tint?: string;
+}
+
 export function Card({
   className,
+  variant = "glass",
+  interactive = false,
+  tint,
+  style,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
-  return <div {...props} className={cn("liquid-bubble", className)} />;
+}: CardProps) {
+  return (
+    <div
+      {...props}
+      style={tint ? { ...style, ["--lq-tint" as string]: tint } : style}
+      className={cn(
+        "rounded-bubble",
+        variants[variant],
+        tint && "lq-tint",
+        interactive && "lq-press cursor-pointer",
+        className,
+      )}
+    />
+  );
 }

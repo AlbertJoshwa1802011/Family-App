@@ -42,33 +42,42 @@ export function eventMonthKey(startAt: number): string {
   return `${d.getFullYear()}-${d.getMonth()}`;
 }
 
+/**
+ * Palette for an event type. `tint` is a raw CSS colour (not a class) so it can
+ * be fed to the liquid-glass `--lq-tint` variable; `bg`/`text`/`dot` stay as
+ * Tailwind classes for non-glass surfaces.
+ */
 export function eventTypeColor(
   type: string,
-): { bg: string; text: string; dot: string } {
+): { bg: string; text: string; dot: string; tint: string } {
   switch (type) {
     case "gathering":
       return {
         bg: "bg-orange-500/15",
         text: "text-orange-300",
         dot: "bg-orange-400",
+        tint: "#fb923c",
       };
     case "appointment":
       return {
         bg: "bg-info/15",
         text: "text-info",
         dot: "bg-info",
+        tint: "var(--color-info)",
       };
     case "milestone":
       return {
         bg: "bg-purple-500/15",
         text: "text-purple-300",
         dot: "bg-purple-400",
+        tint: "#c084fc",
       };
     default:
       return {
         bg: "bg-fg-subtle/15",
         text: "text-fg-muted",
         dot: "bg-fg-subtle",
+        tint: "var(--color-fg-subtle)",
       };
   }
 }

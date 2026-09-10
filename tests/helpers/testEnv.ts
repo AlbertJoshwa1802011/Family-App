@@ -65,6 +65,85 @@ function makeStatement(sqlite: DatabaseSync, sql: string, params: unknown[] = []
   return stmt;
 }
 
+
+function ensureRichExpensesSchema(sqlite: DatabaseSync) {
+  const famCols = sqlite.prepare("PRAGMA table_info(families)").all() as { name: string }[];
+  if (!famCols.some((c) => c.name === "default_currency")) {
+    sqlite.exec("ALTER TABLE families ADD COLUMN default_currency text NOT NULL DEFAULT 'USD'");
+  }
+
+  const cols = sqlite.prepare("PRAGMA table_info(expenses)").all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  if (names.has("amount_minor") && names.has("expense_date")) return;
+  if (!names.has("amount_cents")) {
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS expenses (
+      id text PRIMARY KEY NOT NULL,
+      family_id text NOT NULL,
+      paid_by_member_id text NOT NULL,
+      subject_member_id text,
+      category_id text,
+      parent_expense_id text,
+      nest_depth integer DEFAULT 0 NOT NULL,
+      amount_minor integer NOT NULL,
+      currency text NOT NULL,
+      expense_date text NOT NULL,
+      merchant text,
+      description text,
+      payment_method text,
+      split_type text DEFAULT 'none' NOT NULL,
+      visibility text DEFAULT 'private' NOT NULL,
+      status text DEFAULT 'active' NOT NULL,
+      trashed_at integer,
+      created_by_user_id text NOT NULL,
+      client_request_id text,
+      created_at integer DEFAULT (unixepoch()) NOT NULL,
+      updated_at integer DEFAULT (unixepoch()) NOT NULL
+    )`);
+    return;
+  }
+
+  const bak = "expenses_legacy_simple";
+  sqlite.exec(`ALTER TABLE expenses RENAME TO ${bak}`);
+  sqlite.exec(`CREATE TABLE expenses (
+    id text PRIMARY KEY NOT NULL,
+    family_id text NOT NULL,
+    paid_by_member_id text NOT NULL,
+    subject_member_id text,
+    category_id text,
+    parent_expense_id text,
+    nest_depth integer DEFAULT 0 NOT NULL,
+    amount_minor integer NOT NULL,
+    currency text NOT NULL,
+    expense_date text NOT NULL,
+    merchant text,
+    description text,
+    payment_method text,
+    split_type text DEFAULT 'none' NOT NULL,
+    visibility text DEFAULT 'family' NOT NULL,
+    status text DEFAULT 'active' NOT NULL,
+    trashed_at integer,
+    created_by_user_id text NOT NULL,
+    client_request_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    updated_at integer DEFAULT (unixepoch()) NOT NULL
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_family_date ON expenses (family_id, expense_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_family_status ON expenses (family_id, status)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_created_by ON expenses (created_by_user_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_expense_paid_by ON expenses (paid_by_member_id)`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_client_request ON expenses (family_id, created_by_user_id, client_request_id)`);
+  sqlite.exec(`INSERT INTO expenses (
+    id, family_id, paid_by_member_id, amount_minor, currency, expense_date,
+    description, visibility, status, created_by_user_id, created_at, updated_at, nest_depth, split_type
+  )
+  SELECT
+    e.id, e.family_id, fm.id, e.amount_cents, e.currency, e.spent_on,
+    e.note, 'family', 'active', e.created_by, e.created_at, e.updated_at, 0, 'none'
+  FROM ${bak} e
+  JOIN family_members fm
+    ON fm.family_id = e.family_id AND fm.user_id = e.created_by`);
+}
+
 export function createTestD1(): { d1: D1Database; sqlite: DatabaseSync } {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
@@ -75,6 +154,10 @@ export function createTestD1(): { d1: D1Database; sqlite: DatabaseSync } {
   for (const file of files) {
     sqlite.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
   }
+
+  // Reconcile feature-branch simple expenses → Money Manager rich shape without
+  // dropping rows (mirrors scripts/ensure_money_schema.mjs).
+  ensureRichExpensesSchema(sqlite);
 
   const d1 = {
     prepare: (sql: string) => makeStatement(sqlite, sql),
@@ -140,95 +223,6 @@ export function createTestEnv(overrides: Partial<Env> = {}): TestEnv {
     ...overrides,
   };
   return { env, sqlite };
-}
-
-/**
- * In-memory R2Bucket for tests — no live Cloudflare bucket required.
- * Implements put/get/delete used by worker/lib/r2.ts.
- */
-export function createTestR2(): R2Bucket {
-  const store = new Map<
-    string,
-    { body: ArrayBuffer; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }
-  >();
-
-  const bucket = {
-    put: async (
-      key: string,
-      value: ArrayBuffer | ArrayBufferView | string | Blob | ReadableStream | null,
-      options?: R2PutOptions,
-    ) => {
-      let body: ArrayBuffer;
-      if (value == null) {
-        body = new ArrayBuffer(0);
-      } else if (typeof value === "string") {
-        body = new TextEncoder().encode(value).buffer;
-      } else if (value instanceof Blob) {
-        body = await value.arrayBuffer();
-      } else if (value instanceof ReadableStream) {
-        body = await new Response(value).arrayBuffer();
-      } else if (ArrayBuffer.isView(value)) {
-        body = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
-      } else {
-        body = value;
-      }
-      store.set(key, {
-        body,
-        httpMetadata: options?.httpMetadata,
-        customMetadata: options?.customMetadata,
-      });
-      return {
-        key,
-        size: body.byteLength,
-        etag: "test-etag",
-        httpEtag: '"test-etag"',
-        uploaded: new Date(),
-        checksums: {},
-        httpMetadata: options?.httpMetadata,
-        customMetadata: options?.customMetadata,
-      } as R2Object;
-    },
-    get: async (key: string) => {
-      const entry = store.get(key);
-      if (!entry) return null;
-      return {
-        key,
-        size: entry.body.byteLength,
-        etag: "test-etag",
-        httpEtag: '"test-etag"',
-        uploaded: new Date(),
-        checksums: {},
-        httpMetadata: entry.httpMetadata,
-        customMetadata: entry.customMetadata,
-        body: entry.body,
-        arrayBuffer: async () => entry.body,
-        text: async () => new TextDecoder().decode(entry.body),
-        json: async () => JSON.parse(new TextDecoder().decode(entry.body)),
-        blob: async () => new Blob([entry.body]),
-        writeHttpMetadata: () => {},
-      } as unknown as R2ObjectBody;
-    },
-    delete: async (key: string | string[]) => {
-      for (const k of Array.isArray(key) ? key : [key]) store.delete(k);
-    },
-    head: async (key: string) => {
-      const entry = store.get(key);
-      if (!entry) return null;
-      return {
-        key,
-        size: entry.body.byteLength,
-        etag: "test-etag",
-        httpEtag: '"test-etag"',
-        uploaded: new Date(),
-        checksums: {},
-        httpMetadata: entry.httpMetadata,
-        customMetadata: entry.customMetadata,
-      } as R2Object;
-    },
-    list: async () => ({ objects: [], truncated: false, delimitedPrefixes: [] }),
-  } as unknown as R2Bucket;
-
-  return bucket;
 }
 
 // ── Seed helpers ──────────────────────────────────────────────────────────────
@@ -301,6 +295,43 @@ export function seedActor(
   return { userId: user.id, memberId: member.id, cookie, email: user.email };
 }
 
+/**
+ * A managed dependent: a child or elderly relative with NO Google account.
+ * userId is null, so they can be scheduled for but never notified and never
+ * sign in — the case most likely to crash naive multi-user code.
+ */
+export function seedDependent(
+  sqlite: DatabaseSync,
+  familyId: string,
+  displayName = "Dependent",
+): { id: string } {
+  const id = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO family_members (id, family_id, user_id, member_type, display_name, role, status)
+       VALUES (?, ?, NULL, 'dependent', ?, 'member', 'active')`,
+    )
+    .run(id, familyId, displayName);
+  return { id };
+}
+
+/** A member row in a non-active state (invited / removed) for authz tests. */
+export function seedInactiveActor(
+  sqlite: DatabaseSync,
+  familyId: string,
+  status: "invited" | "removed",
+): { userId: string; memberId: string; cookie: string } {
+  const user = seedUser(sqlite);
+  const memberId = crypto.randomUUID();
+  sqlite
+    .prepare(
+      `INSERT INTO family_members (id, family_id, user_id, member_type, role, status)
+       VALUES (?, ?, ?, 'user', 'member', ?)`,
+    )
+    .run(memberId, familyId, user.id, status);
+  return { userId: user.id, memberId, cookie: seedSession(sqlite, user.id) };
+}
+
 export function seedDocument(
   sqlite: DatabaseSync,
   opts: {
@@ -310,13 +341,14 @@ export function seedDocument(
     visibility?: "family" | "private";
     expiryDate?: string | null;
     status?: string;
+    calendarReminderEnabled?: boolean;
   },
 ): { id: string } {
   const id = crypto.randomUUID();
   sqlite
     .prepare(
-      `INSERT INTO documents (id, family_id, owner_user_id, title, category, visibility, status, expiry_date, updated_at)
-       VALUES (?, ?, ?, ?, 'other', ?, ?, ?, unixepoch())`,
+      `INSERT INTO documents (id, family_id, owner_user_id, title, category, visibility, status, expiry_date, calendar_reminder_enabled, updated_at)
+       VALUES (?, ?, ?, ?, 'other', ?, ?, ?, ?, unixepoch())`,
     )
     .run(
       id,
@@ -326,6 +358,7 @@ export function seedDocument(
       opts.visibility ?? "family",
       opts.status ?? "active",
       opts.expiryDate ?? null,
+      opts.calendarReminderEnabled ? 1 : 0,
     );
   return { id };
 }

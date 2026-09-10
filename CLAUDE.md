@@ -23,27 +23,27 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 ## 1. Commands you will use constantly
 
 ```bash
-npm run gate           # ★ definition of done — typecheck + lint + full test + build. Run before EVERY commit. Alias: test:gate
-npm run test           # vitest run — 511 tests, 37 files. What `gate` runs.
-npm run test:ship      # local slice: Home / tasks / Contacts / Face ID / cron / email / upload
-npm run test:regression  # local slice: events / church / expenses / calendar / bubble nav
-npm run typecheck      # tsc -b + worker tsconfig + node tsconfig
-npm run lint           # eslint .
-npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
+npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
+npm run lint           # eslint . — run before EVERY commit
+npm run test           # vitest run — 358 tests; must stay green
+npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
-npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth) — for curl against npm run dev
-# Prefer Vitest seedActor for feature proof — see .claude/skills/verify-authenticated/SKILL.md
-# Production curl without sid → 401 is EXPECTED (middleware), not a feature bug.
+npm run dev:seed       # seed local D1 with two users + session cookies (no OAuth needed)
+npm run dev:screenshots # Playwright mobile screenshots of every screen → screenshots/
+npm run dev:record      # Playwright video walkthrough (motion review) → recordings/
 ```
 
-**Definition of done for any change:** `npm run gate` (alias `test:gate`) must pass.
+**Definition of done for any change:** `typecheck` ✅, `lint` ✅, `test` ✅, `build` ✅.
+(`typecheck` also compiles `tsconfig.test.json` — the component tests.)
 If you touched the schema, also: `db:generate` ✅ and `validate_migrations.py` ✅.
 
-`test:ship` and `test:regression` are **local shortcuts**. They are **not** a substitute for `npm run gate`. GitHub CI and production deploy already run `npm run gate`. Never skip the full suite because a slice was green. Catalog: `docs/TESTING.md`.
-
-Every agent in this repo **must** follow this. Invoke `.claude/skills/gate/SKILL.md` before committing. For any auth-gated `/api/*` work, also invoke `.claude/skills/verify-authenticated/SKILL.md` (Vitest + `seedActor` — never “fix prod 401”). A red suite is a blocker, not a “known failure.”
+**Project skills** (`.claude/skills/`) encode the house workflows — invoke them instead
+of re-deriving: `gate` (definition of done), `add-api-resource` (the full backend
+pattern with all guards), `live-test` (real-runtime multi-user testing + screenshots),
+`db-migration` (schema change safely), `email-template` (email-safe HTML +
+notification delivery), `release` (commit → PR → merge-deploys → remote migration).
 
 ---
 
@@ -84,42 +84,7 @@ Every agent in this repo **must** follow this. Invoke `.claude/skills/gate/SKILL
    (e.g. removing a family), write **explicit multi-statement deletes in app code** + a test.
    Do not rely on DB-level `ON DELETE` for correctness.
 
-9. **Money is private to its owner, with NO owner/admin bypass.** Documents let owners and
-   admins see private rows; expenses, income, commitments and wishlist items do **not**.
-   Personal finances are the one place a family role must not unlock, so
-   `worker/lib/expenses/visibility.ts` and the finance routes check `createdByUserId` /
-   `ownerUserId` only. Hidden rows return **404, never 403**. Tests pin this — do not
-   "align" it with the documents rule.
-
-10. **Committed money is counted once.** `commitment_payments.expense_id` links an
-   auto-logged expense back to its commitment, and `buildPlan()` excludes those ids from
-   discretionary spend. Skipping that double-counts every EMI.
-
-11. **Every new route or feature must have corresponding test cases and updated `.md` documentation files.** Never deploy or complete a change without:
-   - Adding or extending contract, security, and validation tests in the test suite (e.g., in `tests/vault.test.ts` or `tests/worker-extended.test.ts`).
-   - Documenting the new feature's design, roadmap, or architectural decisions in the relevant markdown files (e.g., `docs/PLAN.md`, `docs/ARCHITECTURE.md`, or `CLAUDE.md` itself) so future agents have full context.
-
 ---
-
-## 2.5 The money model (Phase 7)
-
-`worker/lib/finance/` is pure and DB-free so the arithmetic can be tested hard:
-
-- **`periods.ts`** — pay cycles, week slicing, due-date schedules. All ISO `yyyy-mm-dd`
-  compared at **UTC midnight**. `addMonths` clamps (Jan 31 + 1mo = Feb 28), and a
-  cycle is named for the month it *starts* in, so with payday=25 the 25 Aug–24 Sep
-  window is `2026-08`.
-- **`plan.ts`** — the identity everything else derives from:
-
-      spendable = income − committed − savingsTarget
-      remaining = spendable − discretionary spend
-
-  `percent_of_income` commitments (tithe, sponsorship) resolve against that cycle's
-  income, so giving scales with what was actually earned.
-- **`commitmentCron.ts`** — the daily sweep. Idempotent via the unique
-  `(commitment_id, period_key)` index; `reminded_at` prevents re-notifying.
-
-Reminders run from `scheduled()` on Cloudflare's cron, **never** on app open.
 
 ## 3. Conventions
 
@@ -153,10 +118,57 @@ All primary keys are **text UUIDs** generated in app code (`crypto.randomUUID()`
   Home, Docs, Calendar, Family, Settings. Tasks/Contacts are reached from the Dashboard
   "Quick access" row (keeps the nav uncluttered).
 
+### Liquid Glass design system (`src/index.css`)
+Every translucent surface is built from the same three ingredients, supplied by the
+**`.lq`** class: a tinted gradient fill, a 1px specular rim (`::before`, masked gradient
+border), and an inner sheen pooled at the top (`::after`, `z-index:-1`). Modifiers only
+re-point CSS variables — never re-implement the recipe:
+
+| Class | Use for |
+|---|---|
+| `.lq` | any glass surface (Card, Badge, chips) |
+| `.lq-chrome` | floating chrome: AppBar, BottomNav, Sheet (heavier blur, opaque enough to hide scrolled content) |
+| `.lq-raised` | lifted bubbles: FAB, primary Button, hero cards |
+| `.lq-flat` | dense list rows — drops `backdrop-filter` for scroll performance |
+| `.lq-tint` + `--lq-tint` | colour a surface with any CSS colour |
+| `.lq-primary` / `.lq-danger` / `.lq-white` | coloured button/pill skins |
+| `.lq-field` | inputs — inverts the recipe so light pools at the *bottom* (recessed) |
+| `.lq-press` | liquid press/hover response on tappables |
+
+Rules that have already bitten us:
+1. **The whole `.lq` block lives in `@layer components`.** Unlayered CSS beats every
+   Tailwind utility regardless of specificity — when `.lq` was unlayered it silently
+   overrode `absolute` on the nav's sliding pill and every `bg-*` on a glass element.
+2. **`backdrop-filter` creates a stacking context that paints at the positioned-descendant
+   level.** A glass field will cover an absolutely-positioned sibling icon that precedes it
+   in the DOM (search magnifiers, clear buttons) — give those overlays an explicit `z-1`.
+3. **Don't put a `bg-*` utility on an `.lq` element.** Use `--lq-bg` / `--lq-tint` instead,
+   or the two backgrounds fight.
+4. **`text-overflow: ellipsis` needs inline text.** A `flex`/`inline-flex` title inside
+   ListItem's `truncate` wrapper hard-clips mid-word; put `truncate` on the text node.
+5. Inputs need `[color-scheme:dark]` (already in `inputCls`) or native date-picker glyphs
+   render black on black.
+6. Absolutely-positioned children of an `.lq` element must set an explicit `left`/`right` —
+   the static position is not reliably 0 (the Settings switch knob overflowed its track).
+
+Shared field styling is `inputCls` from **`src/lib/fieldCls.ts`** (kept out of the component
+file so pages importing it don't cross a react-refresh boundary). `src/components/ui/`
+also has `Field`/`Input`/`Textarea`/`Select`, `Chip`, `SegmentedControl` and `Sheet`.
+Motion uses `--ease-liquid` / `--ease-spring`; `.bubble-in` is the entrance animation.
+The ambient drifting colour orbs behind everything are `body::before` — glass needs
+something to refract, so don't remove them.
+
 ### Events: `type` vs `status` are orthogonal
 - `type` = nature: `gathering | appointment | milestone | other` (permanent).
 - `status` = lifecycle: `active | cancelled | trashed`. Cancelled stays visible (strikethrough +
   badge); trashed is filtered out of all lists. Never conflate the two.
+
+### Tasks: complete vs archive vs nested
+- `status` = lifecycle: `open | done | archived`. Completing a task (`done`) sets `completedAt` and
+  removes it from the To-do view — leftover open subtasks are promoted to roots. Archive hides it
+  from Completed too. `priority` is `low | medium | high` (default medium). Nested via
+  `parentTaskId`, max depth 5. Deleting a task explicitly deletes descendants (D1 cascades are
+  advisory). List views: `todo | priority | due | recent | mine | completed`.
 
 ### `eventMonthKey()`
 Returns `"${year}-${month_index}"` with a **0-indexed** month (June → `"2026-5"`). Used only for
@@ -210,6 +222,10 @@ by a forced `skipWaiting`. A "new version" toast handles updates.
 | ESLint: "Cannot call impure function" | `Date.now()` in render | `useState(() => Date.now())` |
 | Migration apply fails: "no such column" | drizzle-kit table-recreation `INSERT...SELECT` lists new cols | Edit the just-generated migration's INSERT to copy only old columns; new ones take defaults. Validate with the python script. Only safe pre-production. |
 | `.partial()` throws on a refined Zod schema | `.refine()` returns ZodEffects, which has no `.partial()` | Call `.partial()` on the base ZodObject, then `.refine()` |
+| A PATCH silently wipes fields the caller never sent | **`.partial()` does not cancel `.default()`** — Zod still fills the default when the key is absent, so every partial update arrives carrying `[]` / `"other"` / `false`. With replace-semantics handlers this deletes real data (it wiped every event attendee on a rename). | Keep defaults OFF the shared field set. Define a default-free `xFieldsSchema`, `.extend()` it with defaults for CREATE, and `.partial()` the default-free one for UPDATE (see `worker/routes/events.ts`) |
+| A partial update leaves `endAt` before `startAt` | A `.refine()` comparing two fields only fires when BOTH are in the payload | Validate the **merged** state (patch over stored row) in the handler, not just the patch |
+| Page crashes on a field the type says exists | `api<T>()` is an unchecked cast, so a wrong envelope type is invisible to `tsc` (`EventDetail` read `ev.attendees` when the API returns `{event, attendees}`) | Model the response envelope exactly; destructure siblings rather than typing them onto the nested object |
+| Optimistic concurrency never triggers | `updatedAt` has one-second granularity — two saves in the same second both look current | Use a monotonic `version` counter (`events.version`), not a timestamp |
 
 ---
 
@@ -219,27 +235,27 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. `tests/helpers/testEnv.ts` runs the real generated migrations against in-memory
-`node:sqlite` behind a D1-compatible adapter, so route tests exercise the actual routes →
-drizzle → SQL path. Prefer it over mocks for anything touching authorization or money arithmetic.
+same depth. Current baseline: **774 tests across 36 files**, all green.
+Multi-user scheduling has its own cast fixture in `tests/helpers/family.ts` (owner,
+admin, plain member, dependent, invited-inactive, removed, outsider) — multi-user bugs
+live in the members people forget. Use it for anything touching shared family data.
 
-Frontend libs (`expiry.ts`, `eventTime.ts`, `greeting.ts`, `gestures.ts`) have pure-function
-unit tests using `Date.UTC()` for timezone-stable fixtures. `@testing-library/react` + `jsdom`
-are installed if you add component tests.
+**Component & design-system tests** (`tests/*.test.tsx`, `tests/design-system.test.ts`)
+run in jsdom via a per-file `// @vitest-environment jsdom` docblock, with the shared
+harness in `tests/helpers/render.tsx`. `design-system.test.ts` parses `src/index.css`
+instead of rendering — jsdom has no `@layer` ordering or `backdrop-filter`, so the
+cascade/stacking rules in §3 can only be enforced against the stylesheet. Interactions
+use `fireEvent` (no `user-event` dependency). See `docs/TEST_RECORD.md`.
 
-**Current baseline:** **511 tests across 37 files**, all green on `main` (CI after PR #16, 2026-09-03).
-Named groups — add tests in the matching file (or a new `tests/<area>.test.ts` if the area is new). Full catalog: `docs/TESTING.md`.
+**Integration tests run against a real database**: `tests/helpers/testEnv.ts` adapts Node's
+built-in `node:sqlite` to the D1 interface and applies the actual migrations — no mocks, no new
+dependencies. Use `seedActor()` to get a user+membership+session cookie in one call. Caveat:
+keep drizzle selects on **explicit aliased fields** (positional row mapping breaks on duplicate
+column names). See `docs/TESTING.md` for the full process + test-case catalog.
 
-| Group | How to run | What it covers |
-|---|---|---|
-| Full suite (**required**) | `npm run gate` (alias `test:gate`) | typecheck + lint + every `tests/**/*.test.ts` + build. CI and production deploy run this. |
-| Ship slice (local only) | `npm run test:ship` | Home, tasks, Contacts, Face ID, cron, email, upload (`worker.test.ts`) |
-| Regression slice (local only) | `npm run test:regression` | Events, church settlements, expenses, Google Calendar, bubble nav (`tests/regression-v16.test.ts`) |
-| Auth | `npx vitest run tests/auth.test.ts` | Session, OAuth |
-| Money | `npx vitest run tests/expenses.test.ts tests/funds.test.ts tests/money.test.ts tests/finance-api.test.ts tests/spend-clarity.test.ts` | Spending, funds, commitments, calendar/donut clarity |
-| A single file | `npx vitest run tests/<name>.test.ts` | Fastest loop while editing that area |
-
-Agents inherit this habit because (1) this file is read first, (2) `npm run gate` is the commit bar, (3) CI and production deploy fail otherwise. There is no optional path.
+Frontend libs (`expiry.ts`, `eventTime.ts`) have pure-function unit tests using `Date.UTC()` for
+timezone-stable fixtures. `@testing-library/react` + `jsdom` are installed if you add component
+tests.
 
 ---
 
@@ -251,8 +267,11 @@ Agents inherit this habit because (1) this file is read first, (2) `npm run gate
 - CSRF: Origin/Referer check on mutations **and** the download proxy (Lax cookies ride top-level
   GETs). Downloads always `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`.
 - Google OAuth: Auth Code + PKCE + `state`; ID token verified with `jose` against Google JWKS.
-- Drive scope is `drive.file` (non-sensitive). Its durability across re-consent is **unproven** —
-  a Phase 0.5 spike must validate create→revoke→re-consent→still-readable before Phase 2 UI breadth.
+- Drive scope is `drive.file` (non-sensitive). Calendar push uses
+`calendar.events`. Existing users must sign out/in once after the scope was
+added so Google re-consents and issues a refresh token that includes Calendar.
+Drive durability across re-consent is **unproven** — a Phase 0.5 spike must
+validate create→revoke→re-consent→still-readable before Phase 2 UI breadth.
 - Audit log: write entries on upload/download/delete/role-change (Phase 2 write path is mandatory,
   else the log is permanently empty for early actions).
 
@@ -260,11 +279,10 @@ Agents inherit this habit because (1) this file is read first, (2) `npm run gate
 
 ## 9. Git workflow in this repo
 
-- Develop on a feature branch off `main`. Run `npm run gate` and only commit when it is green.
+- Develop on the designated feature branch (currently `claude/family-vault-pwa-plan-TrvxG`).
 - Conventional-style commit subjects (`feat:`, `security:`, `docs:`, `test:`). Body explains the
   why + lists notable changes. Push with `git push -u origin <branch>`.
-- **Do not open a PR unless explicitly asked** (cloud agents creating PRs as part of their
-  run are the exception).
+- **Do not open a PR unless explicitly asked.**
 - Never commit secrets, `.dev.vars`, or `*.tsbuildinfo` (gitignored).
 
 ---
@@ -275,26 +293,23 @@ Agents inherit this habit because (1) this file is read first, (2) `npm run gate
 worker/
   index.ts              Hono app + scheduled() cron export; route registration
   types.ts              Env bindings (ASSETS, DB, KV) + HonoEnv
-  cron.ts               runExpiryReminders() — Phase 3 range-based scan + per-window dedupe (docs+events)
-  db/schema.ts          ★ single source of truth for all 43 tables
-  lib/finance/          periods.ts (cycle/schedule maths), plan.ts (the money model),
-                        commitmentCron.ts (daily due-date sweep + auto-log)
-  lib/ai/gemini.ts      Gemini function-calling client (tools execute server-side)
-  lib/                   crypto, session, audit (ACTIONS map + audit() helper), drive, reminders, email (Resend), notify
+  cron.ts               runExpiryReminders() — range-based scan + per-window dedupe (docs+events+tasks)
+  db/schema.ts          ★ single source of truth for all 26 tables
+  lib/                   crypto, session, audit, drive, reminders, email, notify, assistant,
+                        expenses, money, scheduleNotify (who to tell), conflicts (double-booking)
   routes/               auth, families, documents, notifications, events, tasks, contacts,
-                        activity, expenses, finance, wishlist, assistant
+                        notes, chat, calendar, expenses, money, assistant
 src/
   App.tsx               routes + Protected wrapper
   context/AuthContext   /auth/me query (retry:false), {user,families,isLoading,isAuthenticated}
   components/ui/         Button, Card, Badge, ListItem, AppBar, Fab, EmptyState, Skeleton, Avatar...
   components/BottomNav   5-tab mobile nav
   lib/                   api.ts (fetch wrapper), expiry.ts, eventTime.ts, cn.ts
-  pages/                 Dashboard, Documents, Calendar, Tasks, Contacts, Family, Settings, Vault,
-                         Expenses (the ledger), money/ (Overview, Commitments, Wishlist, MoneySettings)
-migrations/             generated SQL (0000–0004) + meta/ snapshots
+  pages/                 Dashboard, Documents, DocumentDetail, Calendar, EventDetail, EventForm,
+                         Tasks, TaskDetail, Contacts, Notes, NoteDetail, Chat, Assistant, Expenses, Family, Settings, Login, NotFound
+migrations/             generated SQL (0000–0011) + meta/ snapshots
 scripts/                gen_icons.py, validate_migrations.py
-docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT, SHIPPING
-public/theme-init.js    pre-paint data-theme/data-density init (CSP-safe, no FOUC)
+docs/                   ARCHITECTURE, FEATURES, PLAN, RESEARCH, REVIEW_NOTES, UI_UX_AUDIT
 public/_headers         CSP + security headers for static assets
 wrangler.jsonc          Worker config (no assets.directory!)
 vite.config.ts          plugin chain + PWA config
@@ -313,24 +328,67 @@ vite.config.ts          plugin chain + PWA config
   (no-op without `RESEND_API_KEY`); session purge runs in the same cron. In-app notification
   center + per-user reminder prefs (channels + lead-time windows) are live on the frontend.
 
-The intended remaining build order is Phase 4 (offline/biometric/search) → Phase 5 (hardening +
-E2E: CSRF Origin/Referer checks, rate limiting, the private-doc authz-matrix test) → Phase 6
-(WhatsApp/push/OCR/shared-drive). See `docs/FEATURES.md §5` for the highest-value gaps.
+**Phase-5 hardening (done):** CSRF Origin/Referer middleware on all `/api` mutations + the
+download proxy (`worker/middleware/csrf.ts`); KV fixed-window rate limits on OAuth
+start/callback, invite creation, and upload-url (`worker/lib/rateLimit.ts`, fails open without
+KV); private-doc enforcement on every surface via `isDocHiddenFrom()`; cross-family reference
+guards (`worker/lib/familyScope.ts`); email-bound invites; the authz-matrix + integration suites
+on a real D1 adapter (`tests/helpers/testEnv.ts`).
 
-### v2 expansion (locked decisions D1–D12 in `docs/ARCHITECTURE.md`)
+**Frontend flows (done):** `activeFamily` in AuthContext (persisted, switchable) — every list
+query passes `familyId`; CreateFamily onboarding gate for zero-family users; DocumentForm +
+rebuilt DocumentDetail (Drive upload/download, versions); Tasks with nested subtasks, complete/archive, and planning views (todo / priority / due / recent / mine / completed); Contacts composers; Family page
+invite flow + `/invite/:token` accept page; Dashboard real stats.
 
-The app is expanding into an **encrypted secrets vault**, **fast search over encrypted data**,
-**voice mode**, **responsive UI + Simple/Elder mode**, **comprehensive audit/activity**, and a
-**platform-maintainer role**. The foundational one-way-door decisions are **locked** in
-`ARCHITECTURE.md` (D1–D12) to avoid future migrations.
+**Premium batch (done):** family chat (`chat_messages`, paginated, soft-delete, @mention →
+notification + email via `worker/lib/mentions.ts`); document search (`?q=`) + AI category
+suggestion (`worker/lib/categorize.ts`, Claude structured output behind `ANTHROPIC_API_KEY`,
+heuristics otherwise); calendar integration (Google Calendar **API push** on
+create/update/cancel via `worker/lib/eventCalendarSync.ts`, plus per-event ICS +
+rotatable capability-URL feed); document remind (`POST /documents/:id/remind`);
+dependents (`POST /families/:id/members`) + member profiles (`?member=` filter); rich HTML
+email templates (`worker/lib/emailTemplates.ts` — email-client-safe: tables, inline styles,
+light palette) + Monday weekly digest (`worker/lib/digest.ts`, `digest_log` dedupe); Instagram
+style bottom nav (Home/Docs/Chat/Activity+badge/Family; Settings behind Family's gear).
+Friendly API error copy lives in `src/lib/api.ts` (`ApiError.code` keeps the machine code).
 
-- **Phase 0 (shared foundation) — DONE & deployed.** 13 new tables + `audit_log`/`users` alters
-  (migration 0004, additive); themeable `data-theme`/`data-density` tokens (dark default = zero
-  visual change) + pre-paint `public/theme-init.js`; audit `ACTIONS` map + `audit()` helper +
-  full mutation/auth coverage; `/api/activity/me` + privacy-fixed family feed.
-- **Next, each its own PR/deploy (see `docs/SHIPPING.md`):** Phase 1 Secrets Vault (client-side
-  crypto, WebAuthn, opaque-blob routes, blind-index search) → Phase 2 responsive shell +
-  Simple/Elder mode → Phase 3 voice → Phase 4 platform/ops → Phase 5 generic module system.
+**Assistant + expenses (done):** in-app assistant (`/assistant`) prefers
+Gemini (`GEMINI_API_KEY`) and falls back to Claude. It loads a
+visibility-filtered D1 snapshot (you, family, members, docs, tasks, events,
+expenses, stats) and can write via tools (add expense/task/event/contact,
+complete a task). Family expenses (`/expenses`) store integer cents.
 
-> ⚠️ **Vault invariant (D6):** the Worker stores only opaque ciphertext + wrapped blobs + blind
-> tags. There is **no server decrypt path, ever.** All crypto is client-side (`src/lib/vaultCrypto.ts`).
+**Location tracking (done):** opt-in per member (`location_sharing_prefs`);
+device posts GPS breadcrumbs to `/locations/points` while sharing is on and the
+PWA can read geolocation; `/locations` shows an SVG trail map + weekly km,
+trips, stops, and daily breakdown. Family can view another member's track only
+while that member has sharing enabled. `Permissions-Policy` allows
+`geolocation=(self)`.
+
+**Money settlements (done):** `/expenses` Money page has Settlements | Expenses.
+Settlements use `settlement_destinations` (Mom, Church, …) + `money_movements`
+(`received` / `settled`). Summary exposes available / settled / inHand; any
+family member can log entries (pastor included once invited). Daily cron
+now also reminds open tasks at 7/2/1 days (email + in-app). Documents remain on
+the owner's Google Drive — not GCS.
+
+**Multi-user scheduling (done):** the app's specialty — one member arranging something
+for another — is now enforced end to end. `worker/lib/scheduleNotify.ts` notifies the
+people an action affects (`event_invite`, `event_rescheduled`, `event_cancelled`,
+`event_uninvited`, `event_rsvp`, `task_assigned`, `task_unassigned`), never the actor,
+never dependents (no account) or inactive members. `event_attendees.rsvp` +
+`POST /events/:id/rsvp` make attendance a state the attendee owns — answering is always
+your own right, even without edit permission; only a **dependent** may be answered for.
+`canMutateEvent` opens *creating* to every member but restricts changing/cancelling/
+deleting to the creator or an admin/owner (`GET /events/:id` returns `canEdit`).
+`worker/lib/conflicts.ts` reports double-bookings **advisorily** (half-open intervals;
+a clash needs a shared attendee) and backs `GET /events/availability` free/busy. Event
+reminders are attendee-scoped (family-wide only when there is no guest list; declined
+attendees dropped). `events.version` + `expectedVersion` give opt-in optimistic
+concurrency → `409`. See `docs/TEST_PLAN_MULTIUSER.md` for the full model, the evidence
+that produced it, and what is still open.
+
+Remaining build order: Phase 4 (offline/biometric/full-text search) → Phase 5 rest (a11y,
+component + E2E browser tests — incl. the two-context Playwright scheduling test) →
+Phase 6 (push notifications/OCR/shared-drive). See `docs/FEATURES.md §5`,
+`docs/TESTING.md §4`, and the segmentation roadmap in `docs/PLAN.md`.

@@ -10,43 +10,6 @@ describe("worker API", () => {
     expect(body.service).toBe("family-vault");
   });
 
-  it("GET /api/health lists OAuth redirect URIs when APP_URL is bound", async () => {
-    const res = await app.request("/api/health", {}, { APP_URL: "https://fam.connect-cloud.workers.dev" } as never);
-    const body = (await res.json()) as {
-      oauth?: { loginCallback: string; storageCallback: string };
-    };
-    expect(body.oauth?.loginCallback).toBe(
-      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
-    );
-    expect(body.oauth?.storageCallback).toBe(
-      "https://fam.connect-cloud.workers.dev/api/admin/storage/connect/callback",
-    );
-  });
-
-  it("GET /api/health strips a trailing slash on APP_URL", async () => {
-    const res = await app.request(
-      "/api/health",
-      {},
-      { APP_URL: "https://fam.connect-cloud.workers.dev/" } as never,
-    );
-    const body = (await res.json()) as {
-      oauth?: { loginCallback: string; storageCallback: string };
-    };
-    expect(body.oauth?.loginCallback).toBe(
-      "https://fam.connect-cloud.workers.dev/api/auth/google/callback",
-    );
-    expect(body.oauth?.storageCallback).not.toContain("workers.dev//");
-  });
-
-  it("GET /api/health oauth callbacks are null without APP_URL", async () => {
-    const res = await app.request("/api/health", {}, {} as never);
-    const body = (await res.json()) as {
-      oauth?: { loginCallback: string | null; storageCallback: string | null };
-    };
-    expect(body.oauth?.loginCallback).toBeNull();
-    expect(body.oauth?.storageCallback).toBeNull();
-  });
-
   it("GET /api/auth/me returns an unauthenticated shape", async () => {
     const res = await app.request("/api/auth/me");
     expect(res.status).toBe(200);
@@ -78,13 +41,5 @@ describe("worker API", () => {
     // hono secureHeaders defaults
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("x-frame-options")).toBe("SAMEORIGIN");
-  });
-});
-
-describe("scheduled handler (reminders without login)", () => {
-  it("the Worker default export has a scheduled() function", async () => {
-    const mod = await import("../worker/index");
-    const worker = mod.default as { scheduled?: unknown };
-    expect(typeof worker.scheduled).toBe("function");
   });
 });

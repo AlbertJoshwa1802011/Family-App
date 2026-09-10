@@ -13,22 +13,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
-import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
-import type { Env } from "../worker/types";
 
-const ORIGIN = "http://localhost:5173";
-
-function authed(env: Env, method: string, path: string, cookie: string, body?: unknown) {
-  return app.request(
-    path,
-    {
-      method,
-      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: ORIGIN },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    },
-    env,
-  );
-}
+// ── 1. /api/events — 401 without session ─────────────────────────────────────
 
 describe("/api/events: 401 without session", () => {
   const protectedRoutes = [
@@ -38,7 +24,6 @@ describe("/api/events: 401 without session", () => {
     { method: "PATCH",  path: "/api/events/evt-1" },
     { method: "DELETE", path: "/api/events/evt-1" },
     { method: "POST",   path: "/api/events/evt-1/cancel" },
-    { method: "POST",   path: "/api/events/evt-1/sync-calendar" },
     { method: "POST",   path: "/api/events/evt-1/attendees" },
     { method: "DELETE", path: "/api/events/evt-1/attendees/mem-1" },
   ];
@@ -160,107 +145,5 @@ describe("/api/tasks and /api/contacts: security headers", () => {
   it("GET /api/contacts has x-content-type-options: nosniff (even on 401)", async () => {
     const res = await app.request("/api/contacts");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  });
-});
-
-// ── Nested attendees on GET /events/:id ───────────────────────────────────────
-
-describe("GET /api/events/:id nested attendees", () => {
-  it("returns attendees nested on event.attendees", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
-    const bob = seedActor(sqlite, family.id, "member", { name: "Bob" });
-
-    const create = await authed(env, "POST", "/api/events", alice.cookie, {
-      familyId: family.id,
-      title: "Dinner",
-      startAt: Math.floor(Date.now() / 1000) + 86400,
-      attendeeMemberIds: [alice.memberId, bob.memberId],
-    });
-    expect(create.status).toBe(201);
-    const created = (await create.json()) as { event: { id: string } };
-
-    const get = await authed(env, "GET", `/api/events/${created.event.id}`, alice.cookie);
-    expect(get.status).toBe(200);
-    const body = (await get.json()) as {
-      event: { attendees: { memberId: string; name: string | null }[] };
-      attendees: unknown[];
-    };
-    expect(Array.isArray(body.event.attendees)).toBe(true);
-    expect(body.event.attendees).toHaveLength(2);
-    expect(body.event.attendees.map((a) => a.memberId).sort()).toEqual(
-      [alice.memberId, bob.memberId].sort(),
-    );
-    // Top-level key kept for backward compatibility.
-    expect(Array.isArray(body.attendees)).toBe(true);
-  });
-
-  it("GET returns the saved fields the edit form needs", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
-    const startAt = 1_800_000_000;
-
-    const create = await authed(env, "POST", "/api/events", alice.cookie, {
-      familyId: family.id,
-      title: "School play",
-      type: "milestone",
-      startAt,
-      endAt: startAt + 3600,
-      allDay: false,
-      location: "Town Hall",
-      description: "Bring flowers",
-    });
-    expect(create.status).toBe(201);
-    const created = (await create.json()) as {
-      event: { id: string };
-      calendar: { status: string };
-    };
-    expect(created.calendar.status).toBe("skipped_no_token");
-
-    const get = await authed(env, "GET", `/api/events/${created.event.id}`, alice.cookie);
-    const body = (await get.json()) as {
-      event: {
-        title: string;
-        type: string;
-        startAt: number;
-        endAt: number | null;
-        allDay: boolean;
-        location: string | null;
-        description: string | null;
-      };
-    };
-    expect(body.event.title).toBe("School play");
-    expect(body.event.type).toBe("milestone");
-    expect(body.event.startAt).toBe(startAt);
-    expect(body.event.endAt).toBe(startAt + 3600);
-    expect(body.event.allDay).toBe(false);
-    expect(body.event.location).toBe("Town Hall");
-    expect(body.event.description).toBe("Bring flowers");
-  });
-
-  it("POST create writes an in-app notification for the actor", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const alice = seedActor(sqlite, family.id, "owner", { name: "Alice" });
-
-    const create = await authed(env, "POST", "/api/events", alice.cookie, {
-      familyId: family.id,
-      title: "Picnic",
-      startAt: Math.floor(Date.now() / 1000) + 86400,
-    });
-    expect(create.status).toBe(201);
-
-    const notes = await authed(env, "GET", "/api/notifications", alice.cookie);
-    expect(notes.status).toBe(200);
-    const body = (await notes.json()) as {
-      notifications: { type: string; title: string }[];
-    };
-    expect(body.notifications.some((n) => n.type === "event_created")).toBe(true);
-    expect(body.notifications.some((n) => n.title.includes("Picnic"))).toBe(true);
   });
 });

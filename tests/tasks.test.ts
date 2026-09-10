@@ -1,280 +1,145 @@
 /**
- * Task create/update — subtasks + JSON null optionals (the phone form
- * used to send `notes: null` which Zod .optional() rejected).
+ * Nested tasks: create/list/complete/archive, views, depth cap, cascade delete.
  */
-import { describe, expect, it } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { app } from "../worker/index";
-import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
+import {
+  createTestEnv,
+  seedActor,
+  seedFamily,
+  seedUser,
+  type TestEnv,
+} from "./helpers/testEnv";
 
-const ORIGIN = "http://localhost:5173";
+let t: TestEnv;
+let familyId: string;
+let owner: ReturnType<typeof seedActor>;
+let member: ReturnType<typeof seedActor>;
 
-async function post(
-  env: ReturnType<typeof createTestEnv>["env"],
-  path: string,
-  cookie: string,
-  body: unknown,
-) {
+beforeEach(() => {
+  t = createTestEnv();
+  const ownerUser = seedUser(t.sqlite);
+  familyId = seedFamily(t.sqlite, ownerUser.id).id;
+  owner = seedActor(t.sqlite, familyId, "owner", { name: "Olive Owner" });
+  member = seedActor(t.sqlite, familyId, "member", { name: "Milo Member" });
+});
+
+function req(method: string, path: string, cookie: string, body?: object) {
   return app.request(
     path,
     {
-      method: "POST",
-      headers: {
-        Cookie: cookie,
-        "Content-Type": "application/json",
-        Origin: ORIGIN,
-      },
-      body: JSON.stringify(body),
+      method,
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
     },
-    env,
+    t.env,
   );
 }
 
-describe("POST /api/tasks with subtasks", () => {
-  it("creates a task when empty optionals are JSON null and subtasks are present", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
+interface ApiTask {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  parentTaskId: string | null;
+  assignedToMemberId: string | null;
+  assignedToName: string | null;
+  completedAt: number | null;
+  childCount: number;
+  doneChildCount: number;
+  dueDate: string | null;
+  createdAt: number;
+}
 
-    const res = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "Pack for trip",
-      notes: null,
-      assignedToMemberId: null,
-      referredTaskId: null,
-      reminderDate: null,
-      remindMemberId: null,
-      subtasks: [
-        { id: "st-1", title: "Passports", done: false },
-        { id: "st-2", title: "Tickets", done: true },
-      ],
-    });
+async function createTask(
+  cookie: string,
+  body: Record<string, unknown>,
+): Promise<ApiTask> {
+  const res = await req("POST", "/api/tasks", cookie, { familyId, ...body });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { task: ApiTask }).task;
+}
 
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      task: { title: string; subtasks: { title: string; done: boolean }[] };
-    };
-    expect(body.task.title).toBe("Pack for trip");
-    expect(body.task.subtasks).toHaveLength(2);
-    expect(body.task.subtasks[0]?.title).toBe("Passports");
-    expect(body.task.subtasks[1]?.done).toBe(true);
-  });
-
-  it("rejects a missing title with validation_error", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-
-    const res = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "",
-      subtasks: [{ id: "st-1", title: "Nope", done: false }],
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("validation_error");
-  });
-
-  it("returns 401 without a session", async () => {
-    const { env } = createTestEnv();
-    const res = await post(env, "/api/tasks", "", { title: "x", familyId: "f" });
-    expect(res.status).toBe(401);
-  });
-});
-
-describe("GET/PATCH /api/tasks/:id subtasks", () => {
-  it("GET returns parsed subtasks after create", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-
-    const created = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "School run",
-      dueDate: null,
-      subtasks: [{ id: "a", title: "Bags", done: false }],
-    });
-    expect(created.status).toBe(201);
-    const { task } = (await created.json()) as { task: { id: string } };
-
-    const got = await app.request(`/api/tasks/${task.id}`, {
-      headers: { Cookie: actor.cookie },
-    }, env);
-    expect(got.status).toBe(200);
-    const body = (await got.json()) as {
-      task: { subtasks: { title: string }[] };
-    };
-    expect(body.task.subtasks).toEqual([{ id: "a", title: "Bags", done: false }]);
-  });
-
-  it("PATCH accepts JSON null optionals and replaces subtasks", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const created = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "Pack",
-      subtasks: [{ id: "a", title: "Bags", done: false }],
-    });
-    const { task } = (await created.json()) as { task: { id: string } };
-
-    const res = await app.request(`/api/tasks/${task.id}`, {
-      method: "PATCH",
-      headers: {
-        Cookie: actor.cookie,
-        "Content-Type": "application/json",
-        Origin: ORIGIN,
-      },
-      body: JSON.stringify({
-        notes: null,
-        dueDate: null,
-        reminderDate: null,
-        subtasks: [
-          { id: "a", title: "Bags", done: true },
-          { id: "b", title: "Lunch", done: false },
-        ],
-      }),
-    }, env);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      task: { subtasks: { title: string; done: boolean }[] };
-    };
-    expect(body.task.subtasks).toHaveLength(2);
-    expect(body.task.subtasks[0]?.done).toBe(true);
-    expect(body.task.subtasks[1]?.title).toBe("Lunch");
-  });
-});
-
-describe("nested tasks + views", () => {
-  async function mutate(
-    env: ReturnType<typeof createTestEnv>["env"],
-    method: string,
-    path: string,
-    cookie: string,
-    body?: unknown,
-  ) {
-    return app.request(
-      path,
-      {
-        method,
-        headers: {
-          Cookie: cookie,
-          "Content-Type": "application/json",
-          Origin: ORIGIN,
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      },
-      env,
-    );
-  }
-
-  interface ApiTask {
-    id: string;
-    title: string;
-    status: string;
-    priority: string;
-    parentTaskId: string | null;
-    completedAt: number | null;
-    childCount: number;
-    doneChildCount: number;
-    assignedToMemberId: string | null;
-  }
-
-  it("creates a nested child, counts it on the parent, and returns ancestors/depth", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-
-    const parentRes = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "Travel prep",
-    });
-    expect(parentRes.status).toBe(201);
-    const { task: parent } = (await parentRes.json()) as { task: ApiTask };
-
-    const childRes = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
+describe("task nesting", () => {
+  it("creates a subtask under a parent in the same family", async () => {
+    const parent = await createTask(owner.cookie, { title: "Travel prep" });
+    const child = await createTask(owner.cookie, {
       title: "Renew passport",
       parentTaskId: parent.id,
       priority: "high",
     });
-    expect(childRes.status).toBe(201);
-    const { task: child } = (await childRes.json()) as { task: ApiTask };
     expect(child.parentTaskId).toBe(parent.id);
     expect(child.priority).toBe("high");
+    expect(child.status).toBe("open");
 
-    const list = await app.request(
-      `/api/tasks?familyId=${family.id}`,
-      { headers: { Cookie: actor.cookie } },
-      env,
-    );
+    const list = await req("GET", `/api/tasks?familyId=${familyId}`, member.cookie);
     expect(list.status).toBe(200);
     const { tasks } = (await list.json()) as { tasks: ApiTask[] };
-    expect(tasks.find((t) => t.id === parent.id)?.childCount).toBe(1);
+    const listedParent = tasks.find((x) => x.id === parent.id)!;
+    expect(listedParent.childCount).toBe(1);
+    expect(listedParent.doneChildCount).toBe(0);
+  });
 
-    const got = await app.request(
-      `/api/tasks/${child.id}`,
-      { headers: { Cookie: actor.cookie } },
-      env,
-    );
-    expect(got.status).toBe(200);
-    const body = (await got.json()) as {
+  it("GET /tasks/:id returns ancestors, children, and depth", async () => {
+    const root = await createTask(owner.cookie, { title: "House" });
+    const mid = await createTask(owner.cookie, {
+      title: "Kitchen",
+      parentTaskId: root.id,
+    });
+    const leaf = await createTask(owner.cookie, {
+      title: "Replace tap",
+      parentTaskId: mid.id,
+    });
+
+    const res = await req("GET", `/api/tasks/${leaf.id}`, member.cookie);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
       task: ApiTask;
       ancestors: ApiTask[];
       children: ApiTask[];
       depth: number;
     };
-    expect(body.ancestors.map((a) => a.id)).toEqual([parent.id]);
-    expect(body.depth).toBe(1);
+    expect(body.task.id).toBe(leaf.id);
+    expect(body.ancestors.map((a) => a.id)).toEqual([root.id, mid.id]);
+    expect(body.depth).toBe(2);
     expect(body.children).toEqual([]);
+
+    const midRes = await req("GET", `/api/tasks/${mid.id}`, member.cookie);
+    const midBody = (await midRes.json()) as { children: ApiTask[] };
+    expect(midBody.children.map((c) => c.id)).toEqual([leaf.id]);
   });
 
-  it("rejects a parent from another family", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-
-    const strangerUser = seedUser(sqlite);
-    const otherFamily = seedFamily(sqlite, strangerUser.id);
-    const stranger = seedActor(sqlite, otherFamily.id, "owner");
-    const foreignRes = await post(env, "/api/tasks", stranger.cookie, {
+  it("rejects a parent from another family (400 invalid_parent_id)", async () => {
+    const strangerUser = seedUser(t.sqlite);
+    const otherFamily = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, otherFamily.id, "owner");
+    const foreign = await req("POST", "/api/tasks", stranger.cookie, {
       familyId: otherFamily.id,
       title: "Foreign parent",
     });
-    const { task: foreign } = (await foreignRes.json()) as { task: ApiTask };
+    const { task: foreignTask } = (await foreign.json()) as { task: ApiTask };
 
-    const res = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
+    const res = await req("POST", "/api/tasks", owner.cookie, {
+      familyId,
       title: "Sneaky child",
-      parentTaskId: foreign.id,
+      parentTaskId: foreignTask.id,
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("invalid_parent_id");
   });
 
   it("caps nesting at 5 layers below the root", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-
     let parentId: string | undefined;
     for (let i = 0; i <= 5; i++) {
-      const created = await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
+      const created = await createTask(owner.cookie, {
         title: `L${i}`,
         parentTaskId: parentId,
       });
-      expect(created.status).toBe(201);
-      parentId = ((await created.json()) as { task: ApiTask }).task.id;
+      parentId = created.id;
     }
-    const res = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
+    // parentId is now depth 5; a child would be depth 6 → rejected
+    const res = await req("POST", "/api/tasks", owner.cookie, {
+      familyId,
       title: "too deep",
       parentTaskId: parentId,
     });
@@ -282,44 +147,48 @@ describe("nested tasks + views", () => {
     expect(((await res.json()) as { error: string }).error).toBe("max_task_depth");
   });
 
-  it("rejects reparenting a task under its own descendant", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const root = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Root",
-      })
-    ).json()) as { task: ApiTask }).task;
-    const child = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Child",
-        parentTaskId: root.id,
-      })
-    ).json()) as { task: ApiTask }).task;
-
-    const res = await mutate(env, "PATCH", `/api/tasks/${root.id}`, actor.cookie, {
+  it("rejects reparenting a task under its own descendant (cycle)", async () => {
+    const root = await createTask(owner.cookie, { title: "Root" });
+    const child = await createTask(owner.cookie, {
+      title: "Child",
+      parentTaskId: root.id,
+    });
+    const res = await req("PATCH", `/api/tasks/${root.id}`, owner.cookie, {
       parentTaskId: child.id,
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("task_cycle");
   });
 
-  it("marking done sets completedAt, drops it from view=todo, and lists it under view=completed", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const created = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "File taxes",
+  it("delete cascades to all descendants (explicit, not FK-only)", async () => {
+    const root = await createTask(owner.cookie, { title: "Root" });
+    const mid = await createTask(owner.cookie, {
+      title: "Mid",
+      parentTaskId: root.id,
     });
-    const { task } = (await created.json()) as { task: ApiTask };
+    const leaf = await createTask(owner.cookie, {
+      title: "Leaf",
+      parentTaskId: mid.id,
+    });
+    const sibling = await createTask(owner.cookie, { title: "Keep me" });
 
-    const done = await mutate(env, "PATCH", `/api/tasks/${task.id}`, actor.cookie, {
+    const del = await req("DELETE", `/api/tasks/${root.id}`, owner.cookie);
+    expect(del.status).toBe(200);
+    expect(((await del.json()) as { deleted: number }).deleted).toBe(3);
+
+    expect((await req("GET", `/api/tasks/${leaf.id}`, owner.cookie)).status).toBe(404);
+    expect((await req("GET", `/api/tasks/${mid.id}`, owner.cookie)).status).toBe(404);
+    expect((await req("GET", `/api/tasks/${root.id}`, owner.cookie)).status).toBe(404);
+
+    const keep = await req("GET", `/api/tasks/${sibling.id}`, owner.cookie);
+    expect(keep.status).toBe(200);
+  });
+});
+
+describe("complete / archive / views", () => {
+  it("marking done sets completedAt, drops it from view=todo, and lists it under view=completed", async () => {
+    const task = await createTask(owner.cookie, { title: "File taxes" });
+    const done = await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, {
       status: "done",
     });
     expect(done.status).toBe(200);
@@ -327,24 +196,23 @@ describe("nested tasks + views", () => {
     expect(updated.status).toBe("done");
     expect(updated.completedAt).toBeGreaterThan(0);
 
-    const todo = await app.request(
-      `/api/tasks?familyId=${family.id}&view=todo`,
-      { headers: { Cookie: actor.cookie } },
-      env,
+    const todo = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=todo`,
+      owner.cookie,
     );
     const todoBody = (await todo.json()) as { tasks: ApiTask[] };
     expect(todoBody.tasks.map((x) => x.id)).not.toContain(task.id);
 
-    const completed = await app.request(
-      `/api/tasks?familyId=${family.id}&view=completed`,
-      { headers: { Cookie: actor.cookie } },
-      env,
+    const completed = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=completed`,
+      owner.cookie,
     );
-    expect(
-      ((await completed.json()) as { tasks: ApiTask[] }).tasks.map((x) => x.id),
-    ).toContain(task.id);
+    const completedBody = (await completed.json()) as { tasks: ApiTask[] };
+    expect(completedBody.tasks.map((x) => x.id)).toContain(task.id);
 
-    const reopen = await mutate(env, "PATCH", `/api/tasks/${task.id}`, actor.cookie, {
+    const reopen = await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, {
       status: "open",
     });
     const { task: opened } = (await reopen.json()) as { task: ApiTask };
@@ -352,131 +220,225 @@ describe("nested tasks + views", () => {
     expect(opened.completedAt).toBeNull();
   });
 
-  it("DELETE cascades to descendants", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const root = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Root",
-      })
-    ).json()) as { task: ApiTask }).task;
-    const mid = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Mid",
-        parentTaskId: root.id,
-      })
-    ).json()) as { task: ApiTask }).task;
-    const leaf = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Leaf",
-        parentTaskId: mid.id,
-      })
-    ).json()) as { task: ApiTask }).task;
-    const sibling = ((await (
-      await post(env, "/api/tasks", actor.cookie, {
-        familyId: family.id,
-        title: "Keep me",
-      })
-    ).json()) as { task: ApiTask }).task;
+  it("archived tasks are hidden from the default list and from completed", async () => {
+    const task = await createTask(owner.cookie, { title: "Old chore" });
+    await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, { status: "done" });
+    await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, { status: "archived" });
 
-    const del = await mutate(env, "DELETE", `/api/tasks/${root.id}`, actor.cookie);
-    expect(del.status).toBe(200);
-    expect(((await del.json()) as { deleted: number }).deleted).toBe(3);
+    const def = await req("GET", `/api/tasks?familyId=${familyId}`, owner.cookie);
+    const defBody = (await def.json()) as { tasks: ApiTask[] };
+    expect(defBody.tasks.map((x) => x.id)).not.toContain(task.id);
 
+    const completed = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=completed`,
+      owner.cookie,
+    );
     expect(
-      (await app.request(`/api/tasks/${leaf.id}`, { headers: { Cookie: actor.cookie } }, env))
-        .status,
-    ).toBe(404);
+      ((await completed.json()) as { tasks: ApiTask[] }).tasks.map((x) => x.id),
+    ).not.toContain(task.id);
+
+    const archived = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&status=archived`,
+      owner.cookie,
+    );
     expect(
-      (await app.request(`/api/tasks/${sibling.id}`, { headers: { Cookie: actor.cookie } }, env))
-        .status,
-    ).toBe(200);
+      ((await archived.json()) as { tasks: ApiTask[] }).tasks.map((x) => x.id),
+    ).toContain(task.id);
   });
 
-  it("view=priority returns open tasks with high first; view=mine is the caller's assignments", async () => {
-    const { env, sqlite } = createTestEnv();
-    const ownerUser = seedUser(sqlite);
-    const family = seedFamily(sqlite, ownerUser.id);
-    const owner = seedActor(sqlite, family.id, "owner");
-    const member = seedActor(sqlite, family.id, "member");
-
-    await post(env, "/api/tasks", owner.cookie, {
-      familyId: family.id,
-      title: "Low job",
-      priority: "low",
-    });
-    const high = await post(env, "/api/tasks", owner.cookie, {
-      familyId: family.id,
+  it("view=priority returns open tasks with high first", async () => {
+    await createTask(owner.cookie, { title: "Low job", priority: "low" });
+    const high = await createTask(owner.cookie, {
       title: "Urgent",
       priority: "high",
     });
-    expect(high.status).toBe(201);
-    await post(env, "/api/tasks", owner.cookie, {
-      familyId: family.id,
-      title: "Mid job",
-      priority: "medium",
+    await createTask(owner.cookie, { title: "Mid job", priority: "medium" });
+
+    const res = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=priority`,
+      owner.cookie,
+    );
+    const { tasks } = (await res.json()) as { tasks: ApiTask[] };
+    expect(tasks[0].id).toBe(high.id);
+    expect(tasks.map((x) => x.priority)).toEqual(["high", "medium", "low"]);
+  });
+
+  it("view=due returns overdue + due-soon open tasks, earliest first", async () => {
+    const overdue = await createTask(owner.cookie, {
+      title: "Overdue",
+      dueDate: "2020-01-01",
     });
-    await post(env, "/api/tasks", owner.cookie, {
-      familyId: family.id,
-      title: "For member",
+    const soon = await createTask(owner.cookie, {
+      title: "Soon",
+      dueDate: "2099-01-01",
+    });
+    await createTask(owner.cookie, { title: "No date" });
+
+    const res = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=due`,
+      owner.cookie,
+    );
+    const { tasks } = (await res.json()) as { tasks: ApiTask[] };
+    expect(tasks.map((x) => x.id)).toContain(overdue.id);
+    expect(tasks.map((x) => x.id)).not.toContain(soon.id);
+    expect(tasks[0].id).toBe(overdue.id);
+  });
+
+  it("view=recent returns newest first and includes a just-created task", async () => {
+    const older = await createTask(owner.cookie, { title: "Older" });
+    const newer = await createTask(owner.cookie, { title: "Newer" });
+    const res = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=recent`,
+      owner.cookie,
+    );
+    const { tasks } = (await res.json()) as { tasks: ApiTask[] };
+    expect(tasks.map((x) => x.id)).toEqual(expect.arrayContaining([older.id, newer.id]));
+    // Same-second inserts are possible; only assert order when createdAt differs.
+    if (newer.createdAt !== older.createdAt) {
+      expect(tasks[0].id).toBe(newer.id);
+    }
+  });
+
+  it("view=mine is scoped to the caller's membership, not someone else's", async () => {
+    await createTask(owner.cookie, {
+      title: "For Milo",
       assignedToMemberId: member.memberId,
     });
-
-    const pri = await app.request(
-      `/api/tasks?familyId=${family.id}&view=priority`,
-      { headers: { Cookie: owner.cookie } },
-      env,
-    );
-    const { tasks } = (await pri.json()) as { tasks: ApiTask[] };
-    expect(tasks[0]?.title).toBe("Urgent");
-    const titles = tasks.map((x) => x.title);
-    expect(titles.indexOf("Urgent")).toBeLessThan(titles.indexOf("Mid job"));
-    expect(titles.indexOf("Mid job")).toBeLessThan(titles.indexOf("Low job"));
-
-    const mine = await app.request(
-      `/api/tasks?familyId=${family.id}&view=mine`,
-      { headers: { Cookie: member.cookie } },
-      env,
-    );
-    const mineTasks = ((await mine.json()) as { tasks: ApiTask[] }).tasks;
-    expect(mineTasks).toHaveLength(1);
-    expect(mineTasks[0]?.title).toBe("For member");
-  });
-
-  it("rejects an unknown view with validation_error", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const res = await app.request(
-      `/api/tasks?familyId=${family.id}&view=nope`,
-      { headers: { Cookie: actor.cookie } },
-      env,
-    );
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toBe("validation_error");
-  });
-
-  it("still creates a JSON-checklist task (subtasks array) alongside nested rows", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const res = await post(env, "/api/tasks", actor.cookie, {
-      familyId: family.id,
-      title: "Pack",
-      subtasks: [{ id: "st-1", title: "Passports", done: false }],
+    await createTask(owner.cookie, {
+      title: "For Olive",
+      assignedToMemberId: owner.memberId,
     });
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      task: { subtasks: { title: string }[]; parentTaskId: string | null };
-    };
-    expect(body.task.subtasks).toHaveLength(1);
-    expect(body.task.parentTaskId).toBeNull();
+    const milo = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=mine`,
+      member.cookie,
+    );
+    const miloTasks = ((await milo.json()) as { tasks: ApiTask[] }).tasks;
+    expect(miloTasks).toHaveLength(1);
+    expect(miloTasks[0].title).toBe("For Milo");
+    expect(miloTasks[0].assignedToName).toBe("Milo Member");
+  });
+
+  it("search ?q= matches a nested title and includes its ancestors", async () => {
+    const root = await createTask(owner.cookie, { title: "Travel prep" });
+    const mid = await createTask(owner.cookie, {
+      title: "Documents",
+      parentTaskId: root.id,
+    });
+    await createTask(owner.cookie, {
+      title: "Scan passport photo",
+      parentTaskId: mid.id,
+    });
+
+    const res = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&q=${encodeURIComponent("passport")}`,
+      owner.cookie,
+    );
+    const { tasks } = (await res.json()) as { tasks: ApiTask[] };
+    expect(tasks.map((x) => x.title).sort()).toEqual(
+      ["Documents", "Scan passport photo", "Travel prep"].sort(),
+    );
+  });
+
+  it("completing a child updates the parent's doneChildCount", async () => {
+    const parent = await createTask(owner.cookie, { title: "Parent" });
+    const child = await createTask(owner.cookie, {
+      title: "Child",
+      parentTaskId: parent.id,
+    });
+    await req("PATCH", `/api/tasks/${child.id}`, owner.cookie, { status: "done" });
+    const res = await req("GET", `/api/tasks/${parent.id}`, owner.cookie);
+    const { task: p } = (await res.json()) as { task: ApiTask };
+    expect(p.childCount).toBe(1);
+    expect(p.doneChildCount).toBe(1);
+  });
+});
+
+describe("task validation + isolation", () => {
+  it("POST missing title / over-max / bad date / bad priority → 400 validation_error", async () => {
+    const missing = await req("POST", "/api/tasks", owner.cookie, { familyId });
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { error: string }).error).toBe("validation_error");
+
+    const long = await req("POST", "/api/tasks", owner.cookie, {
+      familyId,
+      title: "x".repeat(301),
+    });
+    expect(long.status).toBe(400);
+
+    const date = await req("POST", "/api/tasks", owner.cookie, {
+      familyId,
+      title: "Bad date",
+      dueDate: "5 Sept 2026",
+    });
+    expect(date.status).toBe(400);
+
+    const pri = await req("POST", "/api/tasks", owner.cookie, {
+      familyId,
+      title: "Bad pri",
+      priority: "urgent",
+    });
+    expect(pri.status).toBe(400);
+
+    const view = await req(
+      "GET",
+      `/api/tasks?familyId=${familyId}&view=nope`,
+      owner.cookie,
+    );
+    expect(view.status).toBe(400);
+  });
+
+  it("PATCH status pending → 400; null assignee still clears", async () => {
+    const task = await createTask(owner.cookie, {
+      title: "Assigned",
+      assignedToMemberId: member.memberId,
+    });
+    const bad = await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, {
+      status: "pending",
+    });
+    expect(bad.status).toBe(400);
+
+    const clear = await req("PATCH", `/api/tasks/${task.id}`, owner.cookie, {
+      assignedToMemberId: null,
+    });
+    expect(
+      ((await clear.json()) as { task: ApiTask }).task.assignedToMemberId,
+    ).toBeNull();
+  });
+
+  it("non-member cannot list, get, create, or complete (404)", async () => {
+    const task = await createTask(owner.cookie, { title: "Secret" });
+    const strangerUser = seedUser(t.sqlite);
+    const otherFamily = seedFamily(t.sqlite, strangerUser.id);
+    const stranger = seedActor(t.sqlite, otherFamily.id, "owner");
+
+    expect(
+      (await req("GET", `/api/tasks?familyId=${familyId}`, stranger.cookie)).status,
+    ).toBe(404);
+    expect((await req("GET", `/api/tasks/${task.id}`, stranger.cookie)).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await req("POST", "/api/tasks", stranger.cookie, {
+          familyId,
+          title: "Nope",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await req("PATCH", `/api/tasks/${task.id}`, stranger.cookie, { status: "done" }))
+        .status,
+    ).toBe(404);
+  });
+
+  it("unknown view / missing familyId → 400", async () => {
+    expect((await req("GET", "/api/tasks", owner.cookie)).status).toBe(400);
   });
 });

@@ -1,15 +1,18 @@
 /**
  * Tag-a-family-member notifications.
  *
- * Chat @mentions ("@Priya don't forget the passport") share one delivery path:
- * in-app notification + best-effort email honoring the recipient's email pref.
+ * Two entry points share one delivery path (in-app notification + best-effort
+ * email honoring the recipient's email preference):
+ *  - chat @mentions ("@Priya don't forget the passport")
+ *  - explicit document reminders ("Remind…" on a document)
  */
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { Env } from "../types";
 import type { Db } from "../db/client";
 import { schema } from "../db/client";
 import { createNotification } from "./notify";
-import { reminderEmailHtml, sendEmail } from "./email";
+import { sendEmail } from "./email";
+import { reminderEmail } from "./emailTemplates";
 
 export interface MentionableMember {
   userId: string;
@@ -68,7 +71,7 @@ export function findMentions(
   return [...hit.values()];
 }
 
-/** Delivers one mention notification (in-app always, email if enabled). */
+/** Delivers one tag/remind notification (in-app always, email if enabled). */
 export async function notifyMember(
   env: Env,
   db: Db,
@@ -95,11 +98,12 @@ export async function notifyMember(
     await sendEmail(env, {
       to: opts.recipient.email,
       subject: opts.title,
-      html: reminderEmailHtml({
+      html: reminderEmail({
         heading: opts.title,
         body: opts.body,
         ctaLabel: "Open Family Vault",
         ctaUrl: `${appUrl}${opts.link}`,
+        urgency: "info",
       }),
     });
   }

@@ -7,28 +7,17 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  canSendEmail,
-  classifyResendError,
   isEmailConfigured,
   reminderEmailHtml,
   sendEmail,
-  sendEmailResult,
 } from "../worker/lib/email";
 import type { Env } from "../worker/types";
-
-function stubKv(): KVNamespace {
-  return {
-    get: async () => null,
-    put: async () => {},
-    delete: async () => {},
-  } as unknown as KVNamespace;
-}
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: {} as Fetcher,
     DB: {} as D1Database,
-    KV: stubKv(),
+    KV: {} as KVNamespace,
     APP_URL: "https://vault.example",
     ...overrides,
   };
@@ -44,25 +33,6 @@ describe("isEmailConfigured", () => {
   });
   it("true with RESEND_API_KEY", () => {
     expect(isEmailConfigured(makeEnv({ RESEND_API_KEY: "re_test" }))).toBe(true);
-  });
-});
-
-describe("canSendEmail", () => {
-  it("true when Resend is configured", async () => {
-    expect(await canSendEmail(makeEnv({ RESEND_API_KEY: "re_test" }))).toBe(true);
-  });
-
-  it("true when the storage Gmail refresh token is in KV", async () => {
-    const kv = {
-      get: async (key: string) => (key === "storage:refresh_token" ? "rt" : null),
-      put: async () => {},
-      delete: async () => {},
-    } as unknown as KVNamespace;
-    expect(await canSendEmail(makeEnv({ KV: kv }))).toBe(true);
-  });
-
-  it("false with neither Resend nor a storage token", async () => {
-    expect(await canSendEmail(makeEnv())).toBe(false);
   });
 });
 
@@ -97,26 +67,7 @@ describe("sendEmail", () => {
     expect(headers.Authorization).toBe("Bearer re_test");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.to).toBe("a@b.com");
-    expect(body.subject).toBe("[Family Vault reminder] Expiring soon");
-  });
-
-  it("skips the reminder prefix when reminder: false (invites)", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify({ id: "e1" }), { status: 200 }));
-
-    const ok = await sendEmail(
-      makeEnv({ RESEND_API_KEY: "re_test" }),
-      {
-        to: "cousin@example.com",
-        subject: "You're invited to Hall Family on Family Vault",
-        html: "<p>join</p>",
-      },
-      { reminder: false },
-    );
-    expect(ok).toBe(true);
-    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
-    expect(body.subject).toBe("You're invited to Hall Family on Family Vault");
+    expect(body.subject).toBe("Expiring soon");
   });
 
   it("returns false on a non-2xx Resend response", async () => {
@@ -139,64 +90,6 @@ describe("sendEmail", () => {
       html: "<p>x</p>",
     });
     expect(ok).toBe(false);
-  });
-});
-
-describe("sendEmailResult", () => {
-  it("returns via:none when no Gmail token and no Resend key", async () => {
-    const result = await sendEmailResult(makeEnv(), {
-      to: "a@b.com",
-      subject: "Hi",
-      html: "<p>x</p>",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.via).toBe("none");
-  });
-
-  it("returns ok:false when Resend rejects", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("bad from", { status: 403 }),
-    );
-    const result = await sendEmailResult(makeEnv({ RESEND_API_KEY: "re_test" }), {
-      to: "a@b.com",
-      subject: "Hi",
-      html: "<p>x</p>",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.via).toBe("none");
-    expect(result.error).toBe("resend_rejected");
-  });
-
-  it("surfaces Resend testing-mode recipient restriction", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          statusCode: 403,
-          name: "validation_error",
-          message:
-            "You can only send testing emails to your own email address (owner@example.com).",
-        }),
-        { status: 403 },
-      ),
-    );
-    const result = await sendEmailResult(makeEnv({ RESEND_API_KEY: "re_test" }), {
-      to: "other@example.com",
-      subject: "Hi",
-      html: "<p>x</p>",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("resend_testing_recipients");
-  });
-});
-
-describe("classifyResendError", () => {
-  it("detects testing-mode recipient limits", () => {
-    expect(
-      classifyResendError(
-        403,
-        "You can only send testing emails to your own email address (a@b.com). To send emails to other recipients, please verify a domain.",
-      ),
-    ).toBe("resend_testing_recipients");
   });
 });
 

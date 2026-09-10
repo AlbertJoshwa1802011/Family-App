@@ -2,7 +2,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -14,6 +13,9 @@ export interface User {
   email: string;
   name?: string | null;
   picture?: string | null;
+  /** Platform roles (e.g. super_admin). Orthogonal to family role. */
+  appRoles?: string[];
+  /** Convenience: true when appRoles includes super_admin / platform admin. */
   isPlatformAdmin?: boolean;
 }
 
@@ -21,6 +23,8 @@ export interface Family {
   id: string;
   name: string;
   role: "owner" | "admin" | "member";
+  /** Enabled product modules for this membership. Owners always have all. */
+  modules?: import("../lib/modules").FamilyModule[];
 }
 
 interface MeResponse {
@@ -31,27 +35,37 @@ interface MeResponse {
 interface AuthValue {
   user: User | null;
   families: Family[];
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  /** The family every family-scoped query should target. Null until /auth/me resolves. */
+  /**
+   * The family every page operates on. All list/create calls MUST scope to
+   * activeFamily.id — the API requires familyId and enforces membership.
+   * Defaults to the first membership; persisted so multi-family users keep
+   * their selection across sessions.
+   */
   activeFamily: Family | null;
+  /** Convenience alias for activeFamily?.id — Money UI from main uses this. */
   activeFamilyId: string | null;
   setActiveFamilyId: (id: string) => void;
+  isLoading: boolean;
+  isAuthenticated: boolean;
   /** Revoke the server session, drop cached PII, and hard-navigate to login. */
   signOut: () => Promise<void>;
 }
 
+const ACTIVE_FAMILY_KEY = "fv.activeFamilyId";
+
 const AuthContext = createContext<AuthValue | undefined>(undefined);
 
-const ACTIVE_FAMILY_KEY = "fv:activeFamilyId";
+/** Safe for chrome that may render in tests without AuthProvider. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalAuth(): AuthValue | undefined {
+  return useContext(AuthContext);
+}
 
-function readStoredFamilyId(): string | null {
-  try {
-    return localStorage.getItem(ACTIVE_FAMILY_KEY);
-  } catch {
-    // Private mode / storage disabled — fall back to the first family.
-    return null;
-  }
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth(): AuthValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  return ctx;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,61 +77,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
-  const families = useMemo(() => data?.families ?? [], [data?.families]);
-  const [storedId, setStoredId] = useState<string | null>(readStoredFamilyId);
+  const [storedFamilyId, setStoredFamilyId] = useState<string | null>(() =>
+    localStorage.getItem(ACTIVE_FAMILY_KEY),
+  );
 
   const setActiveFamilyId = useCallback((id: string) => {
-    setStoredId(id);
-    try {
-      localStorage.setItem(ACTIVE_FAMILY_KEY, id);
-    } catch {
-      // Non-fatal: selection just won't survive a reload.
-    }
+    localStorage.setItem(ACTIVE_FAMILY_KEY, id);
+    setStoredFamilyId(id);
   }, []);
 
   const signOut = useCallback(async () => {
     try {
+      // Empty JSON body so Content-Type: application/json is well-formed.
       await api("/auth/logout", { method: "POST", body: "{}" });
     } catch {
-      // Best-effort: a failed revoke must not leave the UI signed in.
+      // Still drop local state — a failed revoke must not strand the UI
+      // in a signed-in Settings screen with no feedback.
     }
-    try {
-      localStorage.removeItem(ACTIVE_FAMILY_KEY);
-    } catch {
-      // Non-fatal.
-    }
-    setStoredId(null);
-    await qc.cancelQueries();
-    qc.clear();
-    // Hard navigation so Login cannot bounce back to `/` on stale auth state.
+    localStorage.removeItem(ACTIVE_FAMILY_KEY);
+    setStoredFamilyId(null);
+    // Instantly flip isAuthenticated so <Protected> doesn't keep rendering
+    // family screens from the previous /auth/me payload (staleTime is 30s).
+    qc.setQueryData<MeResponse>(["me"], { user: null, families: [] });
+    qc.removeQueries({
+      predicate: (query) => query.queryKey[0] !== "me",
+    });
+    // Hard navigation clears in-memory PII on a shared phone and avoids
+    // Login bouncing back home if any observer still held old auth data.
     window.location.replace("/login");
   }, [qc]);
 
-  // Resolve the stored id against the memberships we actually have. A stale id
-  // (family left or deleted) must not strand the user on a family they can't
-  // read, so fall back to the first membership. The stored value is only a
-  // preference — it is written when the user actually picks a family, never
-  // healed from an effect.
+  const families = data?.families ?? [];
   const activeFamily =
-    families.find((f) => f.id === storedId) ?? families[0] ?? null;
+    families.find((f) => f.id === storedFamilyId) ?? families[0] ?? null;
+
+  const rawUser = data?.user ?? null;
+  const user = rawUser
+    ? {
+        ...rawUser,
+        isPlatformAdmin:
+          rawUser.isPlatformAdmin ??
+          rawUser.appRoles?.includes("super_admin") ??
+          false,
+      }
+    : null;
 
   const value: AuthValue = {
-    user: data?.user ?? null,
+    user,
     families,
-    isLoading,
-    isAuthenticated: Boolean(data?.user),
     activeFamily,
     activeFamilyId: activeFamily?.id ?? null,
     setActiveFamilyId,
+    isLoading,
+    isAuthenticated: Boolean(user),
     signOut,
   };
 
   return <AuthContext value={value}>{children}</AuthContext>;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function useAuth(): AuthValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
-  return ctx;
 }

@@ -1,12 +1,7 @@
 @import "tailwindcss";
 
-/* ── Custom variants ──────────────────────────────────────────────────────────
-   `elder:` applies to descendants of <html data-density="elder"> (Simple mode),
-   e.g. `elder:hidden` to drop clutter, `hidden elder:flex` to reveal big controls. */
-@custom-variant elder (&:where([data-density="elder"] *));
-
 @theme {
-  /* Brand (STATIC — brand identity, intentionally not themed) */
+  /* Brand */
   --color-vault-50: #f0fdfa;
   --color-vault-300: #5eead4;
   --color-vault-400: #2dd4bf;
@@ -14,312 +9,55 @@
   --color-vault-600: #0d9488;
   --color-vault-700: #0f766e;
 
-  /* Material You Accents */
-  --color-m3-blue: #3b82f6;
-  --color-m3-blue-bg: rgba(59, 130, 246, 0.12);
-  --color-m3-red: #ef4444;
-  --color-m3-red-bg: rgba(239, 68, 68, 0.12);
-  --color-m3-green: #10b981;
-  --color-m3-green-bg: rgba(16, 185, 129, 0.12);
-  --color-m3-yellow: #f59e0b;
-  --color-m3-yellow-bg: rgba(245, 158, 11, 0.12);
-  --color-m3-purple: #8b5cf6;
-  --color-m3-purple-bg: rgba(139, 92, 246, 0.12);
-  --color-m3-cyan: #06b6d4;
-  --color-m3-cyan-bg: rgba(6, 182, 212, 0.12);
-
-  /* Semantic surface/text/line tokens — DARK is the default (emitted to :root).
-     Runtime theming overrides these SAME names under [data-theme="light"] below, so
-     every Tailwind utility (bg-surface, text-fg, border-line, …) swaps automatically.
-     This indirection is the "lock theming now" decision: retrofitting it after pages
-     reference static colors would be a large migration. */
-  --color-ink-950: #070b14;
-  --color-ink-900: #0b1220;
+  /* Surfaces (dark) */
+  --color-ink-950: #05070f;
+  --color-ink-900: #0a1020;
   --color-ink-800: #111a2e;
   --color-ink-700: #1a2540;
   --color-surface: #111a2e;
   --color-surface-2: #16213c;
-  --color-fg: #e6edf6;
-  --color-fg-muted: #94a3b8;
-  --color-fg-subtle: #64748b;
-  --color-line: #ffffff14;
-  --color-line-strong: #ffffff24;
 
-  /* States (static — legible on both themes) */
+  /* Text */
+  --color-fg: #eaf1fa;
+  --color-fg-muted: #9db0c7;
+  --color-fg-subtle: #6b809b;
+
+  /* Borders */
+  --color-line: #ffffff1a;
+  --color-line-strong: #ffffff2e;
+
+  /* States */
   --color-success: #34d399;
   --color-warning: #fbbf24;
   --color-danger: #f87171;
   --color-info: #60a5fa;
 
-  /* Themeable extras */
-  --backdrop-glow-1: #0f766e33;
-  --backdrop-glow-2: #14b8a61f;
-  --skeleton-sheen: #ffffff14;
+  /* Bubble radii — squircle-ish, Apple-scale */
+  --radius-card: 24px;
+  --radius-bubble: 24px;
+  --radius-bubble-lg: 32px;
+  --radius-bubble-xl: 40px;
 
-  /* Radius & elevation */
-  --radius-card: 16px;
-  --shadow-card: 0 1px 2px #0006, 0 10px 30px -14px #000a;
+  --shadow-card: 0 1px 1px #ffffff14 inset, 0 8px 32px -12px #000c;
   --shadow-pop: 0 -8px 40px -8px #000a;
 
-  /* Motion */
+  /* Motion — Apple-ish springs */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-liquid: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
-
-  /* Bubble radius used by liquid surfaces */
-  --radius-bubble: 28px;
-
-  /* Breakpoints — mobile-first. Device intent: sm=big phone, md=tablet portrait,
-     lg=tablet landscape / small laptop, xl=laptop, 2xl=big screen. */
-  --breakpoint-sm: 24rem;
-  --breakpoint-md: 48rem;
-  --breakpoint-lg: 64rem;
-  --breakpoint-xl: 80rem;
-  --breakpoint-2xl: 96rem;
-
-  /* Minimum touch target (WCAG 44px); Simple mode enlarges it below. */
-  --tap-min: 2.75rem;
 }
 
-/* ── Theme: light overrides (dark = @theme default → zero visual change today) ── */
-[data-theme="light"] {
-  --color-ink-950: #f8fafc;
-  --color-ink-900: #f1f5f9;
-  --color-ink-800: #e2e8f0;
-  --color-ink-700: #cbd5e1;
-  --color-surface: #ffffff;
-  --color-surface-2: #f8fafc;
-  --color-fg: #0f172a;
-  --color-fg-muted: #475569;
-  --color-fg-subtle: #64748b;
-  --color-line: #0f172a14;
-  --color-line-strong: #0f172a24;
-  --backdrop-glow-1: #14b8a614;
-  --backdrop-glow-2: #0f766e0a;
-  --skeleton-sheen: #0f172a0a;
-}
+/* ---------------------------------------------------------------------------
+   Liquid Glass primitives
+   ---------------------------------------------------------------------------
+   Every translucent surface in the app is built from three stacked ingredients:
+     1. a tinted, low-alpha gradient fill          (the "liquid")
+     2. a 1px specular rim, bright top-left        (light catching the edge)
+     3. an inner sheen pooled at the top           (light refracting inside)
+   `.lq` supplies all three; modifiers tune blur/tint. Keep the rim on ::before
+   and the sheen on ::after — several components rely on that split.
+--------------------------------------------------------------------------- */
 
-/* ── Density: Simple/Elder mode (composes with either theme) ───────────────────
-   Bumps the root font-size so EVERY rem-based size (Tailwind text + spacing) grows
-   together with zero component edits, raises contrast, strengthens lines, and enlarges
-   touch targets/radius. `--text-scale` is reserved for the Phase-2 fluid type scale.
-   The multiplier is intentionally moderate here (tunable up to ~1.35 once pages are
-   responsive) so today's max-w-md mobile layouts don't overflow. */
-:root {
-  --text-scale: 1;
-}
-[data-density="elder"] {
-  font-size: 125%; /* 16px → 20px */
-  --text-scale: 1.25;
-  --color-fg-muted: var(--color-fg); /* kill low-contrast muted text (→ AAA) */
-  --color-fg-subtle: #cbd5e1; /* promote subtle text one step */
-  --color-line: var(--color-line-strong); /* stronger separators */
-  --tap-min: 3.5rem; /* 56px targets */
-  --radius-card: 20px;
-}
-/* In light + elder, darken (don't lighten) subtle text for contrast. */
-[data-theme="light"][data-density="elder"] {
-  --color-fg-subtle: #334155;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
-
-html {
-  -webkit-tap-highlight-color: transparent;
-  scrollbar-gutter: stable;
-}
-
-body {
-  margin: 0;
-  overflow-x: hidden;
-  overscroll-behavior-y: contain;
-  background-color: var(--color-ink-950);
-  color: var(--color-fg);
-  font-family:
-    "Outfit", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-/* Ambient colour orbs — glass needs something colourful to refract.
-   Without this, liquid bubbles look like flat grey panels (especially on laptop). */
-body::before {
-  content: "";
-  position: fixed;
-  inset: -20%;
-  z-index: -2;
-  background:
-    radial-gradient(38% 30% at 18% 8%, #14b8a63d, transparent 68%),
-    radial-gradient(34% 28% at 88% 18%, #6366f138, transparent 70%),
-    radial-gradient(42% 32% at 50% 96%, #0f766e33, transparent 72%),
-    radial-gradient(30% 24% at 82% 72%, #db277733, transparent 70%);
-  filter: blur(20px);
-  animation: orb-drift 26s var(--ease-out) infinite alternate;
-  pointer-events: none;
-}
-
-/* Fine grain so large blurred areas don't band */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  opacity: 0.035;
-  pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-@keyframes orb-drift {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(-3%, 2%, 0) scale(1.08);
-  }
-  100% {
-    transform: translate3d(2%, -3%, 0) scale(1.03);
-  }
-}
-
-@keyframes bubble-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.bubble-in {
-  animation: bubble-in 0.5s var(--ease-spring) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* Safe-area helpers */
-.pt-safe {
-  padding-top: env(safe-area-inset-top);
-}
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* Skeleton shimmer */
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
-  }
-}
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--color-surface-2);
-}
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--skeleton-sheen),
-    transparent
-  );
-  animation: shimmer 1.4s infinite;
-}
-
-/* ── Native app feel ────────────────────────────────────────────────────────────
-   The details that separate "a website in a browser" from "an installed app".
-   Deliberately conservative: we do NOT globally disable text selection (vault users
-   must be able to long-press-copy a stored account number) nor pinch-zoom (WCAG). */
-
-/* Instant taps: remove the ~300ms double-tap-zoom delay on controls while KEEPING
-   pinch-to-zoom for accessibility. The single biggest "feels native" win. */
-button,
-a,
-label,
-summary,
-[role="button"],
-[role="tab"],
-[role="switch"] {
-  touch-action: manipulation;
-}
-
-/* iOS: don't auto-resize text on orientation change. */
-html {
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}
-
-/* iOS: inputs ≥16px on touch devices so focusing them never triggers a zoom jump. */
-@media (pointer: coarse) {
-  input:not([type="checkbox"]):not([type="radio"]),
-  select,
-  textarea {
-    font-size: max(16px, 1em);
-  }
-}
-
-/* Tactile press feedback — opt in with `tappable` on any pressable surface. */
-.tappable {
-  transition:
-    transform 0.12s var(--ease-out),
-    background-color 0.12s var(--ease-out);
-  -webkit-touch-callout: none;
-}
-.tappable:active {
-  transform: scale(0.97);
-}
-@media (prefers-reduced-motion: reduce) {
-  .tappable:active {
-    transform: none;
-  }
-}
-
-/* Opt-in: chrome elements (nav labels, headers) shouldn't be selectable like body
-   text. Use on UI furniture, NOT on user content / secret values. */
-.no-select {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-/* Images behave like app assets, not draggable/saveable browser content. */
-img {
-  -webkit-user-drag: none;
-  user-select: none;
-}
-
-/* A long-press / swipe target shouldn't pop the OS callout that fights the gesture. */
-.gesture-target {
-  -webkit-touch-callout: none;
-  touch-action: manipulation;
-}
-
-/* ── Liquid bubble surfaces (phone + laptop) ─────────────────────────────────
-   Three stacked ingredients — same recipe as Apple liquid glass:
-     1. tinted low-alpha fill (+ backdrop blur)
-     2. 1px specular rim (::before, masked gradient border)
-     3. inner sheen pooled at the top (::after)
-
-   Public classes: .liquid-bubble · .liquid-pill-track · .liquid-field
-   Modifiers: .liquid-chrome · .liquid-raised · .liquid-flat · .liquid-press
-
-   Live in `@layer components` so Tailwind utilities can still override. */
 :root {
   --lq-fill: linear-gradient(
     160deg,
@@ -343,54 +81,17 @@ img {
     transparent 68%
   );
   --lq-shadow: 0 10px 34px -14px #000d, 0 2px 8px -4px #0009;
-  --lq-blur: 22px;
+  --lq-blur: 18px;
   --lq-bg: #0d1526a6;
-  /* Back-compat aliases used by older tests / light-theme overrides */
-  --liquid-fill: #ffffff14;
-  --liquid-fill-strong: #ffffff1f;
-  --liquid-border: #ffffff26;
-  --liquid-rim: #ffffff47;
-  --liquid-field: #00000047;
-  --liquid-field-border: #ffffff1f;
-  --liquid-bubble: var(--lq-shadow);
-}
-[data-theme="light"] {
-  --lq-fill: linear-gradient(
-    160deg,
-    #ffffffcc 0%,
-    #ffffff99 45%,
-    #f8fafce6 100%
-  );
-  --lq-rim: linear-gradient(
-    140deg,
-    #ffffff 0%,
-    #ffffff99 28%,
-    #94a3b833 55%,
-    #ffffffb3 100%
-  );
-  --lq-sheen: radial-gradient(
-    130% 80% at 50% -22%,
-    #ffffffb3 0%,
-    #ffffff40 42%,
-    transparent 68%
-  );
-  --lq-shadow: 0 10px 28px -14px #0f172a2e, 0 2px 8px -4px #0f172a14;
-  --lq-bg: #fffffff2;
-  --liquid-fill: rgba(255, 255, 255, 0.72);
-  --liquid-fill-strong: rgba(255, 255, 255, 0.88);
-  --liquid-border: rgba(15, 23, 42, 0.08);
-  --liquid-rim: rgba(255, 255, 255, 0.9);
-  --liquid-field: rgba(15, 23, 42, 0.04);
-  --liquid-field-border: rgba(15, 23, 42, 0.1);
-  --liquid-bubble: var(--lq-shadow);
+  --lq-tint: #ffffff;
 }
 
+/* Layered so Tailwind utilities still win: an unlayered `.lq` would beat
+   `absolute`, `bg-*` and friends no matter their specificity. */
 @layer components {
-  .liquid-bubble,
   .lq {
     position: relative;
     isolation: isolate;
-    border-radius: var(--radius-bubble);
     background-color: var(--lq-bg);
     background-image: var(--lq-fill);
     box-shadow: var(--lq-shadow);
@@ -398,10 +99,8 @@ img {
     backdrop-filter: blur(var(--lq-blur)) saturate(170%);
   }
 
-  /* Specular rim */
-  .liquid-bubble::before,
-  .lq::before,
-  .liquid-pill-track::before {
+  /* 1px specular rim, drawn as a masked gradient border so it can be a gradient */
+  .lq::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -420,10 +119,8 @@ img {
     z-index: 2;
   }
 
-  /* Inner sheen */
-  .liquid-bubble::after,
-  .lq::after,
-  .liquid-pill-track::after {
+  /* inner sheen — sits above the fill, below the content */
+  .lq::after {
     content: "";
     position: absolute;
     inset: 0;
@@ -433,17 +130,8 @@ img {
     z-index: -1;
   }
 
-  .liquid-pill-track {
-    position: relative;
-    isolation: isolate;
-    background-color: color-mix(in oklab, var(--lq-bg) 88%, transparent);
-    background-image: var(--lq-fill);
-    box-shadow: var(--lq-shadow), inset 0 1px 0 #ffffff24;
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    backdrop-filter: blur(28px) saturate(180%);
-  }
-
-  .liquid-chrome {
+  /* Floating chrome (app bar, nav, sheets): heavier blur, deeper shadow */
+  .lq-chrome {
     --lq-blur: 34px;
     --lq-shadow: 0 8px 40px -10px #000f, 0 1px 0 #ffffff14 inset;
     --lq-bg: #060a14e0;
@@ -456,11 +144,9 @@ img {
       #ffffff40 100%
     );
   }
-  :where([data-theme="light"]) .liquid-chrome {
-    --lq-bg: #fffffff5;
-  }
 
-  .liquid-raised {
+  /* Raised bubble (FAB, primary actions): brighter rim, lifted shadow */
+  .lq-raised {
     --lq-shadow: 0 14px 40px -12px #000f, 0 4px 12px -6px #000c;
     --lq-rim: linear-gradient(
       140deg,
@@ -472,50 +158,29 @@ img {
     );
   }
 
-  .liquid-flat {
+  /* Flat variant for dense lists — skips backdrop-filter for scroll performance */
+  .lq-flat {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     --lq-bg: #101a2ecc;
   }
 
-  .liquid-field {
-    position: relative;
-    isolation: isolate;
-    border-radius: 1rem;
-    background-color: #060b1699;
-    background-image: linear-gradient(160deg, #00000026 0%, #ffffff08 62%, #ffffff14 100%);
-    box-shadow: inset 0 1px 3px #0009, 0 1px 0 #ffffff0f;
-    -webkit-backdrop-filter: blur(10px) saturate(140%);
-    backdrop-filter: blur(10px) saturate(140%);
-    color-scheme: dark;
-    transition:
-      box-shadow 0.15s var(--ease-out),
-      background-color 0.15s var(--ease-out);
-  }
-  :where([data-theme="light"]) .liquid-field {
-    color-scheme: light;
-    background-color: #ffffffd9;
-    background-image: linear-gradient(160deg, #0f172a0a 0%, #ffffffcc 100%);
-  }
-  .liquid-field:focus,
-  .liquid-field:focus-within {
-    box-shadow:
-      inset 0 1px 3px #0009,
-      0 0 0 3px color-mix(in oklab, var(--color-vault-400) 28%, transparent);
+  /* Tinted glass — pass any color via --lq-tint */
+  .lq-tint {
+    background-image: linear-gradient(
+        160deg,
+        color-mix(in oklab, var(--lq-tint) 30%, transparent) 0%,
+        color-mix(in oklab, var(--lq-tint) 12%, transparent) 55%,
+        color-mix(in oklab, var(--lq-tint) 4%, transparent) 100%
+      ),
+      var(--lq-fill);
   }
 
-  .liquid-press {
-    transition:
-      transform 0.42s var(--ease-liquid),
-      box-shadow 0.42s var(--ease-liquid),
-      background-color 0.25s var(--ease-out);
-  }
-  .liquid-press:active {
-    transform: scale(0.965);
-  }
-
-  /* Primary vault-tinted bubble (FAB) */
-  .liquid-primary {
+  /* ---------------------------------------------------------------------------
+     Coloured glass skins. Each only re-points the `.lq` variables, so the rim,
+     sheen and blur recipe stays identical across every tone.
+  --------------------------------------------------------------------------- */
+  .lq-primary {
     --lq-bg: #0d9488e0;
     --lq-fill: linear-gradient(
       160deg,
@@ -527,64 +192,193 @@ img {
     --lq-shadow: 0 12px 32px -12px #14b8a6cc, 0 2px 10px -6px #000c;
     color: #fff;
   }
+  @media (hover: hover) {
+    .lq-primary.lq-press:hover {
+      --lq-bg: #14b8a6e6;
+    }
+  }
 
-  .card-premium,
-  .glass-panel {
-    position: relative;
-    isolation: isolate;
-    border-radius: var(--radius-bubble);
-    background-color: var(--lq-bg);
-    background-image: var(--lq-fill);
-    box-shadow: var(--lq-shadow);
-    -webkit-backdrop-filter: blur(var(--lq-blur)) saturate(170%);
-    backdrop-filter: blur(var(--lq-blur)) saturate(170%);
+  .lq-danger {
+    --lq-bg: #7f1d1d5c;
+    --lq-fill: linear-gradient(160deg, #f8717140 0%, #f871711a 48%, transparent 100%);
+    --lq-shadow: 0 10px 28px -14px #f8717166, 0 2px 8px -4px #0009;
+  }
+  @media (hover: hover) {
+    .lq-danger.lq-press:hover {
+      --lq-bg: #991b1b70;
+    }
+  }
+
+  .lq-white {
+    --lq-bg: #ffffffed;
+    --lq-fill: linear-gradient(160deg, #ffffff 0%, #ffffffcc 55%, #f1f5f9e6 100%);
+    --lq-shadow: 0 12px 32px -14px #ffffff8c, 0 2px 10px -6px #0009;
+    --lq-rim: linear-gradient(140deg, #ffffff 0%, #ffffff80 30%, #94a3b833 70%, #ffffffb3 100%);
+  }
+
+  /* Field glass — recessed rather than raised: the light sits at the bottom. */
+  .lq-field {
+    --lq-bg: #060b1699;
+    --lq-fill: linear-gradient(160deg, #00000026 0%, #ffffff08 62%, #ffffff14 100%);
+    --lq-rim: linear-gradient(140deg, #ffffff2e 0%, #ffffff0d 40%, #ffffff1f 100%);
+    --lq-shadow: inset 0 1px 3px #0009, 0 1px 0 #ffffff0f;
+    --lq-blur: 10px;
+  }
+  .lq-field:focus-within {
+    --lq-rim: linear-gradient(140deg, #2dd4bfb3 0%, #14b8a659 45%, #2dd4bf8c 100%);
+    --lq-shadow: inset 0 1px 3px #0009, 0 0 0 3px #14b8a629;
+  }
+
+  /* Interactive bubbles: liquid press + hover lift */
+  .lq-press {
+    transition:
+      transform 0.42s var(--ease-liquid),
+      box-shadow 0.42s var(--ease-liquid),
+      background-color 0.25s var(--ease-out);
+  }
+  .lq-press:active {
+    transform: scale(0.965);
+    --lq-shadow: 0 4px 14px -8px #000d;
+  }
+  @media (hover: hover) {
+    .lq-press:hover {
+      --lq-bg: #17233cbf;
+    }
   }
 }
 
-/* Micro-animations and utility styling */
-.checkbox-bounce {
-  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-.checkbox-bounce:active {
-  transform: scale(0.85);
+html,
+body,
+#root {
+  height: 100%;
 }
 
-.scroll-hide::-webkit-scrollbar {
-  display: none;
-}
-.scroll-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+html {
+  -webkit-tap-highlight-color: transparent;
+  scrollbar-gutter: stable;
 }
 
-/* Liquid-glass bottom nav — brief water sheen on vertical peek */
-@keyframes liquid-sheen-sweep {
+body {
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  background-color: var(--color-ink-950);
+  color: var(--color-fg);
+  font-family:
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------------------------------------------------------------------------
+   Ambient light field — slow-drifting colour orbs that the glass refracts.
+   Fixed + behind everything, so blurred surfaces always have something to pick
+   up. `-z-10` on the layer keeps it out of the content stacking context.
+--------------------------------------------------------------------------- */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  background:
+    radial-gradient(38% 30% at 18% 8%, #14b8a63d, transparent 68%),
+    radial-gradient(34% 28% at 88% 18%, #6366f138, transparent 70%),
+    radial-gradient(42% 32% at 50% 96%, #0f766e33, transparent 72%),
+    radial-gradient(30% 24% at 82% 72%, #db277733, transparent 70%);
+  filter: blur(20px);
+  animation: orb-drift 26s var(--ease-out) infinite alternate;
+  pointer-events: none;
+}
+
+/* fine grain so large blurred areas don't band */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.035;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes orb-drift {
   0% {
-    background-position: 120% 0;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-3%, 2%, 0) scale(1.08);
   }
   100% {
-    background-position: -20% 0;
+    transform: translate3d(2%, -3%, 0) scale(1.03);
   }
 }
-.liquid-sheen::after {
+
+/* Bubble entrance — content rises and settles like a droplet */
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.bubble-in {
+  animation: bubble-in 0.5s var(--ease-spring) both;
+}
+
+/* Slow specular sweep across a highlighted bubble */
+@keyframes lq-sweep {
+  0% {
+    transform: translateX(-120%) rotate(8deg);
+  }
+  100% {
+    transform: translateX(220%) rotate(8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Safe-area helpers */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Clears the floating BottomNav capsule (~5.25rem content + margins) and the
+   home-indicator. Content that sits under the translucent nav looks tappable
+   but the nav steals the hit — see Settings Sign out regression. */
+.pb-nav {
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #ffffff0f;
+}
+.skeleton::after {
   content: "";
-  pointer-events: none;
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    105deg,
-    transparent 35%,
-    rgba(255, 255, 255, 0.22) 50%,
-    transparent 65%
-  );
-  background-size: 220% 100%;
-  animation: liquid-sheen-sweep 0.9s ease-out;
-  opacity: 0.85;
-}
-@media (prefers-reduced-motion: reduce) {
-  .liquid-sheen::after {
-    animation: none;
-    opacity: 0;
-  }
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, #ffffff1f, transparent);
+  animation: shimmer 1.4s infinite;
 }

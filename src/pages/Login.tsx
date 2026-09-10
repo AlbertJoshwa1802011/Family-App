@@ -3,9 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/Button";
+import { Field, Input, Textarea } from "../components/ui/Field";
 import { api, ApiError } from "../lib/api";
-import { inputCls } from "../lib/fieldCls";
-import { cn } from "../lib/cn";
 
 function GoogleIcon() {
   return (
@@ -32,9 +31,9 @@ function GoogleIcon() {
 
 const LOGIN_ERRORS: Record<string, string> = {
   access_denied:
-    "This app is invite-only. Request access below and we'll email you when you're approved.",
+    "This app is invite-only. Request a demo below and we'll email you when you're approved.",
   access_revoked:
-    "Your access was revoked. Contact your family admin if you think that's a mistake.",
+    "Your access was revoked. Contact your team admin if you think that's a mistake.",
   rate_limited: "Too many sign-in attempts — wait a moment and try again.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   missing_params: "Sign-in didn't finish — please try again.",
@@ -46,20 +45,16 @@ const LOGIN_ERRORS: Record<string, string> = {
 
 type Mode = "request" | "signin";
 
-function safeNextPath(raw: string | null): string {
-  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
-  return "/";
-}
-
 export function Login() {
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get("error");
-  const nextPath = safeNextPath(params.get("next"));
-  const prefillEmail = (params.get("email") ?? "").trim();
-  const prefillName = (params.get("name") ?? "").trim();
-  const emailLocked = Boolean(prefillEmail);
+  const nextRaw = params.get("next");
+  const nextPath =
+    nextRaw && nextRaw.startsWith("/") && !nextRaw.startsWith("//")
+      ? nextRaw
+      : "/";
 
   const initialMode: Mode =
     oauthError === "access_denied" || oauthError === "access_revoked"
@@ -76,8 +71,8 @@ export function Login() {
   );
   const [success, setSuccess] = useState("");
 
-  const [name, setName] = useState(prefillName);
-  const [email, setEmail] = useState(prefillEmail);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
   const [message, setMessage] = useState("");
 
@@ -90,12 +85,11 @@ export function Login() {
     setError("");
     setSuccess("");
     const startUrl = new URL("/api/auth/google/start", window.location.origin);
-    // Preserve deep links (invite accept) through OAuth returnTo.
-    if (nextPath !== "/") startUrl.searchParams.set("returnTo", nextPath);
+    if (nextPath !== "/") startUrl.searchParams.set("next", nextPath);
     window.location.assign(startUrl.pathname + startUrl.search);
   }
 
-  async function submitRequest(e: FormEvent) {
+  async function submitDemo(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError("");
@@ -108,7 +102,7 @@ export function Login() {
           body: JSON.stringify({
             name,
             email,
-            company,
+            company: company || undefined,
             message: message || undefined,
           }),
         },
@@ -140,7 +134,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="flex size-20 items-center justify-center rounded-3xl bg-vault-600/20 ring-1 ring-vault-500/30">
+      <div className="lq lq-tint lq-raised flex size-22 items-center justify-center rounded-full [--lq-tint:var(--color-vault-400)]">
         <ShieldCheck className="size-10 text-vault-300" aria-hidden="true" />
       </div>
 
@@ -148,99 +142,70 @@ export function Login() {
         Family Vault
       </h1>
       <p className="mt-3 max-w-xs text-sm leading-relaxed text-fg-muted">
-        Sign in with Google if you already have access. New people request
-        access — an admin gets the email and must approve before you can sign
-        in.
+        Sign in with Google to open your family vault. New teammates can request
+        a demo for approval.
       </p>
 
       <div className="mt-8 flex w-full max-w-xs gap-2">
         <button
           type="button"
           onClick={() => setMode("signin")}
-          className={cn(
-            "liquid-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium",
-            mode === "signin"
-              ? "liquid-bubble bg-vault-500/30 text-white"
-              : "text-fg-muted",
-          )}
+          className={`lq lq-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium ${
+            mode === "signin" ? "lq-primary text-white" : "text-fg-muted"
+          }`}
         >
           Sign in
         </button>
         <button
           type="button"
           onClick={() => setMode("request")}
-          className={cn(
-            "liquid-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium",
-            mode === "request"
-              ? "liquid-bubble bg-vault-500/30 text-white"
-              : "text-fg-muted",
-          )}
+          className={`lq lq-press flex-1 rounded-2xl px-3 py-2 text-sm font-medium ${
+            mode === "request" ? "lq-primary text-white" : "text-fg-muted"
+          }`}
         >
-          Request access
+          Request demo
         </button>
       </div>
 
       {mode === "request" ? (
         <form
-          onSubmit={submitRequest}
+          onSubmit={submitDemo}
           className="mt-6 w-full max-w-xs space-y-3 text-left"
         >
-          <label className="block text-xs font-medium text-fg-muted">
-            Your name
-            <input
+          <Field label="Your name" required>
+            <Input
               required
               autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Alex"
-              className={cn(inputCls, "mt-1")}
             />
-          </label>
-          <label className="block text-xs font-medium text-fg-muted">
-            Email
-            <input
+          </Field>
+          <Field label="Work email" required>
+            <Input
               required
               type="email"
               autoComplete="email"
               value={email}
-              readOnly={emailLocked}
-              onChange={(e) => {
-                if (!emailLocked) setEmail(e.target.value);
-              }}
-              placeholder="you@example.com"
-              className={cn(
-                inputCls,
-                "mt-1",
-                emailLocked && "cursor-default opacity-90",
-              )}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
             />
-            {emailLocked && (
-              <span className="mt-1 block text-[11px] text-fg-subtle">
-                Filled from your Google sign-in
-              </span>
-            )}
-          </label>
-          <label className="block text-xs font-medium text-fg-muted">
-            Company / team
-            <input
-              required
-              autoComplete="organization"
+          </Field>
+          <Field label="Company / team">
+            <Input
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              placeholder="Your company or family team"
-              className={cn(inputCls, "mt-1")}
+              placeholder="Optional"
             />
-          </label>
-          <label className="block text-xs font-medium text-fg-muted">
-            Why do you need access?
-            <textarea
+          </Field>
+          <Field label="Why do you need access?">
+            <Textarea
               rows={3}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Optional note for the admin"
-              className={cn(inputCls, "mt-1 resize-none")}
             />
-          </label>
+          </Field>
           <Button type="submit" size="lg" fullWidth loading={submitting}>
             Request access
           </Button>
@@ -278,7 +243,7 @@ export function Login() {
           className="underline underline-offset-2"
           onClick={() => setMode("request")}
         >
-          Request access
+          Request a demo
         </button>
         .
       </p>

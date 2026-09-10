@@ -315,13 +315,13 @@ export function Assistant() {
                 // recipe forces 28px radius on all corners and leaves a gap above
                 // the home indicator on phones.
                 "fixed inset-x-0 bottom-0 z-50 flex max-h-[min(85vh,100dvh)] flex-col",
-                "rounded-t-3xl border border-b-0 border-line bg-ink-950/95 shadow-pop",
+                "rounded-t-3xl border border-b-0 border-white/10 bg-ink-950/95 shadow-pop",
                 "backdrop-blur-2xl",
                 "animate-[slideUp_220ms_cubic-bezier(0.22,1,0.36,1)]",
                 "md:inset-x-auto md:right-4 md:bottom-4 md:w-96 md:max-h-[85vh] md:rounded-3xl md:border",
               )}
             >
-              <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
+              <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-3">
                 <Sparkles className="size-4 text-m3-purple" aria-hidden="true" />
                 <h2 className="flex-1 text-sm font-semibold text-fg">Money assistant</h2>
                 <button
@@ -352,7 +352,7 @@ export function Assistant() {
                           type="button"
                           onClick={() => send(s)}
                           disabled={Boolean(keyWarning)}
-                          className="rounded-full border border-line px-3 py-2 text-xs text-fg-muted transition-colors hover:bg-white/5 disabled:opacity-40"
+                          className="rounded-full border border-white/10 px-3 py-2 text-xs text-fg-muted transition-colors hover:bg-white/5 disabled:opacity-40"
                         >
                           {s}
                         </button>
@@ -409,7 +409,7 @@ export function Assistant() {
                   send(input);
                 }}
                 className={cn(
-                  "flex shrink-0 items-center gap-2 border-t border-line px-4 pt-3",
+                  "flex shrink-0 items-center gap-2 border-t border-white/10 px-4 pt-3",
                   // Keep the composer clear of the home indicator when the keyboard is closed.
                   keyboardInset > 0
                     ? "pb-3"
@@ -423,7 +423,7 @@ export function Assistant() {
                   placeholder="I spent 70 on noodles…"
                   aria-label="Message the assistant"
                   // text-base (≥16px) avoids iOS focus-zoom; liquid-field keeps the glass look.
-                  className="liquid-field min-h-11 flex-1 rounded-2xl px-3.5 py-2.5 text-base text-fg placeholder:text-fg-subtle focus:outline-none"
+                  className="lq-field liquid-field min-h-11 flex-1 rounded-2xl px-3.5 py-2.5 text-base text-fg placeholder:text-fg-subtle focus:outline-none"
                 />
                 <Button type="submit" loading={busy} aria-label="Send" className="size-11 shrink-0">
                   <CornerDownLeft className="size-4" />

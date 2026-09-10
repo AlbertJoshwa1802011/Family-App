@@ -454,7 +454,7 @@ function ExpenseFormFields({
                       "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                       categoryId === null
                         ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                        : "border-line text-fg-muted hover:bg-white/5",
+                        : "border-white/10 text-fg-muted hover:bg-white/5",
                     )}
                   >
                     None
@@ -468,7 +468,7 @@ function ExpenseFormFields({
                         "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                         isRootSelected(cat.id)
                           ? "text-white"
-                          : "border-line text-fg-muted hover:bg-white/5",
+                          : "border-white/10 text-fg-muted hover:bg-white/5",
                       )}
                       style={
                         isRootSelected(cat.id)
@@ -501,7 +501,7 @@ function ExpenseFormFields({
                             "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                             categoryId === cat.id
                               ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                              : "border-line text-fg-muted hover:bg-white/5",
+                              : "border-white/10 text-fg-muted hover:bg-white/5",
                           )}
                         >
                           <span aria-hidden="true" className="text-sm leading-none">
@@ -523,7 +523,7 @@ function ExpenseFormFields({
                     + New category
                   </Button>
                 ) : (
-                  <div className="space-y-2 rounded-xl border border-line p-3">
+                  <div className="space-y-2 rounded-xl border border-white/10 p-3">
                     <label htmlFor="newCat" className="text-xs font-medium text-fg-subtle">
                       New category name
                     </label>
@@ -548,7 +548,7 @@ function ExpenseFormFields({
                               "flex size-9 items-center justify-center rounded-lg border text-base",
                               newCategoryEmoji === em
                                 ? "border-vault-500/40 bg-vault-500/15"
-                                : "border-line hover:bg-white/5",
+                                : "border-white/10 hover:bg-white/5",
                             )}
                           >
                             {em}
@@ -748,7 +748,7 @@ function ExpenseFormFields({
                     "rounded-xl border p-3 text-left transition-colors",
                     visibility === key
                       ? "border-vault-500/40 bg-vault-500/10"
-                      : "border-line hover:bg-white/5",
+                      : "border-white/10 hover:bg-white/5",
                   )}
                 >
                   <span className="flex items-center gap-1.5">

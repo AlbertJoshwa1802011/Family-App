@@ -236,7 +236,7 @@ function CurrencySection({
               "min-h-11 min-w-[4.5rem] rounded-xl border px-3 py-2 text-sm font-semibold transition-colors",
               value === c
                 ? "border-vault-500/50 bg-vault-500/15 text-vault-300"
-                : "border-line text-fg-muted hover:bg-white/5",
+                : "border-white/10 text-fg-muted hover:bg-white/5",
             )}
           >
             {c}
@@ -250,7 +250,7 @@ function CurrencySection({
             type="checkbox"
             checked={relabelExisting}
             onChange={(e) => setRelabelExisting(e.target.checked)}
-            className="mt-1 size-4 rounded border-line"
+            className="mt-1 size-4 rounded border-white/10"
           />
           <span>
             Also update existing entries still labeled{" "}
@@ -358,7 +358,7 @@ function IncomeSection({
           Add your salary so the plan knows what it's working with.
         </p>
       ) : (
-        <ul className="divide-y divide-line border-t border-line">
+        <ul className="divide-y divide-line border-t border-white/10">
           {incomes.map((inc) => (
             <li key={inc.id} className="flex items-center gap-3 px-4 py-3">
               <span
@@ -468,7 +468,7 @@ function PlanSection({
               "rounded-xl border px-2 py-2 text-xs font-medium transition-colors",
               kind === opt.value
                 ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                : "border-line text-fg-muted hover:bg-white/5",
+                : "border-white/10 text-fg-muted hover:bg-white/5",
             )}
           >
             {opt.label}

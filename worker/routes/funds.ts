@@ -65,7 +65,7 @@ async function requireFundMember(
   if (!opts.allowArchived && fund.status === "archived") {
     return { error: Response.json({ error: "not_found" }, { status: 404 }) as Response };
   }
-  const membership = await requireFamilyMember(c, fund.familyId);
+  const membership = await requireFamilyMember(c, fund.familyId, "member", "expenses");
   if (membership instanceof Response) return { error: membership };
   return { db, fund, membership };
 }
@@ -195,7 +195,7 @@ fundRoutes.get("/", requireSession, async (c) => {
   const familyId = c.req.query("familyId");
   if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);
@@ -225,7 +225,7 @@ fundRoutes.post("/", requireSession, zv(createFundSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
 
-  const membership = await requireFamilyMember(c, data.familyId);
+  const membership = await requireFamilyMember(c, data.familyId, "member", "expenses");
   if (membership instanceof Response) return membership;
 
   const db = getDb(c.env);

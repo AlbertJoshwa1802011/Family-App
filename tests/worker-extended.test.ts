@@ -9,7 +9,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { app } from "../worker/index";
-import { createTestEnv, seedActor, seedFamily, seedUser } from "./helpers/testEnv";
 
 // ---------------------------------------------------------------------------
 // Helper: POST JSON helper
@@ -112,13 +111,18 @@ describe("1. Worker baseline", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  it("x-content-type-options: nosniff on GET /api/notifications", async () => {
-    const res = await app.request("/api/notifications");
+  it("x-content-type-options: nosniff on GET /api/expenses", async () => {
+    const res = await app.request("/api/expenses");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  it("x-content-type-options: nosniff on GET /api/families/me/activity", async () => {
-    const res = await app.request("/api/families/me/activity");
+  it("x-content-type-options: nosniff on GET /api/assistant", async () => {
+    const res = await app.request("/api/assistant");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("x-content-type-options: nosniff on GET /api/notifications", async () => {
+    const res = await app.request("/api/notifications");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 });
@@ -169,29 +173,21 @@ describe("2. Unknown routes return JSON 404", () => {
 // 3. Correct HTTP methods on stub routes
 // ---------------------------------------------------------------------------
 describe("3. Correct HTTP methods on stub routes", () => {
-  const docProtected = [
-    { method: "GET",    path: "/api/documents" },
-    { method: "POST",   path: "/api/documents" },
-    { method: "GET",    path: "/api/documents/doc-1" },
-    { method: "PATCH",  path: "/api/documents/doc-1" },
-    { method: "DELETE", path: "/api/documents/doc-1" },
-    { method: "POST",   path: "/api/documents/doc-1/files/upload" },
-    { method: "POST",   path: "/api/documents/doc-1/files/upload-url" },
-    { method: "POST",   path: "/api/documents/doc-1/files" },
-    { method: "GET",    path: "/api/documents/doc-1/files/file-1/download" },
-    { method: "GET",    path: "/api/documents/doc-1/comments" },
-    { method: "POST",   path: "/api/documents/doc-1/comments" },
-    { method: "DELETE", path: "/api/documents/doc-1/comments/comment-1" },
-  ];
+  it("GET /api/documents → 401 without session (auth required)", async () => {
+    const res = await app.request("/api/documents");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthorized");
+  });
 
-  for (const { method, path } of docProtected) {
-    it(`${method} ${path} → 401 without session (auth required)`, async () => {
-      const res = await app.request(path, { method });
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe("unauthorized");
+  it("POST /api/documents → 401 without session (auth required)", async () => {
+    const res = await app.request("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ familyId: "fam-1", title: "Passport" }),
     });
-  }
+    expect(res.status).toBe(401);
+  });
 
   it("GET /api/families → 401 without session (auth required)", async () => {
     const res = await app.request("/api/families");
@@ -226,6 +222,16 @@ describe("3. Correct HTTP methods on stub routes", () => {
 
   it("GET /api/contacts → 401 (requires session)", async () => {
     const res = await app.request("/api/contacts");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/expenses → 401 (requires session)", async () => {
+    const res = await app.request("/api/expenses");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/assistant → 401 (requires session)", async () => {
+    const res = await app.request("/api/assistant");
     expect(res.status).toBe(401);
   });
 });
@@ -351,6 +357,10 @@ describe("7. Auth enforcement on event/task/contact routes", () => {
     { method: "POST",  path: "/api/contacts",        body: { familyId: "f-1", name: "Alice" } },
     { method: "POST",  path: "/api/contacts",        body: { name: "" } },             // would fail Zod
     { method: "PATCH", path: "/api/contacts/some-id", body: { email: "bad" } },        // would fail Zod
+    { method: "POST",  path: "/api/expenses",        body: { familyId: "f-1", amount: 10 } },
+    { method: "POST",  path: "/api/expenses",        body: { amount: -1 } },
+    { method: "POST",  path: "/api/assistant",       body: { familyId: "f-1", message: "hi" } },
+    { method: "POST",  path: "/api/assistant",       body: { message: "" } },
   ];
 
   for (const { method, path, body } of cases) {
@@ -365,33 +375,4 @@ describe("7. Auth enforcement on event/task/contact routes", () => {
       expect(responseBody.error).toBe("unauthorized");
     });
   }
-
-  it("GET /api/families/me/dashboard-stats → 401 without session (auth required)", async () => {
-    const res = await app.request("/api/families/me/dashboard-stats");
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("unauthorized");
-  });
-
-  it("GET /api/families/me/dashboard-stats → 200 shape for a member", async () => {
-    const { env, sqlite } = createTestEnv();
-    const owner = seedUser(sqlite);
-    const family = seedFamily(sqlite, owner.id);
-    const actor = seedActor(sqlite, family.id, "owner");
-    const res = await app.request("/api/families/me/dashboard-stats", {
-      headers: { Cookie: actor.cookie },
-    }, env);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      documentCount: number;
-      expiringCount: number;
-      memberCount: number;
-      storageBytes: number;
-      tasksTotal: number;
-      tasksCompleted: number;
-    };
-    expect(body.memberCount).toBeGreaterThanOrEqual(1);
-    expect(body.documentCount).toBe(0);
-    expect(body.expiringCount).toBe(0);
-  });
 });

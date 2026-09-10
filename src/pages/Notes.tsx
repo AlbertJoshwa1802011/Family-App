@@ -23,24 +23,22 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Fab } from "../components/ui/Fab";
 import { Chip } from "../components/ui/Chip";
-import { Modal } from "../components/ui/Modal";
+import { Sheet } from "../components/ui/Sheet";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/cn";
 import {
-  KIND_LABELS,
-  NOTE_KINDS,
   formatNoteStamp,
   noteDisplayTitle,
   notePreview,
   type Note,
-  type NoteKind,
   type Notebook,
 } from "../lib/notes";
+import { useLabels } from "../lib/useLabels";
 
 type FolderFilter = "all" | "none" | "trash" | string; // string = notebook id
-type KindFilter = "all" | NoteKind;
+type KindFilter = "all" | string;
 
 function NoteSkeleton() {
   return (
@@ -65,6 +63,10 @@ export function Notes() {
   const [folderSheet, setFolderSheet] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [nowMs] = useState(() => Date.now());
+  const { labels: kindLabels, format: formatKind, find: findKind } = useLabels(
+    activeFamily?.id,
+    "note_kind",
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q.trim()), 250);
@@ -225,9 +227,16 @@ export function Notes() {
           <Chip selected={kind === "all"} onClick={() => setKind("all")}>
             Any kind
           </Chip>
-          {NOTE_KINDS.map((k) => (
-            <Chip key={k} selected={kind === k} onClick={() => setKind(k)}>
-              {KIND_LABELS[k]}
+          {kindLabels.map((k) => (
+            <Chip
+              key={k.slug}
+              selected={kind === k.slug}
+              onClick={() => setKind(k.slug)}
+            >
+              <span aria-hidden="true" className="mr-1">
+                {k.emoji}
+              </span>
+              {k.label}
             </Chip>
           ))}
         </div>
@@ -260,9 +269,10 @@ export function Notes() {
             {notes.map((note) => {
               const title = noteDisplayTitle(note);
               const preview = notePreview(note.body);
+              const kindMeta = findKind(note.kind);
               const subtitleParts = [
                 formatNoteStamp(note.updatedAt, nowMs),
-                KIND_LABELS[note.kind],
+                formatKind(note.kind),
                 note.noteDate,
                 preview && preview !== title ? preview : null,
               ].filter(Boolean);
@@ -273,16 +283,20 @@ export function Notes() {
                   leading={
                     <span
                       className={cn(
-                        "liquid-bubble liquid-flat flex size-10 items-center justify-center rounded-full",
+                        "lq lq-flat lq-tint flex size-10 items-center justify-center rounded-full",
                         note.kind === "bible"
-                          ? "[--lq-bg:#fbbf2426]"
-                          : "[--lq-bg:#14b8a626]",
+                          ? "[--lq-tint:var(--color-warning)]"
+                          : "[--lq-tint:var(--color-vault-400)]",
                       )}
                     >
-                      {note.kind === "bible" ? (
-                        <BookMarked className="relative z-10 size-5 text-warning" />
+                      {kindMeta ? (
+                        <span className="text-lg" aria-hidden="true">
+                          {kindMeta.emoji}
+                        </span>
+                      ) : note.kind === "bible" ? (
+                        <BookMarked className="size-5 text-warning" />
                       ) : (
-                        <NotebookPen className="relative z-10 size-5 text-vault-300" />
+                        <NotebookPen className="size-5 text-vault-300" />
                       )}
                     </span>
                   }
@@ -328,7 +342,7 @@ export function Notes() {
         />
       )}
 
-      <Modal
+      <Sheet
         open={folderSheet}
         onClose={() => setFolderSheet(false)}
         title="New folder"
@@ -360,7 +374,7 @@ export function Notes() {
             Create folder
           </Button>
         </form>
-      </Modal>
+      </Sheet>
     </>
   );
 }

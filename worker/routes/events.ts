@@ -1,85 +1,125 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, asc, eq, gte, lte, ne } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { requireFamilyMember } from "../middleware/requireMember";
-import { insertAuditEvent, ACTIONS } from "../lib/audit";
-import { notifyEventChange } from "../lib/eventNotify";
+import { insertAuditEvent } from "../lib/audit";
+import { allDocumentsInFamily, allMembersInFamily } from "../lib/familyScope";
+import { buildCalendar } from "../lib/ics";
+import { findConflicts, busyBlocks } from "../lib/conflicts";
 import {
-  calendarStatusMessage,
-  deleteGoogleCalendarEvent,
-  upsertGoogleCalendarEvent,
-  type CalendarSyncResult,
-} from "../lib/googleCalendar";
+  attendeeMemberIds,
+  emailEventIcsToActor,
+  notifyEventCancelled,
+  notifyEventInvited,
+  notifyEventRescheduled,
+  notifyEventUninvited,
+  notifyRsvpAnswered,
+  targetsForMembers,
+  type EventSummary,
+} from "../lib/scheduleNotify";
+import {
+  syncEventToGoogleCalendars,
+  userHasGoogleCalendarCopy,
+} from "../lib/eventCalendarSync";
+import { labelSlugSchema } from "../lib/labels";
+import { createNotification } from "../lib/notify";
 
-function whenLabel(startAt: number, allDay: boolean): string {
-  const d = new Date(startAt * 1000);
-  const date = d.toISOString().slice(0, 10);
-  if (allDay) return date;
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const mm = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${date} ${hh}:${mm} UTC`;
-}
-
-async function syncCalendar(
-  env: Parameters<typeof upsertGoogleCalendarEvent>[0],
-  db: ReturnType<typeof getDb>,
-  userId: string,
-  event: {
-    id: string;
-    title: string;
-    description: string | null;
-    location: string | null;
-    startAt: number;
-    endAt: number | null;
-    allDay: boolean;
-    googleCalendarEventId: string | null;
-  },
-) {
-  return upsertGoogleCalendarEvent(env, db, userId, event);
-}
+export const eventRoutes = new Hono<HonoEnv>();
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
-const EventType = z.enum(["gathering", "appointment", "milestone", "other"]);
+// Free slug: built-ins (gathering|…) plus family customs from /labels.
+const EventType = labelSlugSchema;
 
-const eventBaseSchema = z.object({
-  familyId: z.string().optional(),
+/**
+ * Field definitions WITHOUT defaults.
+ *
+ * Defaults and .partial() must never meet: `.default([])` still fires when the
+ * key is absent, so `eventBaseSchema.partial()` handed the update handler
+ * `attendeeMemberIds: []`, `type: "other"` and `allDay: false` on EVERY patch.
+ * Because the handler treats a present attendee array as a full replace, a
+ * rename silently deleted the whole guest list and reset the event's type.
+ * Defaults therefore live on the CREATE schema only.
+ */
+const eventFieldsSchema = z.object({
+  familyId: z.string().min(1),
   title: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   startAt: z.number().int().positive(),
   endAt: z.number().int().positive().optional(),
   allDay: z.boolean().optional(),
   location: z.string().max(500).optional(),
+  /** Minutes before start to leave — advisory; null clears on PATCH. */
+  travelBufferMins: z.number().int().min(0).max(24 * 60).nullable().optional(),
   type: EventType.optional(),
   attendeeMemberIds: z.array(z.string()).optional(),
   documentIds: z.array(z.string()).optional(),
 });
 
+const eventBaseSchema = eventFieldsSchema.extend({
+  allDay: z.boolean().optional().default(false),
+  type: EventType.optional().default("other"),
+  attendeeMemberIds: z.array(z.string()).optional().default([]),
+  documentIds: z.array(z.string()).optional().default([]),
+});
+
+/**
+ * Optimistic-concurrency guard. When the client sends the `version` it last
+ * read, a mutation racing another member's edit gets 409 instead of silently
+ * clobbering it. Omitted = last-write-wins (kept for backwards compatibility).
+ */
+const concurrencySchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+});
+
 const createEventSchema = eventBaseSchema
   .extend({
-    allDay: z.boolean().optional().default(false),
-    type: EventType.optional().default("other"),
-    attendeeMemberIds: z.array(z.string()).optional().default([]),
-    documentIds: z.array(z.string()).optional().default([]),
+    // Defaults ON — Family Vault pushes unless the creator opts out.
+    syncGoogleCalendar: z.boolean().optional().default(true),
+    syncAppleCalendar: z.boolean().optional().default(true),
   })
   .refine((d) => !d.endAt || d.endAt >= d.startAt, {
     message: "endAt must be >= startAt",
     path: ["endAt"],
   });
 
-// partial() on a schema with .default() would re-apply those defaults on PATCH
-// (wiping type back to "other"). Keep the patch object default-free.
-const updateEventSchema = eventBaseSchema.partial().refine(
+// partial() must be called on ZodObject before refine() — and on the
+// default-free field set, so an omitted key stays omitted.
+const updateEventSchema = eventFieldsSchema.partial().merge(concurrencySchema).refine(
   (d) => !d.endAt || !d.startAt || d.endAt >= d.startAt,
   { message: "endAt must be >= startAt", path: ["endAt"] },
 );
 
 const addAttendeesSchema = z.object({
   memberIds: z.array(z.string()).min(1),
+});
+
+const actionItemsSchema = z.object({
+  titles: z
+    .array(z.string().min(1).max(300))
+    .min(1)
+    .max(20),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+const followUpSchema = z.object({
+  message: z.string().min(1).max(500).optional(),
+});
+
+const RsvpStatus = z.enum(["invited", "accepted", "declined", "tentative"]);
+
+const rsvpSchema = z.object({
+  status: RsvpStatus,
+  // Guardians answer for dependents, who have no account of their own.
+  // Omitted = "me".
+  memberId: z.string().optional(),
 });
 
 function zv<T extends z.ZodType>(s: T) {
@@ -89,35 +129,84 @@ function zv<T extends z.ZodType>(s: T) {
   });
 }
 
-export const eventRoutes = new Hono<HonoEnv>();
+// ── Authorization ─────────────────────────────────────────────────────────────
+
+/**
+ * Who may change an event once it exists.
+ *
+ * Creating is open to every active member — anyone can put something on the
+ * family calendar. Changing or removing what SOMEONE ELSE scheduled is not:
+ * a teenager must not be able to delete a parent's hospital appointment.
+ * So mutations require the event's creator, or an admin/owner.
+ *
+ * RSVP is deliberately NOT gated by this — answering an invitation is always
+ * the attendee's own right (see the /rsvp handler).
+ */
+function canMutateEvent(
+  membership: { userId: string | null; role: string },
+  event: { createdBy: string },
+): boolean {
+  return (
+    membership.userId === event.createdBy ||
+    membership.role === "admin" ||
+    membership.role === "owner"
+  );
+}
+
+const FORBIDDEN_EVENT = {
+  error: "forbidden",
+  reason: "only the event creator or a family admin can change this event",
+} as const;
+
+/** Display name for notification copy ("Dad added you to ..."). */
+async function actorName(db: ReturnType<typeof getDb>, userId: string): Promise<string> {
+  const row = await db
+    .select({ name: schema.users.name, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  return row?.name ?? row?.email ?? "A family member";
+}
+
+function summarize(e: {
+  id: string;
+  familyId: string;
+  title: string;
+  startAt: number;
+  endAt?: number | null;
+  allDay: boolean | null;
+  location: string | null;
+  description?: string | null;
+  status?: "active" | "cancelled" | "trashed";
+  version?: number;
+  updatedAt?: number;
+}): EventSummary {
+  return {
+    id: e.id,
+    familyId: e.familyId,
+    title: e.title,
+    startAt: e.startAt,
+    endAt: e.endAt ?? null,
+    allDay: Boolean(e.allDay),
+    location: e.location,
+    description: e.description ?? null,
+    status: e.status ?? "active",
+    version: e.version,
+    updatedAt: e.updatedAt,
+  };
+}
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 // GET /events?familyId=:id&from=:unix&to=:unix
 eventRoutes.get("/", requireSession, async (c) => {
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
+  const familyId = c.req.query("familyId");
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
 
-  let familyId = c.req.query("familyId");
-  if (!familyId) {
-    // Resolve user's first active family
-    const membership = await db
-      .select({ familyId: schema.familyMembers.familyId })
-      .from(schema.familyMembers)
-      .where(
-        and(
-          eq(schema.familyMembers.userId, userId),
-          eq(schema.familyMembers.status, "active"),
-        ),
-      )
-      .get();
-    if (!membership) return c.json({ events: [] });
-    familyId = membership.familyId;
-  }
-
-  const membership = await requireFamilyMember(c, familyId);
+  const membership = await requireFamilyMember(c, familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
+  const db = getDb(c.env);
   const fromParam = c.req.query("from");
   const toParam = c.req.query("to");
 
@@ -125,8 +214,24 @@ eventRoutes.get("/", requireSession, async (c) => {
     eq(schema.events.familyId, familyId),
     ne(schema.events.status, "trashed"),
   ];
-  if (fromParam) conditions.push(gte(schema.events.startAt, parseInt(fromParam)));
-  if (toParam) conditions.push(lte(schema.events.startAt, parseInt(toParam)));
+  // Ignore non-numeric range params instead of pushing NaN into SQL.
+  const from = fromParam ? parseInt(fromParam, 10) : NaN;
+  const to = toParam ? parseInt(toParam, 10) : NaN;
+  if (Number.isFinite(from)) conditions.push(gte(schema.events.startAt, from));
+  if (Number.isFinite(to)) conditions.push(lte(schema.events.startAt, to));
+
+  // ?member=<memberId> → "what is on THIS person's calendar". Mirrors the
+  // documents route's subject-member filter.
+  const memberFilter = c.req.query("member");
+  if (memberFilter) {
+    const attending = await db
+      .select({ eventId: schema.eventAttendees.eventId })
+      .from(schema.eventAttendees)
+      .where(eq(schema.eventAttendees.memberId, memberFilter));
+    const ids = attending.map((a) => a.eventId);
+    if (ids.length === 0) return c.json({ events: [] });
+    conditions.push(inArray(schema.events.id, ids));
+  }
 
   const events = await db
     .select()
@@ -141,52 +246,66 @@ eventRoutes.get("/", requireSession, async (c) => {
 eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   const userId = c.get("userId")!;
   const data = c.req.valid("json");
+
+  const membership = await requireFamilyMember(c, data.familyId, "member", "calendar");
+  if (membership instanceof Response) return membership;
+
   const db = getDb(c.env);
 
-  let familyId = data.familyId;
-  if (!familyId) {
-    // Resolve user's first active family
-    const m = await db
-      .select({ familyId: schema.familyMembers.familyId })
-      .from(schema.familyMembers)
-      .where(
-        and(
-          eq(schema.familyMembers.userId, userId),
-          eq(schema.familyMembers.status, "active"),
-        ),
-      )
-      .get();
-    if (!m) {
-      return c.json({ error: "no_family_membership" }, 400);
-    }
-    familyId = m.familyId;
+  // Client-supplied IDs must belong to this family (no cross-family references).
+  if (!(await allMembersInFamily(db, data.familyId, data.attendeeMemberIds))) {
+    return c.json({ error: "invalid_member_ids" }, 400);
   }
-
-  const membership = await requireFamilyMember(c, familyId);
-  if (membership instanceof Response) return membership;
+  if (!(await allDocumentsInFamily(db, data.familyId, data.documentIds))) {
+    return c.json({ error: "invalid_document_ids" }, 400);
+  }
 
   const eventId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
   await db.insert(schema.events).values({
     id: eventId,
-    familyId,
+    familyId: data.familyId,
     title: data.title,
     description: data.description,
     startAt: data.startAt,
     endAt: data.endAt,
     allDay: data.allDay,
     location: data.location,
+    travelBufferMins:
+      data.travelBufferMins === null || data.travelBufferMins === undefined
+        ? null
+        : data.travelBufferMins,
     type: data.type,
     status: "active",
     createdBy: userId,
     updatedAt: now,
   });
 
-  // Add attendees
-  if (data.attendeeMemberIds.length > 0) {
+  // Add attendees. Dependents (no account) cannot answer for themselves, so
+  // their guardian's act of scheduling counts as acceptance.
+  const uniqueAttendees = [...new Set(data.attendeeMemberIds)];
+  if (uniqueAttendees.length > 0) {
+    const dependents = new Set(
+      (
+        await db
+          .select({ id: schema.familyMembers.id })
+          .from(schema.familyMembers)
+          .where(
+            and(
+              inArray(schema.familyMembers.id, uniqueAttendees),
+              eq(schema.familyMembers.memberType, "dependent"),
+            ),
+          )
+      ).map((r) => r.id),
+    );
     await db.insert(schema.eventAttendees).values(
-      data.attendeeMemberIds.map((memberId) => ({ eventId, memberId })),
+      uniqueAttendees.map((memberId) => ({
+        eventId,
+        memberId,
+        rsvp: dependents.has(memberId) ? ("accepted" as const) : ("invited" as const),
+        rsvpAt: dependents.has(memberId) ? now : null,
+      })),
     );
   }
 
@@ -198,10 +317,9 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   }
 
   await insertAuditEvent(db, {
-    // Use the resolved familyId — data.familyId is optional on the request body.
-    familyId,
+    familyId: data.familyId,
     actorUserId: userId,
-    action: ACTIONS.EVENT_CREATED,
+    action: "event_created",
     targetType: "event",
     targetId: eventId,
     meta: { title: data.title },
@@ -213,46 +331,87 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
     .where(eq(schema.events.id, eventId))
     .get();
 
-  let calendar: CalendarSyncResult = {
-    status: "failed",
-    googleCalendarEventId: null,
-    message: calendarStatusMessage("failed"),
-  };
-  if (event) {
-    try {
-      calendar = await syncCalendar(c.env, db, userId, event);
-    } catch (err) {
-      console.error("[events] calendar sync failed:", err);
-    }
+  // Tell the people this was scheduled FOR. The UI has always promised this.
+  if (uniqueAttendees.length > 0) {
+    await notifyEventInvited(
+      db,
+      c.env,
+      summarize(event!),
+      uniqueAttendees,
+      { userId, name: await actorName(db, userId) },
+    );
   }
 
-  // Re-read so googleCalendarEventId from a successful sync is in the payload.
-  const latest = await db
-    .select()
-    .from(schema.events)
-    .where(eq(schema.events.id, eventId))
-    .get();
-
-  try {
-    await notifyEventChange(c.env, db, {
-      familyId,
-      actorUserId: userId,
-      eventId,
-      title: data.title,
-      kind: "created",
-      attendeeMemberIds: data.attendeeMemberIds,
-      whenLabel: whenLabel(data.startAt, data.allDay ?? false),
-    });
-  } catch (err) {
-    console.error("[events] notify failed:", err);
+  // Creator is excluded from invite mail — send them an .ics so Apple Calendar
+  // (via Mail) can add the event immediately. Opt-out via syncAppleCalendar.
+  if (data.syncAppleCalendar) {
+    await emailEventIcsToActor(
+      db,
+      c.env,
+      summarize(event!),
+      userId,
+      `Saved “${event!.title}” to Family Vault`,
+    );
   }
 
-  return c.json({ event: latest ?? event, calendar }, 201);
+  // Push into Google Calendar (default on; opt-out via syncGoogleCalendar).
+  let calendarSynced = false;
+  if (data.syncGoogleCalendar) {
+    const gcal = await syncEventToGoogleCalendars(db, c.env, eventId);
+    calendarSynced = gcal.syncedUserIds.includes(userId);
+  }
+
+  // Advisory double-booking check — reported, never blocking.
+  const conflicts = await findConflicts(
+    db,
+    data.familyId,
+    { startAt: data.startAt, endAt: data.endAt, allDay: data.allDay },
+    uniqueAttendees,
+    eventId,
+  );
+
+  return c.json(
+    {
+      event,
+      conflicts,
+      calendarSynced,
+      appleCalendar: data.syncAppleCalendar,
+    },
+    201,
+  );
+});
+
+// GET /events/availability?familyId=&from=&to= — free/busy per member.
+// "When is everyone free?" Registered BEFORE /:id so the param route does not
+// swallow the literal path.
+eventRoutes.get("/availability", requireSession, async (c) => {
+  const familyId = c.req.query("familyId");
+  if (!familyId) return c.json({ error: "familyId query param required" }, 400);
+
+  const membership = await requireFamilyMember(c, familyId, "member", "calendar");
+  if (membership instanceof Response) return membership;
+
+  const from = parseInt(c.req.query("from") ?? "", 10);
+  const to = parseInt(c.req.query("to") ?? "", 10);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return c.json({ error: "from and to query params required" }, 400);
+  }
+  if (to < from) return c.json({ error: "to must be >= from" }, 400);
+
+  const db = getDb(c.env);
+  const busy = await busyBlocks(db, familyId, from, to);
+
+  // Group by member so the client can render one lane per person.
+  const byMember: Record<string, typeof busy> = {};
+  for (const b of busy) (byMember[b.memberId] ??= []).push(b);
+
+  return c.json({ from, to, busy, byMember });
 });
 
 // GET /events/:id — get event with attendees.
 eventRoutes.get("/:id", requireSession, async (c) => {
   const { id: eventId } = c.req.param();
+  const userId = c.get("userId")!;
   const db = getDb(c.env);
 
   const event = await db
@@ -263,12 +422,14 @@ eventRoutes.get("/:id", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
   const attendees = await db
     .select({
       memberId: schema.eventAttendees.memberId,
+      rsvp: schema.eventAttendees.rsvp,
+      rsvpAt: schema.eventAttendees.rsvpAt,
       memberType: schema.familyMembers.memberType,
       displayName: schema.familyMembers.displayName,
       role: schema.familyMembers.role,
@@ -281,9 +442,95 @@ eventRoutes.get("/:id", requireSession, async (c) => {
     .leftJoin(schema.users, eq(schema.familyMembers.userId, schema.users.id))
     .where(eq(schema.eventAttendees.eventId, eventId));
 
-  // Nest attendees on the event so the SPA can read `event.attendees`
-  // without a second key (missing that field used to blank the detail screen).
-  return c.json({ event: { ...event, attendees }, attendees });
+  // Headline counts so the UI can show "3 going · 1 declined" without a second pass.
+  const rsvpSummary = attendees.reduce<Record<string, number>>(
+    (acc, a) => {
+      acc[a.rsvp] = (acc[a.rsvp] ?? 0) + 1;
+      return acc;
+    },
+    { invited: 0, accepted: 0, declined: 0, tentative: 0 },
+  );
+
+  // Can the caller act on this event, or only view and RSVP? Lets the client
+  // hide controls that the server would reject anyway.
+  const canEdit = canMutateEvent(membership, event);
+  const calendarSynced = await userHasGoogleCalendarCopy(db, eventId, userId);
+
+  const linked = await db
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      category: schema.documents.category,
+      visibility: schema.documents.visibility,
+      ownerUserId: schema.documents.ownerUserId,
+    })
+    .from(schema.eventDocuments)
+    .innerJoin(
+      schema.documents,
+      eq(schema.eventDocuments.documentId, schema.documents.id),
+    )
+    .where(
+      and(
+        eq(schema.eventDocuments.eventId, eventId),
+        ne(schema.documents.status, "trashed"),
+      ),
+    );
+
+  const documents = linked
+    .filter((d) => {
+      if (d.visibility !== "private") return true;
+      if (d.ownerUserId === userId) return true;
+      return membership.role === "owner" || membership.role === "admin";
+    })
+    .map(({ id, title, category }) => ({ id, title, category }));
+
+  return c.json({ event, attendees, rsvpSummary, canEdit, documents, calendarSynced });
+});
+
+// GET /events/:id/ics — download a single event as an .ics file
+// ("Add to calendar" in Google/Apple/Outlook). Session + membership gated.
+eventRoutes.get("/:id/ics", requireSession, async (c) => {
+  const { id: eventId } = c.req.param();
+  const db = getDb(c.env);
+
+  const event = await db
+    .select()
+    .from(schema.events)
+    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+    .get();
+
+  if (!event) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+  if (membership instanceof Response) return membership;
+
+  const body = buildCalendar({
+    name: "Family Vault",
+    events: [
+      {
+        uid: `event-${event.id}@family-vault`,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        startAt: event.startAt,
+        endAt: event.endAt,
+        allDay: Boolean(event.allDay),
+        cancelled: event.status === "cancelled",
+        sequence: Math.max(0, (event.version ?? 1) - 1),
+        updatedAt: event.updatedAt ?? event.createdAt,
+      },
+    ],
+  });
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/calendar; charset=utf-8",
+      // inline: iOS Safari / Calendar often open the Add Event sheet instead of
+      // just downloading a file (attachment).
+      "Content-Disposition": `inline; filename="event-${event.id}.ics"`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });
 
 // PATCH /events/:id — update event fields.
@@ -301,11 +548,62 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
+
+  if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
+
+  // Optimistic concurrency: reject a write based on a stale read instead of
+  // silently overwriting whatever the other member just saved.
+  if (
+    updates.expectedVersion !== undefined &&
+    updates.expectedVersion !== event.version
+  ) {
+    return c.json(
+      { error: "conflict", reason: "event_modified", currentVersion: event.version },
+      409,
+    );
+  }
+
+  // The Zod refine only compares the two fields when BOTH are in the payload.
+  // Moving startAt alone could therefore leave the stored endAt before it, so
+  // validate the MERGED state, not just the patch.
+  const nextStartAt = updates.startAt ?? event.startAt;
+  const nextEndAt = updates.endAt !== undefined ? updates.endAt : event.endAt;
+  if (nextEndAt != null && nextEndAt < nextStartAt) {
+    return c.json(
+      {
+        error: "validation_error",
+        issues: [
+          {
+            code: "custom",
+            path: ["endAt"],
+            message: "endAt must be >= startAt",
+          },
+        ],
+      },
+      400,
+    );
+  }
+
+  // Validate document replace BEFORE writing the event row so a bad ID list
+  // cannot leave a half-applied patch.
+  if (updates.documentIds !== undefined) {
+    if (!(await allDocumentsInFamily(db, event.familyId, updates.documentIds))) {
+      return c.json({ error: "invalid_document_ids" }, 400);
+    }
+  }
+
+  // Attendee IDs also validated before write (same reason).
+  if (updates.attendeeMemberIds !== undefined) {
+    if (!(await allMembersInFamily(db, event.familyId, updates.attendeeMemberIds))) {
+      return c.json({ error: "invalid_member_ids" }, 400);
+    }
+  }
 
   const set: Partial<typeof schema.events.$inferInsert> = {
     updatedAt: Math.floor(Date.now() / 1000),
+    version: event.version + 1,
   };
   if (updates.title !== undefined) set.title = updates.title;
   if (updates.description !== undefined) set.description = updates.description;
@@ -313,16 +611,62 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
   if (updates.endAt !== undefined) set.endAt = updates.endAt;
   if (updates.allDay !== undefined) set.allDay = updates.allDay;
   if (updates.location !== undefined) set.location = updates.location;
+  if (updates.travelBufferMins !== undefined) {
+    set.travelBufferMins = updates.travelBufferMins;
+  }
   if (updates.type !== undefined) set.type = updates.type;
 
   await db.update(schema.events).set(set).where(eq(schema.events.id, eventId));
 
-  // Replace attendees if provided
+  // Linked documents are a REPLACE when the key is present (same as attendees).
+  if (updates.documentIds !== undefined) {
+    const nextDocs = [...new Set(updates.documentIds)];
+    await db
+      .delete(schema.eventDocuments)
+      .where(eq(schema.eventDocuments.eventId, eventId));
+    if (nextDocs.length > 0) {
+      await db.insert(schema.eventDocuments).values(
+        nextDocs.map((documentId) => ({ eventId, documentId })),
+      );
+    }
+  }
+
+  // Attendee list is a REPLACE, so work out who joined and who was dropped
+  // before touching the rows — each group gets a different message, and people
+  // who were already on the list must not be re-notified.
+  const previousAttendees = await attendeeMemberIds(db, eventId);
+  let added: string[] = [];
+  let removed: string[] = [];
+
   if (updates.attendeeMemberIds !== undefined) {
+    const next = [...new Set(updates.attendeeMemberIds)];
+    const before = new Set(previousAttendees);
+    added = next.filter((m) => !before.has(m));
+    removed = previousAttendees.filter((m) => !next.includes(m));
+
+    // Preserve existing answers: only genuinely new attendees start as 'invited'.
+    const kept = await db
+      .select({
+        memberId: schema.eventAttendees.memberId,
+        rsvp: schema.eventAttendees.rsvp,
+        rsvpAt: schema.eventAttendees.rsvpAt,
+      })
+      .from(schema.eventAttendees)
+      .where(eq(schema.eventAttendees.eventId, eventId));
+    const keptById = new Map(kept.map((k) => [k.memberId, k]));
+
     await db.delete(schema.eventAttendees).where(eq(schema.eventAttendees.eventId, eventId));
-    if (updates.attendeeMemberIds.length > 0) {
+    if (next.length > 0) {
       await db.insert(schema.eventAttendees).values(
-        updates.attendeeMemberIds.map((memberId) => ({ eventId, memberId })),
+        next.map((memberId) => {
+          const prior = keptById.get(memberId);
+          return {
+            eventId,
+            memberId,
+            rsvp: prior?.rsvp ?? ("invited" as const),
+            rsvpAt: prior?.rsvpAt ?? null,
+          };
+        }),
       );
     }
   }
@@ -336,48 +680,54 @@ eventRoutes.patch("/:id", requireSession, zv(updateEventSchema), async (c) => {
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: ACTIONS.EVENT_UPDATED,
+    action: "event_updated",
     targetType: "event",
     targetId: eventId,
   });
 
-  let calendar: CalendarSyncResult = {
-    status: "failed",
-    googleCalendarEventId: null,
-    message: calendarStatusMessage("failed"),
-  };
-  if (updatedEvent) {
-    try {
-      calendar = await syncCalendar(c.env, db, userId, updatedEvent);
-    } catch (err) {
-      console.error("[events] calendar sync failed:", err);
-    }
+  const actor = { userId, name: await actorName(db, userId) };
+  const summary = summarize(updatedEvent!);
+
+  // A moved event is the change people most need to hear about. Everyone still
+  // attending is told, plus the creator if someone else moved their event.
+  const timeChanged =
+    updates.startAt !== undefined && updates.startAt !== event.startAt;
+  if (timeChanged) {
+    const current = await attendeeMemberIds(db, eventId);
+    const audience = new Set(current);
+    const creatorMember = await db
+      .select({ id: schema.familyMembers.id })
+      .from(schema.familyMembers)
+      .where(
+        and(
+          eq(schema.familyMembers.familyId, event.familyId),
+          eq(schema.familyMembers.userId, event.createdBy),
+        ),
+      )
+      .get();
+    if (creatorMember) audience.add(creatorMember.id);
+    await notifyEventRescheduled(db, c.env, summary, [...audience], actor, event.startAt);
   }
 
-  const latest = await db
-    .select()
-    .from(schema.events)
-    .where(eq(schema.events.id, eventId))
-    .get();
-
-  try {
-    await notifyEventChange(c.env, db, {
-      familyId: event.familyId,
-      actorUserId: userId,
-      eventId,
-      title: latest?.title ?? updatedEvent?.title ?? event.title,
-      kind: "updated",
-      attendeeMemberIds: updates.attendeeMemberIds ?? [],
-      whenLabel: whenLabel(
-        latest?.startAt ?? updatedEvent?.startAt ?? event.startAt,
-        latest?.allDay ?? updatedEvent?.allDay ?? event.allDay,
-      ),
-    });
-  } catch (err) {
-    console.error("[events] notify failed:", err);
+  if (added.length > 0) {
+    await notifyEventInvited(db, c.env, summary, added, actor);
+  }
+  if (removed.length > 0) {
+    await notifyEventUninvited(db, c.env, summary, removed, actor);
   }
 
-  return c.json({ event: latest ?? updatedEvent, calendar });
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
+  const conflicts = await findConflicts(
+    db,
+    event.familyId,
+    { startAt: summary.startAt, endAt: updatedEvent!.endAt, allDay: updatedEvent!.allDay },
+    await attendeeMemberIds(db, eventId),
+    eventId,
+  );
+
+  const calendarSynced = await userHasGoogleCalendarCopy(db, eventId, userId);
+  return c.json({ event: updatedEvent, conflicts, calendarSynced });
 });
 
 // DELETE /events/:id — soft delete (status=trashed).
@@ -394,36 +744,37 @@ eventRoutes.delete("/:id", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
+
+  if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
+
+  // Capture the audience before the row is trashed, then tell them it is off.
+  const attendees = await attendeeMemberIds(db, eventId);
 
   await db
     .update(schema.events)
     .set({ status: "trashed", trashedAt: Math.floor(Date.now() / 1000) })
     .where(eq(schema.events.id, eventId));
 
+  if (attendees.length > 0) {
+    await notifyEventCancelled(db, c.env, summarize(event), attendees, {
+      userId,
+      name: await actorName(db, userId),
+    });
+  }
+
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: ACTIONS.EVENT_TRASHED,
+    action: "event_deleted",
     targetType: "event",
     targetId: eventId,
   });
 
-  // Remove from the *creator's* Google Calendar (where create wrote it).
-  const removed = await deleteGoogleCalendarEvent(
-    c.env,
-    event.createdBy,
-    event.googleCalendarEventId,
-  );
-  if (removed && event.googleCalendarEventId) {
-    await db
-      .update(schema.events)
-      .set({ googleCalendarEventId: null })
-      .where(eq(schema.events.id, eventId));
-  }
-
-  return c.json({ ok: true, googleCalendarRemoved: removed });
+  return c.json({ ok: true });
 });
 
 // POST /events/:id/cancel — cancel without deleting (stays visible with strikethrough).
@@ -441,87 +792,139 @@ eventRoutes.post("/:id/cancel", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
+
+  if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
+
+  const attendees = await attendeeMemberIds(db, eventId);
 
   await db
     .update(schema.events)
     .set({ status: "cancelled", updatedAt: Math.floor(Date.now() / 1000) })
     .where(eq(schema.events.id, eventId));
 
+  if (attendees.length > 0) {
+    await notifyEventCancelled(db, c.env, summarize(event), attendees, {
+      userId,
+      name: await actorName(db, userId),
+    });
+  }
+
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
   await insertAuditEvent(db, {
     familyId: event.familyId,
     actorUserId: userId,
-    action: ACTIONS.EVENT_CANCELLED,
+    action: "event_cancelled",
     targetType: "event",
     targetId: eventId,
   });
 
-  let googleCalendarRemoved = false;
-  try {
-    googleCalendarRemoved = await deleteGoogleCalendarEvent(
-      c.env,
-      event.createdBy,
-      event.googleCalendarEventId,
-    );
-    if (googleCalendarRemoved && event.googleCalendarEventId) {
-      await db
-        .update(schema.events)
-        .set({ googleCalendarEventId: null })
-        .where(eq(schema.events.id, eventId));
+  return c.json({ ok: true });
+});
+
+// POST /events/:id/action-items — turn meeting follow-ups into tasks linked
+// to this event. Additive; does not change the event itself.
+eventRoutes.post(
+  "/:id/action-items",
+  requireSession,
+  zv(actionItemsSchema),
+  async (c) => {
+    const { id: eventId } = c.req.param();
+    const userId = c.get("userId")!;
+    const data = c.req.valid("json");
+    const db = getDb(c.env);
+
+    const event = await db
+      .select()
+      .from(schema.events)
+      .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+      .get();
+    if (!event) return c.json({ error: "not_found" }, 404);
+
+    const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+    if (membership instanceof Response) return membership;
+
+    const now = Math.floor(Date.now() / 1000);
+    const tasks: { id: string; title: string }[] = [];
+    for (const title of data.titles) {
+      const id = crypto.randomUUID();
+      await db.insert(schema.tasks).values({
+        id,
+        familyId: event.familyId,
+        title: title.trim(),
+        status: "open",
+        priority: "medium",
+        dueDate: data.dueDate,
+        relatedEventId: eventId,
+        createdBy: userId,
+        updatedAt: now,
+      });
+      tasks.push({ id, title: title.trim() });
+      await insertAuditEvent(db, {
+        familyId: event.familyId,
+        actorUserId: userId,
+        action: "task_created",
+        targetType: "task",
+        targetId: id,
+        meta: { via: "event_action_items", eventId },
+      });
     }
-  } catch (err) {
-    console.error("[events] calendar delete on cancel failed:", err);
-  }
 
-  try {
-    await notifyEventChange(c.env, db, {
-      familyId: event.familyId,
-      actorUserId: userId,
-      eventId,
-      title: event.title,
-      kind: "cancelled",
-      attendeeMemberIds: [],
-      whenLabel: whenLabel(event.startAt, event.allDay),
-    });
-  } catch (err) {
-    console.error("[events] notify failed:", err);
-  }
+    return c.json({ tasks }, 201);
+  },
+);
 
-  return c.json({ ok: true, googleCalendarRemoved });
-});
+// POST /events/:id/follow-up — nudge attendees with an in-app notification
+// (meeting follow-up). Never notifies the actor; skips dependents.
+eventRoutes.post(
+  "/:id/follow-up",
+  requireSession,
+  zv(followUpSchema),
+  async (c) => {
+    const { id: eventId } = c.req.param();
+    const userId = c.get("userId")!;
+    const data = c.req.valid("json");
+    const db = getDb(c.env);
 
-// POST /events/:id/sync-calendar — retry Google Calendar write without editing.
-// Existing events created before Calendar API / reconnect never sync otherwise.
-eventRoutes.post("/:id/sync-calendar", requireSession, async (c) => {
-  const { id: eventId } = c.req.param();
-  const userId = c.get("userId")!;
-  const db = getDb(c.env);
+    const event = await db
+      .select()
+      .from(schema.events)
+      .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+      .get();
+    if (!event) return c.json({ error: "not_found" }, 404);
 
-  const event = await db
-    .select()
-    .from(schema.events)
-    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
-    .get();
+    const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+    if (membership instanceof Response) return membership;
 
-  if (!event) return c.json({ error: "not_found" }, 404);
+    const memberIds = await attendeeMemberIds(db, eventId);
+    const targets = await targetsForMembers(db, memberIds, userId);
+    const body =
+      data.message?.trim() ||
+      `Follow up on “${event.title}” — any open action items?`;
+    const link = `/calendar/events/${eventId}`;
+    let sent = 0;
+    for (const t of targets) {
+      await createNotification(db, {
+        userId: t.userId,
+        familyId: event.familyId,
+        type: "meeting_followup",
+        title: `Follow-up: ${event.title}`,
+        body,
+        link,
+      });
+      sent += 1;
+    }
 
-  const membership = await requireFamilyMember(c, event.familyId);
-  if (membership instanceof Response) return membership;
-
-  const calendar = await syncCalendar(c.env, db, userId, event);
-  const latest = await db
-    .select()
-    .from(schema.events)
-    .where(eq(schema.events.id, eventId))
-    .get();
-
-  return c.json({ event: latest ?? event, calendar });
-});
+    return c.json({ ok: true, notified: sent });
+  },
+);
 
 // POST /events/:id/attendees — add members as attendees.
 eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async (c) => {
   const { id: eventId } = c.req.param();
+  const userId = c.get("userId")!;
   const { memberIds } = c.req.valid("json");
   const db = getDb(c.env);
 
@@ -533,24 +936,65 @@ eventRoutes.post("/:id/attendees", requireSession, zv(addAttendeesSchema), async
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
 
-  // Insert attendees, ignore duplicates
-  for (const memberId of memberIds) {
+  if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
+
+  if (!(await allMembersInFamily(db, event.familyId, memberIds))) {
+    return c.json({ error: "invalid_member_ids" }, 400);
+  }
+
+  // Only genuinely new attendees are inserted and notified — re-adding someone
+  // must not spam them a second time.
+  const already = new Set(await attendeeMemberIds(db, eventId));
+  const fresh = [...new Set(memberIds)].filter((m) => !already.has(m));
+
+  const dependents = new Set(
+    fresh.length === 0
+      ? []
+      : (
+          await db
+            .select({ id: schema.familyMembers.id })
+            .from(schema.familyMembers)
+            .where(
+              and(
+                inArray(schema.familyMembers.id, fresh),
+                eq(schema.familyMembers.memberType, "dependent"),
+              ),
+            )
+        ).map((r) => r.id),
+  );
+
+  const nowSecs = Math.floor(Date.now() / 1000);
+  for (const memberId of fresh) {
     try {
-      await db.insert(schema.eventAttendees).values({ eventId, memberId });
+      await db.insert(schema.eventAttendees).values({
+        eventId,
+        memberId,
+        rsvp: dependents.has(memberId) ? "accepted" : "invited",
+        rsvpAt: dependents.has(memberId) ? nowSecs : null,
+      });
     } catch {
-      // Ignore duplicate key constraint violations
+      // Ignore duplicate key constraint violations (racing add).
     }
   }
 
-  return c.json({ ok: true });
+  if (fresh.length > 0) {
+    await notifyEventInvited(db, c.env, summarize(event), fresh, {
+      userId,
+      name: await actorName(db, userId),
+    });
+    await syncEventToGoogleCalendars(db, c.env, eventId);
+  }
+
+  return c.json({ ok: true, added: fresh.length });
 });
 
 // DELETE /events/:id/attendees/:memberId — remove an attendee.
 eventRoutes.delete("/:id/attendees/:memberId", requireSession, async (c) => {
   const { id: eventId, memberId } = c.req.param();
+  const userId = c.get("userId")!;
   const db = getDb(c.env);
 
   const event = await db
@@ -561,8 +1005,10 @@ eventRoutes.delete("/:id/attendees/:memberId", requireSession, async (c) => {
 
   if (!event) return c.json({ error: "not_found" }, 404);
 
-  const membership = await requireFamilyMember(c, event.familyId);
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
   if (membership instanceof Response) return membership;
+
+  if (!canMutateEvent(membership, event)) return c.json(FORBIDDEN_EVENT, 403);
 
   await db
     .delete(schema.eventAttendees)
@@ -573,5 +1019,134 @@ eventRoutes.delete("/:id/attendees/:memberId", requireSession, async (c) => {
       ),
     );
 
+  await notifyEventUninvited(db, c.env, summarize(event), [memberId], {
+    userId,
+    name: await actorName(db, userId),
+  });
+
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
   return c.json({ ok: true });
+});
+
+// POST /events/:id/rsvp — answer an invitation.
+//
+// Answering is the ATTENDEE's own right, so this is intentionally not behind
+// canMutateEvent: a plain member who may not touch the event's time can always
+// say whether they are coming. What is guarded is answering for someone else —
+// allowed only for dependents, who have no account to answer with.
+eventRoutes.post("/:id/rsvp", requireSession, zv(rsvpSchema), async (c) => {
+  const { id: eventId } = c.req.param();
+  const userId = c.get("userId")!;
+  const { status, memberId: targetMemberId } = c.req.valid("json");
+  const db = getDb(c.env);
+
+  const event = await db
+    .select()
+    .from(schema.events)
+    .where(and(eq(schema.events.id, eventId), ne(schema.events.status, "trashed")))
+    .get();
+
+  if (!event) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, event.familyId, "member", "calendar");
+  if (membership instanceof Response) return membership;
+
+  // A cancelled event has nothing left to answer.
+  if (event.status === "cancelled") {
+    return c.json({ error: "conflict", reason: "event_cancelled" }, 409);
+  }
+
+  let memberId = membership.id;
+  let onBehalfOf: string | null = null;
+
+  if (targetMemberId && targetMemberId !== membership.id) {
+    const target = await db
+      .select({
+        id: schema.familyMembers.id,
+        familyId: schema.familyMembers.familyId,
+        memberType: schema.familyMembers.memberType,
+        displayName: schema.familyMembers.displayName,
+      })
+      .from(schema.familyMembers)
+      .where(eq(schema.familyMembers.id, targetMemberId))
+      .get();
+
+    if (!target || target.familyId !== event.familyId) {
+      return c.json({ error: "invalid_member_ids" }, 400);
+    }
+    // You may answer for a child who has no account; never for another adult.
+    if (target.memberType !== "dependent") {
+      return c.json(
+        { error: "forbidden", reason: "you can only RSVP for yourself or a dependent" },
+        403,
+      );
+    }
+    memberId = target.id;
+    onBehalfOf = target.displayName ?? "a dependent";
+  }
+
+  const attendee = await db
+    .select({ memberId: schema.eventAttendees.memberId })
+    .from(schema.eventAttendees)
+    .where(
+      and(
+        eq(schema.eventAttendees.eventId, eventId),
+        eq(schema.eventAttendees.memberId, memberId),
+      ),
+    )
+    .get();
+
+  // Not invited → nothing to answer. 403 (not 404): the event is visible to you.
+  if (!attendee) {
+    return c.json({ error: "forbidden", reason: "not_an_attendee" }, 403);
+  }
+
+  await db
+    .update(schema.eventAttendees)
+    .set({ rsvp: status, rsvpAt: Math.floor(Date.now() / 1000) })
+    .where(
+      and(
+        eq(schema.eventAttendees.eventId, eventId),
+        eq(schema.eventAttendees.memberId, memberId),
+      ),
+    );
+
+  await insertAuditEvent(db, {
+    familyId: event.familyId,
+    actorUserId: userId,
+    action: "event_rsvp",
+    targetType: "event",
+    targetId: eventId,
+    meta: { rsvp: status, memberId },
+  });
+
+  // The organizer is the one waiting on the answer.
+  const organizerMember = await db
+    .select({ id: schema.familyMembers.id })
+    .from(schema.familyMembers)
+    .where(
+      and(
+        eq(schema.familyMembers.familyId, event.familyId),
+        eq(schema.familyMembers.userId, event.createdBy),
+      ),
+    )
+    .get();
+
+  if (organizerMember) {
+    await notifyRsvpAnswered(
+      db,
+      c.env,
+      summarize(event),
+      [organizerMember.id],
+      { userId, name: await actorName(db, userId) },
+      status,
+      onBehalfOf,
+    );
+  }
+
+  // Decline drops the Google Calendar copy; accept/tentative (re)creates it.
+  await syncEventToGoogleCalendars(db, c.env, eventId);
+
+  return c.json({ ok: true, memberId, rsvp: status });
 });
