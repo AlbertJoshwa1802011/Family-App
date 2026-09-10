@@ -11,9 +11,13 @@ import { app } from "../worker/index";
 import { ASSISTANT_TOOLS } from "../worker/lib/assistantTools";
 import { assistantProvider, isAssistantConfigured } from "../worker/lib/assistant";
 import {
+  DEFAULT_GEMINI_MODEL,
+  FALLBACK_GEMINI_MODELS,
   GEMINI_GENERATE_URL,
   fromGeminiResponse,
   geminiComplete,
+  geminiGenerateUrl,
+  geminiModelCandidates,
   toGeminiContents,
   toGeminiFunctionDeclarations,
   type GeminiGenerateResponse,
@@ -121,6 +125,59 @@ describe("gemini schema + message conversion", () => {
     const talk = fromGeminiResponse(geminiText("You have 2 open tasks."));
     expect(talk.stop_reason).toBe("end_turn");
     expect(talk.content).toEqual([{ type: "text", text: "You have 2 open tasks." }]);
+  });
+
+  it("preserves thoughtSignature on tool_use so the next Gemini turn does not 400", () => {
+    const roundTrip = fromGeminiResponse({
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: [
+              {
+                functionCall: {
+                  name: "add_expense",
+                  args: { amount: 100, category: "food", note: "snacks" },
+                },
+                thoughtSignature: "sig_abc123",
+              },
+            ],
+          },
+          finishReason: "STOP",
+        },
+      ],
+    });
+    expect(roundTrip.content[0]).toMatchObject({
+      type: "tool_use",
+      name: "add_expense",
+      thoughtSignature: "sig_abc123",
+    });
+
+    const contents = toGeminiContents([
+      { role: "user", content: "add 100 for snacks" },
+      { role: "assistant", content: roundTrip.content },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: (roundTrip.content[0] as { id: string }).id,
+            content: JSON.stringify({ ok: true }),
+          },
+        ],
+      },
+    ]);
+    expect(contents[1].parts[0].functionCall?.name).toBe("add_expense");
+    expect(contents[1].parts[0].thoughtSignature).toBe("sig_abc123");
+  });
+
+  it("lists flash model fallbacks with optional preferred override first", () => {
+    expect(geminiModelCandidates(null)[0]).toBe(DEFAULT_GEMINI_MODEL);
+    expect(geminiModelCandidates("gemini-flash-latest")[0]).toBe("gemini-flash-latest");
+    expect(geminiModelCandidates("gemini-flash-latest")).toEqual([
+      "gemini-flash-latest",
+      ...FALLBACK_GEMINI_MODELS.filter((m) => m !== "gemini-flash-latest"),
+    ]);
   });
 
   it("fromGeminiResponse yields a safe fallback when Gemini returns no candidates", () => {
@@ -291,6 +348,34 @@ describe("gemini HTTP (stubbed generateContent)", () => {
     await expect(
       geminiComplete("k", { system: "s", tools: [], messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/gemini_http_429/);
+  });
+
+  it("geminiComplete falls through to the next flash model on 404 NOT_FOUND", async () => {
+    vi.unstubAllGlobals();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(String(url));
+        if (String(url).includes("gemini-2.5-flash")) {
+          return new Response(JSON.stringify({ error: { message: "models/gemini-2.5-flash is not found" } }), {
+            status: 404,
+          });
+        }
+        return new Response(JSON.stringify(geminiText("Recovered on fallback.")), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    const msg = await geminiComplete("k", {
+      system: "s",
+      tools: [],
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(msg.content[0]).toMatchObject({ type: "text", text: "Recovered on fallback." });
+    expect(calls[0]).toBe(geminiGenerateUrl("gemini-2.5-flash"));
+    expect(calls[1]).toBe(geminiGenerateUrl("gemini-flash-latest"));
   });
 });
 
