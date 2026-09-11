@@ -9,6 +9,7 @@ import { Avatar } from "../components/ui/Avatar";
 import { TypePicker } from "../components/ui/TypePicker";
 import { inputCls } from "../lib/fieldCls";
 import { api } from "../lib/api";
+import { downloadEventIcs } from "../lib/downloadEventIcs";
 import { useAuth } from "../context/AuthContext";
 
 interface Member {
@@ -80,6 +81,9 @@ export function EventForm() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hydrated, setHydrated] = useState(false);
   const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
+  // Stable across retries so a double-submit / back-button retry cannot
+  // insert a second event after the first POST already succeeded.
+  const [clientRequestId] = useState(() => crypto.randomUUID());
 
   // Edit mode: hydrate the form once from the existing event.
   useQuery({
@@ -169,9 +173,11 @@ export function EventForm() {
       void qc.invalidateQueries({ queryKey: ["events"] });
       const go = () => {
         const evId = data.event?.id;
+        // Offer Apple Calendar via a credentialed blob download — never replace
+        // the SPA with `/api/events/:id/ics` (that caused unauthorized JSON +
+        // duplicate creates when the user hit Create again).
         if (!isEdit && data.appleCalendar && evId) {
-          window.location.assign(`/api/events/${evId}/ics`);
-          return;
+          void downloadEventIcs(evId);
         }
         navigate(evId ? `/calendar/events/${evId}` : "/calendar", {
           replace: true,
@@ -233,6 +239,7 @@ export function EventForm() {
         ? {
             syncGoogleCalendar: form.syncGoogleCalendar,
             syncAppleCalendar: form.syncAppleCalendar,
+            clientRequestId,
           }
         : {}),
     });
@@ -510,7 +517,7 @@ export function EventForm() {
                 <span>
                   <span className="block text-sm text-fg">Apple Calendar</span>
                   <span className="block text-xs text-fg-subtle">
-                    Opens Add to Calendar on iPhone after save
+                    Downloads a calendar file after save (and emails you one)
                   </span>
                 </span>
               </label>

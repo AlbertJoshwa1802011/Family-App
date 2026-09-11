@@ -134,6 +134,13 @@
       "when": 1789069069207,
       "tag": "0018_restore_money_manager",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1789088330927,
+      "tag": "0019_event_client_request_id",
+      "breakpoints": true
     }
   ]
 }
