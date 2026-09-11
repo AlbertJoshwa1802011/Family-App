@@ -54,6 +54,15 @@ const ERROR_MESSAGES: Record<string, string> = {
   range_too_large: "Pick a shorter range — up to 31 days at a time.",
   invalid_week: "That week selection isn't valid.",
   internal_error: "Something went wrong on our side — please try again.",
+  email_not_configured:
+    "Email isn't connected yet — Connect Gmail in Settings or ask an admin to set RESEND_API_KEY.",
+  gmail_api_disabled:
+    "Enable Gmail API in Google Cloud, then Connect Gmail in Settings again.",
+  gmail_auth_failed:
+    "Gmail rejected the send — Connect Gmail in Settings and approve gmail.send.",
+  resend_testing_recipients:
+    "Resend can only email its account owner in testing mode — Connect Gmail instead.",
+  email_send_failed: "Could not send that email — try Connect Gmail in Settings.",
 };
 
 export function friendlyMessage(code: string, status: number): string {
@@ -81,13 +90,19 @@ export async function api<T>(
 
   if (!res.ok) {
     let code = res.statusText;
+    let serverMessage: string | undefined;
     try {
-      const body = (await res.json()) as { error?: string };
+      const body = (await res.json()) as { error?: string; message?: string };
       if (body?.error) code = body.error;
+      if (body?.message) serverMessage = body.message;
     } catch {
       // non-JSON error body — keep statusText as the code
     }
-    throw new ApiError(res.status, code, friendlyMessage(code, res.status));
+    throw new ApiError(
+      res.status,
+      code,
+      serverMessage ?? friendlyMessage(code, res.status),
+    );
   }
 
   if (res.status === 204) return undefined as T;

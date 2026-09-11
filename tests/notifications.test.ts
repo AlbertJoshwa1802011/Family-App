@@ -13,6 +13,7 @@ describe("/api/notifications: 401 without session", () => {
     { method: "GET",  path: "/api/notifications" },
     { method: "GET",  path: "/api/notifications?unreadOnly=1" },
     { method: "POST", path: "/api/notifications/read-all" },
+    { method: "POST", path: "/api/notifications/test-email" },
     { method: "POST", path: "/api/notifications/notif-1/read" },
     { method: "GET",  path: "/api/notifications/prefs" },
     { method: "PUT",  path: "/api/notifications/prefs" },
