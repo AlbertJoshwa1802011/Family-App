@@ -5,7 +5,16 @@ import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
 import type { HonoEnv, AppContext } from "../types";
+import {
+  LOGIN_SCOPES,
+  GOOGLE_SCOPES,
+  extraScopesFromConnect,
+  replaceGrantedScopes,
+  userHasScope,
+  clearGoogleAccessTokenCache,
+} from "../lib/googleAuth";
 import { getDb, schema } from "../db/client";
+import { requireSession } from "../middleware/requireSession";
 import {
   createSession,
   deleteSession,
@@ -81,21 +90,17 @@ async function beginGoogleOAuth(
     { expirationTtl: PKCE_TTL_SECS },
   );
 
+  const connect = c.req.query("connect") ?? "";
+  const scopes = [...LOGIN_SCOPES, ...extraScopesFromConnect(connect)];
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: [
-      "openid",
-      "email",
-      "profile",
-      // Drive: document files created by this app only (non-sensitive).
-      "https://www.googleapis.com/auth/drive.file",
-      // Calendar: push Family Vault events into the user's primary calendar.
-      "https://www.googleapis.com/auth/calendar.events",
-    ].join(" "),
+    scope: scopes.join(" "),
     access_type: "offline",
     prompt: "consent",
+    include_granted_scopes: "true",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -107,6 +112,17 @@ async function beginGoogleOAuth(
 // GET /auth/google/start — full-page navigation (phones / in-app browsers).
 // 302s to Google. A GET used to 404 JSON, which is what you see if the
 // address bar stops on /api/auth/google/start.
+
+// GET /auth/google/status — which optional Google scopes the user has granted.
+authRoutes.get("/google/status", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const [gmail, calendar] = await Promise.all([
+    userHasScope(c.env, userId, GOOGLE_SCOPES.gmailSend),
+    userHasScope(c.env, userId, GOOGLE_SCOPES.calendarEvents),
+  ]);
+  return c.json({ gmail, calendar });
+});
+
 authRoutes.get("/google/start", async (c) => {
   const origin = requestOrigin(c.req.url, c.env?.APP_URL);
   const result = await beginGoogleOAuth(c);
@@ -271,6 +287,7 @@ authRoutes.get("/google/callback", async (c) => {
     id_token: string;
     access_token: string;
     refresh_token?: string;
+    scope?: string;
   };
 
   // Verify the Google ID token with jose against Google's JWKS endpoint
@@ -341,6 +358,12 @@ authRoutes.get("/google/callback", async (c) => {
     });
   } else {
     await c.env.KV.delete(`user:access_token:${user.id}`);
+  }
+  // Persist Google's reported scopes (needed for gmail.send / Connect Gmail).
+  await replaceGrantedScopes(c.env, user.id, tokens.scope);
+  // Drop any stale access token cache if scope string changed mid-session.
+  if (!tokens.access_token) {
+    await clearGoogleAccessTokenCache(c.env, user.id);
   }
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));

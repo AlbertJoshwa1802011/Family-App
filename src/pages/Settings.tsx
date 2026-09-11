@@ -27,9 +27,17 @@ function windowLabel(w: number): string {
 
 function ReminderPrefsCard() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ["reminder-prefs"],
     queryFn: () => api<{ prefs: ReminderPrefs }>("/notifications/prefs"),
+  });
+
+  const gmailStatus = useQuery({
+    queryKey: ["google-status"],
+    queryFn: () => api<{ gmail: boolean; calendar: boolean }>("/auth/google/status"),
   });
 
   const save = useMutation({
@@ -40,6 +48,20 @@ function ReminderPrefsCard() {
       }),
     // Optimistically reflect the change, then reconcile with the server.
     onSuccess: (res) => qc.setQueryData(["reminder-prefs"], res),
+  });
+
+  const testEmail = useMutation({
+    mutationFn: () =>
+      api<{ ok: true; to: string; via?: string }>(
+        "/notifications/test-email",
+        { method: "POST" },
+      ),
+    onSuccess: (res) =>
+      setTestMsg(
+        `Sent to ${res.to}${res.via ? ` via ${res.via}` : ""}`,
+      ),
+    onError: (e: unknown) =>
+      setTestMsg(e instanceof Error ? e.message : "Could not send test email."),
   });
 
   if (isLoading || !data) {
@@ -112,6 +134,49 @@ function ReminderPrefsCard() {
             );
           })}
         </div>
+      </div>
+      <div className="space-y-2 px-4 py-3">
+        <div className="text-sm font-medium text-fg">Gmail send</div>
+        <p className="text-xs text-fg-muted">
+          Enabling Gmail API in Google Cloud is not enough — grant{" "}
+          <span className="font-medium text-fg">gmail.send</span> so invites and
+          tests leave from your Google account
+          {user?.email ? ` (${user.email})` : ""}.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1"
+            onClick={() => {
+              window.location.href = `/api/auth/google/start?connect=gmail&next=${encodeURIComponent("/settings")}`;
+            }}
+          >
+            {gmailStatus.data?.gmail ? "Reconnect Gmail" : "Connect Gmail"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1"
+            loading={testEmail.isPending}
+            onClick={() => {
+              setTestMsg(null);
+              testEmail.mutate();
+            }}
+          >
+            Send test email
+          </Button>
+        </div>
+        {gmailStatus.data?.gmail ? (
+          <p className="text-xs text-success">Gmail send connected</p>
+        ) : (
+          <p className="text-xs text-fg-subtle">Gmail send not connected yet</p>
+        )}
+        {testMsg && (
+          <p className="text-xs text-fg-muted" role="status">
+            {testMsg}
+          </p>
+        )}
       </div>
     </Card>
   );

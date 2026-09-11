@@ -1,21 +1,45 @@
 /**
- * Transactional email via Resend.
+ * Transactional email.
  *
- * Email is best-effort and strictly optional: if RESEND_API_KEY is not
- * configured (local dev, tests), sendEmail() logs and returns false rather
- * than throwing — the cron must still record in-app notifications and keep
- * running. Callers only record the `email` reminders_log row when this
- * returns true, so a transient send failure is retried on the next run.
+ * Transport order (first success wins, never throws):
+ *  1. Gmail API as the acting user when `opts.fromUserId` is set and that
+ *     user's token includes gmail.send (Settings → Connect Gmail).
+ *  2. Resend, when RESEND_API_KEY is set.
+ *
+ * Enabling Gmail API in Google Cloud Console alone does not send mail —
+ * the signed-in user must also grant gmail.send on their OAuth token.
  */
+import { eq } from "drizzle-orm";
 import type { Env } from "../types";
+import { getDb, schema } from "../db/client";
+import {
+  GOOGLE_SCOPES,
+  classifyGoogleApiError,
+  clearGoogleAccessTokenCache,
+  getGoogleAccessTokenOrNull,
+  scopesKey,
+  userHasScope,
+} from "./googleAuth";
 
 const RESEND_API = "https://api.resend.com/emails";
-
-/** From-address for all Family Vault mail. */
+const GMAIL_SEND =
+  "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const FROM = "Family Vault <reminders@familyvault.app>";
 
 export function isEmailConfigured(env: Env): boolean {
   return Boolean(env.RESEND_API_KEY);
+}
+
+/** True when Resend is configured or the user can send via Gmail. */
+export async function canSendEmail(
+  env: Env,
+  userId?: string,
+): Promise<boolean> {
+  if (env.RESEND_API_KEY) return true;
+  if (!userId) return false;
+  if (await userHasScope(env, userId, GOOGLE_SCOPES.gmailSend)) return true;
+  // Older sessions may lack a scopes KV entry — still try if a refresh token exists.
+  return Boolean(await env.KV.get(`user:refresh_token:${userId}`));
 }
 
 export interface EmailMessage {
@@ -23,7 +47,6 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text?: string;
-  /** Optional file attachments (e.g. .ics for Apple/Google Calendar). */
   attachments?: Array<{
     filename: string;
     content: string; // base64
@@ -31,15 +54,141 @@ export interface EmailMessage {
   }>;
 }
 
-/**
- * Sends one email. Returns true on a 2xx Resend response, false otherwise
- * (including when email is not configured). Never throws.
- */
-export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
-  if (!env.RESEND_API_KEY) {
-    console.log(`[email] skipped (no RESEND_API_KEY): to=${msg.to} subject=${msg.subject}`);
-    return false;
+export interface SendEmailResult {
+  ok: boolean;
+  via: "gmail" | "resend" | "none";
+  from?: string;
+  error?: string;
+}
+
+export interface SendEmailOpts {
+  /** Prefer sending as this user's Gmail (requires gmail.send). */
+  fromUserId?: string;
+}
+
+export function classifyResendError(status: number, body: string): string {
+  const text = body.toLowerCase();
+  if (
+    text.includes("only send testing emails to your own") ||
+    text.includes("you can only send testing emails") ||
+    text.includes("verify a domain") ||
+    (status === 403 && text.includes("testing"))
+  ) {
+    return "resend_testing_recipients";
   }
+  if (status === 403 || status === 422) return "resend_rejected";
+  return "resend_send_failed";
+}
+
+function encodeUtf8Subject(subject: string): string {
+  const bytes = new TextEncoder().encode(subject);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return `=?UTF-8?B?${btoa(bin)}?=`;
+}
+
+function toBase64Url(raw: string): string {
+  const bytes = new TextEncoder().encode(raw);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function buildRfc822(opts: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}): string {
+  const subject = encodeUtf8Subject(opts.subject);
+  return [
+    `From: ${opts.from}`,
+    `To: ${opts.to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    opts.html,
+  ].join("\r\n");
+}
+
+async function sendViaGmailApi(
+  accessToken: string,
+  from: string,
+  msg: EmailMessage,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (msg.attachments && msg.attachments.length > 0) {
+    return { ok: false, error: "gmail_attachments_unsupported" };
+  }
+  const raw = toBase64Url(
+    buildRfc822({
+      from,
+      to: msg.to,
+      subject: msg.subject,
+      html: msg.html,
+    }),
+  );
+  const res = await fetch(GMAIL_SEND, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ raw }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`[email] Gmail ${res.status}: ${text}`);
+    const kind = classifyGoogleApiError(res.status, text);
+    if (kind === "api_disabled") return { ok: false, error: "gmail_api_disabled" };
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "gmail_auth_failed" };
+    }
+    return { ok: false, error: "gmail_send_failed" };
+  }
+  return { ok: true };
+}
+
+async function sendViaUserGmail(
+  env: Env,
+  userId: string,
+  msg: EmailMessage,
+): Promise<{ ok: true; from: string } | { ok: false; error: string } | null> {
+  const scopesKnown = Boolean(await env.KV.get(scopesKey(userId)));
+  if (
+    scopesKnown &&
+    !(await userHasScope(env, userId, GOOGLE_SCOPES.gmailSend))
+  ) {
+    return null;
+  }
+
+  let token = await getGoogleAccessTokenOrNull(env, userId);
+  if (!token) return null;
+
+  const user = await getDb(env)
+    .select({ email: schema.users.email, name: schema.users.name })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (!user?.email) return null;
+
+  const from = user.name ? `${user.name} <${user.email}>` : user.email;
+  let gmail = await sendViaGmailApi(token, from, msg);
+  if (!gmail.ok && gmail.error === "gmail_auth_failed") {
+    await clearGoogleAccessTokenCache(env, userId);
+    token = await getGoogleAccessTokenOrNull(env, userId);
+    if (token) gmail = await sendViaGmailApi(token, from, msg);
+  }
+  if (gmail.ok) return { ok: true, from };
+  if (gmail.error === "gmail_attachments_unsupported") return null;
+  return { ok: false, error: gmail.error };
+}
+
+async function sendViaResend(
+  env: Env,
+  msg: EmailMessage,
+): Promise<{ ok: true } | { ok: false; error: string } | null> {
+  if (!env.RESEND_API_KEY) return null;
   try {
     const res = await fetch(RESEND_API, {
       method: "POST",
@@ -65,14 +214,58 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<boolean> {
       }),
     });
     if (!res.ok) {
-      console.error(`[email] Resend ${res.status} for to=${msg.to}`);
-      return false;
+      const text = await res.text();
+      console.error(
+        `[email] Resend ${res.status} for to=${msg.to}: ${text.slice(0, 300)}`,
+      );
+      return { ok: false, error: classifyResendError(res.status, text) };
     }
-    return true;
+    return { ok: true };
   } catch (err) {
-    console.error(`[email] send failed for to=${msg.to}:`, err);
-    return false;
+    console.error(`[email] Resend send failed for to=${msg.to}:`, err);
+    return { ok: false, error: "resend_send_failed" };
   }
+}
+
+export async function sendEmailDetailed(
+  env: Env,
+  msg: EmailMessage,
+  opts: SendEmailOpts = {},
+): Promise<SendEmailResult> {
+  let lastError: string | undefined;
+
+  if (opts.fromUserId) {
+    const userSend = await sendViaUserGmail(env, opts.fromUserId, msg);
+    if (userSend?.ok) return { ok: true, via: "gmail", from: userSend.from };
+    if (userSend && !userSend.ok) lastError = userSend.error;
+  }
+
+  const resend = await sendViaResend(env, msg);
+  if (resend?.ok) return { ok: true, via: "resend", from: FROM };
+  if (resend && !resend.ok) lastError = resend.error;
+
+  if (!env.RESEND_API_KEY && !opts.fromUserId) {
+    console.log(
+      `[email] skipped (no RESEND_API_KEY): to=${msg.to} subject=${msg.subject}`,
+    );
+  }
+  return {
+    ok: false,
+    via: "none",
+    error: lastError ?? "email_send_failed",
+  };
+}
+
+/**
+ * Sends one email. Returns true on success. Never throws.
+ * Pass `opts.fromUserId` to try the user's Gmail before Resend.
+ */
+export async function sendEmail(
+  env: Env,
+  msg: EmailMessage,
+  opts: SendEmailOpts = {},
+): Promise<boolean> {
+  return (await sendEmailDetailed(env, msg, opts)).ok;
 }
 
 /** Minimal, inline-styled HTML wrapper for a reminder email. */
@@ -101,14 +294,4 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-
-/** Main-compatible wrapper — same as sendEmail, returns a structured result. */
-export async function sendEmailDetailed(
-  env: Env,
-  msg: EmailMessage,
-): Promise<{ ok: boolean; error?: string }> {
-  const ok = await sendEmail(env, msg);
-  return ok ? { ok: true } : { ok: false, error: "send_failed" };
 }
