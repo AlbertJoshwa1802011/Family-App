@@ -5,8 +5,7 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(self), microphone=(), geolocation=(self)
-  # connect-src MUST allow Google Drive resumable upload hosts — the browser
-  # PUTs file bytes straight to the Location URL from upload-url (never via the
-  # Worker). `connect-src 'self'` alone blocks that PUT and Safari reports it as
-  # the opaque TypeError "Load failed".
+  # Document/photo bytes are POSTed to /api (Worker proxies to Drive). Keep
+  # googleapis in connect-src as defense-in-depth for any legacy direct PUT.
+  # Removing them historically caused Safari TypeError("Load failed") on uploads.
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://www.googleapis.com https://*.googleapis.com; manifest-src 'self'; worker-src 'self'

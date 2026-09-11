@@ -222,7 +222,7 @@ by a forced `skipWaiting`. A "new version" toast handles updates.
 | Expiry badge off by one near midnight | Local-time date parse | Use `Date.UTC()` (see `src/lib/expiry.ts`) |
 | `typecheck` misses vite.config.ts | tsconfig.node not compiled | typecheck script includes `tsc -p tsconfig.node.json` |
 | Asset responses missing CSP | secureHeaders only covers `/api/*` | `public/_headers` |
-| Photo upload shows Safari **"Load failed"** | CSP `connect-src 'self'` blocks Drive PUT | Allow `https://www.googleapis.com` + `https://*.googleapis.com` in `public/_headers`; see `tests/csp-headers.test.ts` |
+| Photo upload shows Safari **"Load failed"** | Browser PUT to Drive blocked (CSP/CORS) | Prefer Worker proxy `POST /files/content`; keep googleapis in CSP `connect-src` as defense-in-depth |
 | ESLint: "Cannot call impure function" | `Date.now()` in render | `useState(() => Date.now())` |
 | Migration apply fails: "no such column" | drizzle-kit table-recreation `INSERT...SELECT` lists new cols | Edit the just-generated migration's INSERT to copy only old columns; new ones take defaults. Validate with the python script. Only safe pre-production. |
 | `.partial()` throws on a refined Zod schema | `.refine()` returns ZodEffects, which has no `.partial()` | Call `.partial()` on the base ZodObject, then `.refine()` |

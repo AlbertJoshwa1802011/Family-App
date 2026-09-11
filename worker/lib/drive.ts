@@ -5,10 +5,13 @@
  * Access tokens are cached in KV at user:access_token:{userId} with a 5-minute early
  * expiry buffer to handle clock skew.
  *
- * All file uploads use a two-step pattern:
- * 1. Call createResumableUploadUrl() to get a Drive upload URL.
- * 2. The *client* uploads directly to that URL (bypassing the Worker memory limit).
- * 3. Call recordFileMeta() to store the Drive fileId + metadata in D1.
+ * Preferred upload path (avoids browser→Drive CORS / CSP):
+ * 1. Browser POSTs bytes to the Worker (`POST /documents/:id/files/content`).
+ * 2. Worker calls uploadFileToDrive() (resumable init + PUT) with the owner's token.
+ * 3. Worker records Drive fileId + metadata in D1.
+ *
+ * Legacy: createResumableUploadUrl() still exists for clients that PUT directly
+ * to Drive (requires CSP connect-src googleapis). Prefer the Worker proxy.
  *
  * Downloads are proxied through the Worker (streams, no buffering) so we can
  * enforce auth and add Content-Disposition: attachment.
@@ -66,22 +69,33 @@ export async function createDriveFolder(
 
 /**
  * Initiates a resumable upload session and returns the upload URL.
- * The client should upload the file directly to this URL; the Worker
- * never sees the file bytes (avoids Worker memory limits).
+ * Legacy browser-direct PUT path — prefer uploadFileToDrive() so the Worker
+ * owns both steps and the browser never talks to googleapis.
  */
 export async function createResumableUploadUrl(
   accessToken: string,
   folderId: string,
   fileName: string,
   mimeType: string,
+  opts?: { contentLength?: number; origin?: string },
 ): Promise<string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "X-Upload-Content-Type": mimeType,
+  };
+  if (opts?.contentLength != null) {
+    headers["X-Upload-Content-Length"] = String(opts.contentLength);
+  }
+  // When a browser will PUT to the Location URL, Drive must see the page
+  // Origin on session init or the subsequent cross-origin PUT fails CORS.
+  if (opts?.origin) {
+    headers["Origin"] = opts.origin;
+  }
+
   const res = await fetch(`${DRIVE_UPLOAD}?uploadType=resumable`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "X-Upload-Content-Type": mimeType,
-    },
+    headers,
     body: JSON.stringify({ name: fileName, mimeType, parents: [folderId] }),
   });
 
@@ -90,6 +104,42 @@ export async function createResumableUploadUrl(
   const location = res.headers.get("Location");
   if (!location) throw new DriveError("Drive did not return Location header", 502);
   return location;
+}
+
+/**
+ * Uploads file bytes to Drive via a Worker-owned resumable session.
+ * Browser never contacts googleapis — avoids CSP/CORS "Load failed" on Safari.
+ */
+export async function uploadFileToDrive(
+  accessToken: string,
+  folderId: string,
+  fileName: string,
+  mimeType: string,
+  body: BodyInit,
+  sizeBytes: number,
+): Promise<{ id: string }> {
+  const uploadUrl = await createResumableUploadUrl(accessToken, folderId, fileName, mimeType, {
+    contentLength: sizeBytes,
+  });
+
+  const putRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": mimeType,
+      "Content-Length": String(sizeBytes),
+    },
+    body,
+  });
+
+  if (!putRes.ok) {
+    throw new DriveError(`Drive upload failed: ${await putRes.text()}`, 502);
+  }
+
+  const data = (await putRes.json()) as { id?: string };
+  if (!data?.id) {
+    throw new DriveError("Drive upload succeeded but returned no file id", 502);
+  }
+  return { id: data.id };
 }
 
 /**

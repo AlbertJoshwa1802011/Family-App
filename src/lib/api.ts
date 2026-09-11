@@ -43,6 +43,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   drive_not_configured:
     "File storage isn't connected yet — ask the family owner to finish Google Drive setup.",
   drive_error: "Google Drive had a hiccup — please try again in a moment.",
+  drive_reauth_required:
+    "Google Drive needs you to sign in again — open Settings, sign out, and sign back in with Google.",
   oauth_not_configured: "Sign-in isn't configured on this server yet.",
   cannot_modify_owner: "The family owner's role can't be changed.",
   ai_not_configured:
@@ -67,16 +69,19 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  // Spread `options` first so `credentials` / merged `headers` cannot be
-  // overwritten by a caller (the previous order dropped Content-Type whenever
-  // `options.headers` was passed).
+  // FormData must not get a forced application/json Content-Type — the browser
+  // needs to set multipart boundary itself (document/photo uploads).
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = new Headers(options.headers);
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const res = await fetch(`/api${path}`, {
     ...options,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+    headers,
   });
 
   if (!res.ok) {

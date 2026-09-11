@@ -13,6 +13,7 @@ import {
   getDriveAccessToken,
   createDriveFolder,
   createResumableUploadUrl,
+  uploadFileToDrive,
   downloadDriveFile,
   isDriveConfigured,
   DriveError,
@@ -27,6 +28,9 @@ import { loadMentionableMembers, notifyMember } from "../lib/mentions";
 import { labelSlugSchema } from "../lib/labels";
 import { findRelatedDocuments } from "../lib/relatedDocuments";
 import { syncExpiryCalendarReminder } from "../lib/expiryCalendar";
+
+/** App-level cap for proxied uploads (photos/docs). Keeps Worker memory bounded. */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export const documentRoutes = new Hono<HonoEnv>();
 
@@ -151,6 +155,89 @@ async function ensureDriveFolder(
 
   return folderId;
 }
+
+/**
+ * Persist a Drive file as the document's new current version (shared by
+ * finalize-after-direct-PUT and the Worker-proxied content upload).
+ */
+async function recordDocumentFileVersion(
+  env: HonoEnv["Bindings"],
+  opts: {
+    doc: typeof schema.documents.$inferSelect;
+    userId: string;
+    driveFileId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+  },
+) {
+  const db = getDb(env);
+  const { doc, userId, driveFileId, fileName, mimeType, sizeBytes } = opts;
+  const now = Math.floor(Date.now() / 1000);
+
+  await db
+    .update(schema.files)
+    .set({ isCurrent: false })
+    .where(and(eq(schema.files.documentId, doc.id), eq(schema.files.isCurrent, true)));
+
+  const prev = await db
+    .select({ version: schema.files.version })
+    .from(schema.files)
+    .where(eq(schema.files.documentId, doc.id))
+    .orderBy(desc(schema.files.version))
+    .get();
+
+  const version = (prev?.version ?? 0) + 1;
+  const fileId = crypto.randomUUID();
+
+  await db.insert(schema.files).values({
+    id: fileId,
+    documentId: doc.id,
+    driveFileId,
+    fileName,
+    mimeType,
+    sizeBytes,
+    version,
+    isCurrent: true,
+    status: "active",
+  });
+
+  await db
+    .update(schema.documents)
+    .set({ currentFileId: fileId, updatedAt: now })
+    .where(eq(schema.documents.id, doc.id));
+
+  await insertAuditEvent(db, {
+    familyId: doc.familyId,
+    actorUserId: userId,
+    action: "document_uploaded",
+    targetType: "document",
+    targetId: doc.id,
+    meta: { fileName, mimeType, sizeBytes, version },
+  });
+
+  return db.select().from(schema.files).where(eq(schema.files.id, fileId)).get();
+}
+
+/** Fallback when camera/gallery pickers leave File.name empty. */
+function fallbackUploadFileName(mimeType: string): string {
+  const ext =
+    mimeType === "image/jpeg"
+      ? ".jpg"
+      : mimeType === "image/png"
+        ? ".png"
+        : mimeType === "image/heic" || mimeType === "image/heif"
+          ? ".heic"
+          : mimeType === "image/webp"
+            ? ".webp"
+            : mimeType === "application/pdf"
+              ? ".pdf"
+              : mimeType.startsWith("image/")
+                ? ".img"
+                : ".bin";
+  return `upload-${Date.now()}${ext}`;
+}
+
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -466,8 +553,9 @@ documentRoutes.delete("/:id", requireSession, async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /documents/:id/files/upload-url — generate a Drive resumable upload URL.
-// The client uploads directly to Drive (Worker never sees file bytes).
+// POST /documents/:id/files/upload-url — legacy: Drive resumable URL for a
+// browser-direct PUT. Prefer POST /files/content (Worker proxy) — Safari often
+// fails the direct PUT on CORS even when CSP allows googleapis.
 // MUST be registered before /:id/files/:fid to avoid route collision.
 documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema), async (c) => {
   const { id: docId } = c.req.param();
@@ -508,12 +596,183 @@ documentRoutes.post("/:id/files/upload-url", requireSession, zv(uploadUrlSchema)
 
     const folderId = await ensureDriveFolder(c.env, family);
     const accessToken = await getDriveAccessToken(c.env, family.ownerUserId);
-    const uploadUrl = await createResumableUploadUrl(accessToken, folderId, fileName, mimeType);
+    // Forward the page Origin so Drive's resumable session allows a browser PUT.
+    const origin = c.req.header("Origin") ?? undefined;
+    const uploadUrl = await createResumableUploadUrl(accessToken, folderId, fileName, mimeType, {
+      origin,
+    });
 
     return c.json({ uploadUrl });
   } catch (e) {
     if (e instanceof DriveError) {
-      return c.json({ error: "drive_error", detail: e.message }, e.statusCode as 502 | 503);
+      const code = /refresh token|re-authenticate/i.test(e.message)
+        ? "drive_reauth_required"
+        : "drive_error";
+      return c.json({ error: code, detail: e.message }, e.statusCode as 502 | 503);
+    }
+    throw e;
+  }
+});
+
+// POST /documents/:id/files/content — Worker-proxied upload (preferred).
+// Browser sends multipart `file`; Worker talks to Drive. No browser→googleapis.
+documentRoutes.post("/:id/files/content", requireSession, async (c) => {
+  const { id: docId } = c.req.param();
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  const limited = await checkRateLimit(c, `upload:${userId}`, { limit: 30, windowSecs: 60 });
+  if (limited) return limited;
+
+  const doc = await db
+    .select()
+    .from(schema.documents)
+    .where(and(eq(schema.documents.id, docId), ne(schema.documents.status, "trashed")))
+    .get();
+
+  if (!doc) return c.json({ error: "not_found" }, 404);
+
+  const membership = await requireFamilyMember(c, doc.familyId, "member", "documents");
+  if (membership instanceof Response) return membership;
+
+  if (isDocHiddenFrom(doc, userId, membership.role)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  if (!isDriveConfigured(c.env)) {
+    return c.json({ error: "drive_not_configured" }, 503);
+  }
+
+  const contentType = c.req.header("content-type") ?? "";
+  let fileName: string;
+  let mimeType: string;
+  let sizeBytes: number;
+  let body: BodyInit;
+
+  if (contentType.includes("multipart/form-data")) {
+    // Use the Fetch FormData parser (not Hono parseBody): empty File.name
+    // values stay as File/Blob instead of being coerced to strings.
+    let form: FormData;
+    try {
+      form = await c.req.formData();
+    } catch {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [{ path: ["file"], message: "Could not parse multipart body" }],
+        },
+        400,
+      );
+    }
+    const file = form.get("file");
+    if (!(file instanceof Blob)) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [{ path: ["file"], message: "Expected multipart field 'file'" }],
+        },
+        400,
+      );
+    }
+    sizeBytes = file.size;
+    if (sizeBytes > MAX_UPLOAD_BYTES) {
+      return c.json({ error: "payload_too_large" }, 413);
+    }
+    if (sizeBytes <= 0) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [{ path: ["file"], message: "File is empty" }],
+        },
+        400,
+      );
+    }
+    mimeType = (file.type || "application/octet-stream").slice(0, 200);
+    const rawName =
+      file instanceof File
+        ? (file.name || "").trim().split(/[/\\]/).pop() ?? ""
+        : "";
+    fileName = (rawName || fallbackUploadFileName(mimeType)).slice(0, 500);
+    body = file;
+  } else {
+    const rawName = (c.req.header("X-File-Name") ?? "").trim().split(/[/\\]/).pop() ?? "";
+    mimeType = (c.req.header("Content-Type") || "application/octet-stream")
+      .split(";")[0]!
+      .trim()
+      .slice(0, 200);
+    fileName = (rawName || fallbackUploadFileName(mimeType)).slice(0, 500);
+    const lenHeader = c.req.header("Content-Length");
+    sizeBytes = lenHeader ? Number(lenHeader) : 0;
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      const buf = await c.req.arrayBuffer();
+      sizeBytes = buf.byteLength;
+      body = buf;
+    } else {
+      if (sizeBytes > MAX_UPLOAD_BYTES) {
+        return c.json({ error: "payload_too_large" }, 413);
+      }
+      const stream = c.req.raw.body;
+      if (!stream) {
+        return c.json(
+          {
+            error: "validation_error",
+            issues: [{ path: ["body"], message: "Empty body" }],
+          },
+          400,
+        );
+      }
+      body = stream;
+    }
+    if (sizeBytes > MAX_UPLOAD_BYTES) {
+      return c.json({ error: "payload_too_large" }, 413);
+    }
+    if (sizeBytes <= 0) {
+      return c.json(
+        {
+          error: "validation_error",
+          issues: [{ path: ["body"], message: "File is empty" }],
+        },
+        400,
+      );
+    }
+  }
+
+  try {
+    const family = await db
+      .select()
+      .from(schema.families)
+      .where(eq(schema.families.id, doc.familyId))
+      .get();
+
+    if (!family) return c.json({ error: "not_found" }, 404);
+
+    const folderId = await ensureDriveFolder(c.env, family);
+    const accessToken = await getDriveAccessToken(c.env, family.ownerUserId);
+    const { id: driveFileId } = await uploadFileToDrive(
+      accessToken,
+      folderId,
+      fileName,
+      mimeType,
+      body,
+      sizeBytes,
+    );
+
+    const file = await recordDocumentFileVersion(c.env, {
+      doc,
+      userId,
+      driveFileId,
+      fileName,
+      mimeType,
+      sizeBytes,
+    });
+
+    return c.json({ file }, 201);
+  } catch (e) {
+    if (e instanceof DriveError) {
+      const code = /refresh token|re-authenticate/i.test(e.message)
+        ? "drive_reauth_required"
+        : "drive_error";
+      return c.json({ error: code, detail: e.message }, e.statusCode as 502 | 503);
     }
     throw e;
   }
@@ -571,55 +830,14 @@ documentRoutes.post("/:id/files", requireSession, zv(recordFileSchema), async (c
     return c.json({ error: "not_found" }, 404);
   }
 
-  // Mark previous current file as non-current
-  const now = Math.floor(Date.now() / 1000);
-  await db
-    .update(schema.files)
-    .set({ isCurrent: false })
-    .where(and(eq(schema.files.documentId, docId), eq(schema.files.isCurrent, true)));
-
-  // Get next version number
-  const prev = await db
-    .select({ version: schema.files.version })
-    .from(schema.files)
-    .where(eq(schema.files.documentId, docId))
-    .orderBy(desc(schema.files.version))
-    .get();
-
-  const version = (prev?.version ?? 0) + 1;
-  const fileId = crypto.randomUUID();
-
-  await db.insert(schema.files).values({
-    id: fileId,
-    documentId: docId,
+  const file = await recordDocumentFileVersion(c.env, {
+    doc,
+    userId,
     driveFileId,
     fileName,
     mimeType,
     sizeBytes,
-    version,
-    isCurrent: true,
-    status: "active",
   });
-
-  await db
-    .update(schema.documents)
-    .set({ currentFileId: fileId, updatedAt: now })
-    .where(eq(schema.documents.id, docId));
-
-  await insertAuditEvent(db, {
-    familyId: doc.familyId,
-    actorUserId: userId,
-    action: "document_uploaded",
-    targetType: "document",
-    targetId: docId,
-    meta: { fileName, mimeType, sizeBytes, version },
-  });
-
-  const file = await db
-    .select()
-    .from(schema.files)
-    .where(eq(schema.files.id, fileId))
-    .get();
 
   return c.json({ file }, 201);
 });

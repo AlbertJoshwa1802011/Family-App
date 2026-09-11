@@ -1,13 +1,13 @@
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { titleFromFileName } from "./documentTitle";
 
-/** Stable copy when the browser cannot reach Google Drive (CSP / offline / CORS). */
+/** Stable copy when the browser cannot reach the upload API (offline / SW). */
 export const DRIVE_NETWORK_ERROR =
   "Couldn’t reach Google Drive to upload this file. Check your connection and try again.";
 
 /**
- * Map browser/network failures on the Drive PUT into a stable message.
- * Safari/WebKit surfaces CSP `connect-src` blocks as TypeError("Load failed").
+ * Map browser/network failures on the upload request into a stable message.
+ * Safari/WebKit surfaces blocked fetches as TypeError("Load failed").
  */
 export function mapDrivePutError(err: unknown): Error {
   if (err instanceof TypeError) {
@@ -17,7 +17,7 @@ export function mapDrivePutError(err: unknown): Error {
   return new Error(DRIVE_NETWORK_ERROR);
 }
 
-/** Drive resumable Location URLs are always on googleapis.com. */
+/** Drive resumable Location URLs are always on googleapis.com (legacy direct PUT). */
 export function isGoogleDriveUploadUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -28,60 +28,61 @@ export function isGoogleDriveUploadUrl(url: string): boolean {
 }
 
 /**
- * Attach a file to an existing document.
+ * Camera/gallery pickers (especially iOS) often leave File.name empty.
+ * Always produce a non-empty name for Drive + D1 metadata.
+ */
+export function resolveUploadFileName(file: File): string {
+  const raw = (file.name || "").trim().split(/[/\\]/).pop() ?? "";
+  if (raw.length > 0) return raw.slice(0, 500);
+  const mime = file.type || "application/octet-stream";
+  const ext =
+    mime === "image/jpeg"
+      ? ".jpg"
+      : mime === "image/png"
+        ? ".png"
+        : mime === "image/heic" || mime === "image/heif"
+          ? ".heic"
+          : mime === "image/webp"
+            ? ".webp"
+            : mime === "application/pdf"
+              ? ".pdf"
+              : mime.startsWith("image/")
+                ? ".img"
+                : ".bin";
+  return `upload-${Date.now()}${ext}`;
+}
+
+/**
+ * Attach a file to an existing document via the Worker proxy.
  *
- * Worker never sees file bytes:
- * 1. POST /files/upload-url → Drive resumable session URL
- * 2. PUT the file straight to Drive (requires CSP connect-src googleapis)
- * 3. POST /files to record Drive fileId + metadata in D1
+ * Browser → POST /files/content (multipart) → Worker → Drive.
+ * Never PUTs to googleapis from the page (avoids CSP/CORS "Load failed").
  */
 export async function uploadDocumentFile(
   documentId: string,
   file: File,
 ): Promise<void> {
-  const mimeType = file.type || "application/octet-stream";
-  const { uploadUrl } = await api<{ uploadUrl: string }>(
-    `/documents/${documentId}/files/upload-url`,
-    {
-      method: "POST",
-      body: JSON.stringify({ fileName: file.name, mimeType }),
-    },
-  );
+  const fileName = resolveUploadFileName(file);
+  const form = new FormData();
+  // Third arg sets Content-Disposition filename even when File.name is empty.
+  form.append("file", file, fileName);
 
-  if (!isGoogleDriveUploadUrl(uploadUrl)) {
-    throw new Error(
-      "Upload URL was not a Google Drive address — refusing to send the file.",
-    );
-  }
-
-  let driveRes: Response;
   try {
-    driveRes = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": mimeType },
-      body: file,
+    await api(`/documents/${documentId}/files/content`, {
+      method: "POST",
+      body: form,
     });
   } catch (err) {
-    throw mapDrivePutError(err);
+    if (err instanceof TypeError) throw mapDrivePutError(err);
+    if (err instanceof ApiError && err.code === "drive_reauth_required") {
+      throw new ApiError(
+        err.status,
+        err.code,
+        "Google Drive needs you to sign in again — open Settings, sign out, and sign back in with Google.",
+      );
+    }
+    throw err;
   }
-
-  if (!driveRes.ok) {
-    throw new Error(`Drive upload failed (${driveRes.status})`);
-  }
-  const driveFile = (await driveRes.json()) as { id: string };
-  if (!driveFile?.id) {
-    throw new Error("Drive upload succeeded but returned no file id");
-  }
-
-  await api(`/documents/${documentId}/files`, {
-    method: "POST",
-    body: JSON.stringify({
-      driveFileId: driveFile.id,
-      fileName: file.name,
-      mimeType,
-      sizeBytes: file.size,
-    }),
-  });
 }
 
 export interface CreatedDocument {
@@ -98,7 +99,8 @@ export async function createAndUploadDocument(
   familyId: string,
   file: File,
 ): Promise<CreatedDocument> {
-  const title = titleFromFileName(file.name);
+  const fileName = resolveUploadFileName(file);
+  const title = titleFromFileName(fileName);
 
   let category = "other";
   try {
@@ -106,7 +108,7 @@ export async function createAndUploadDocument(
       "/documents/suggest-category",
       {
         method: "POST",
-        body: JSON.stringify({ title, fileName: file.name }),
+        body: JSON.stringify({ title, fileName }),
       },
     );
     if (suggestion.category) category = suggestion.category;

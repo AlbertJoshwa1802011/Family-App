@@ -1,9 +1,8 @@
 /**
  * Document / photo upload contracts.
  *
- * Guards the three-step Drive flow and the CSP allowlist that makes the
- * browser PUT possible. A prior regression (`connect-src 'self'` only) made
- * Safari report TypeError("Load failed") on every photo upload.
+ * Preferred path: browser POSTs multipart to /files/content (Worker → Drive).
+ * CSP still allows googleapis as defense-in-depth for any legacy direct PUT.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -13,6 +12,7 @@ import {
   DRIVE_NETWORK_ERROR,
   isGoogleDriveUploadUrl,
   mapDrivePutError,
+  resolveUploadFileName,
   uploadDocumentFile,
 } from "../src/lib/uploadDocumentFile";
 
@@ -36,6 +36,24 @@ describe("titleFromFileName", () => {
   it("caps at 300 characters", () => {
     const long = `${"a".repeat(400)}.pdf`;
     expect(titleFromFileName(long).length).toBe(300);
+  });
+});
+
+describe("resolveUploadFileName", () => {
+  it("keeps a normal file name", () => {
+    expect(resolveUploadFileName(new File(["x"], "kids.jpg", { type: "image/jpeg" }))).toBe(
+      "kids.jpg",
+    );
+  });
+
+  it("synthesizes a name when File.name is empty (iOS camera)", () => {
+    const name = resolveUploadFileName(new File(["x"], "", { type: "image/jpeg" }));
+    expect(name).toMatch(/^upload-\d+\.jpg$/);
+  });
+
+  it("uses .heic for image/heic with empty name", () => {
+    const name = resolveUploadFileName(new File(["x"], "  ", { type: "image/heic" }));
+    expect(name).toMatch(/^upload-\d+\.heic$/);
   });
 });
 
@@ -74,7 +92,7 @@ describe("mapDrivePutError", () => {
   });
 });
 
-describe("public/_headers CSP allows Drive PUT", () => {
+describe("public/_headers CSP allows Drive hosts (defense-in-depth)", () => {
   const headers = readFileSync("public/_headers", "utf8");
   const csp = headers.match(/Content-Security-Policy:\s*(.+)/)?.[1] ?? "";
   const connect = csp
@@ -90,42 +108,29 @@ describe("public/_headers CSP allows Drive PUT", () => {
 
   it("keeps a comment explaining why (agent foot-gun guard)", () => {
     expect(headers.toLowerCase()).toMatch(/drive/);
-    expect(headers.toLowerCase()).toMatch(/load failed|resumable|upload/);
+    expect(headers.toLowerCase()).toMatch(/load failed|proxy|upload/);
   });
 });
 
-describe("uploadDocumentFile", () => {
+describe("uploadDocumentFile (Worker proxy)", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.includes("/files/upload-url")) {
-          return new Response(JSON.stringify({ uploadUrl: DRIVE_UPLOAD }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.startsWith("https://www.googleapis.com/")) {
-          expect(init?.method).toBe("PUT");
-          expect((init?.headers as Record<string, string>)["Content-Type"]).toBeTruthy();
-          return new Response(JSON.stringify({ id: "drive-file-1" }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.endsWith("/files") && init?.method === "POST") {
-          const body = JSON.parse(String(init.body)) as {
-            driveFileId: string;
-            mimeType: string;
-            sizeBytes: number;
-          };
-          expect(body.driveFileId).toBe("drive-file-1");
-          expect(body.sizeBytes).toBeGreaterThan(0);
-          return new Response(JSON.stringify({ ok: true }), {
-            status: 201,
-            headers: { "Content-Type": "application/json" },
-          });
+        if (url.includes("/files/content") && init?.method === "POST") {
+          expect(init.body).toBeInstanceOf(FormData);
+          const form = init.body as FormData;
+          const file = form.get("file");
+          expect(file).toBeInstanceOf(File);
+          const headers = new Headers(init.headers);
+          expect(headers.get("Content-Type") ?? "").not.toContain("application/json");
+          return new Response(
+            JSON.stringify({
+              file: { id: "f1", version: 1, mimeType: (file as File).type },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
         }
         return new Response(JSON.stringify({ error: "unexpected", url }), { status: 500 });
       }),
@@ -137,52 +142,40 @@ describe("uploadDocumentFile", () => {
     vi.restoreAllMocks();
   });
 
-  it("requests a resumable URL, PUTs bytes to Drive, then records metadata", async () => {
+  it("POSTs multipart to /files/content (never contacts googleapis)", async () => {
     const file = new File(["hello"], "passport.pdf", { type: "application/pdf" });
     await uploadDocumentFile("doc-1", file);
 
     const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-    expect(calls[0]).toContain("/api/documents/doc-1/files/upload-url");
-    expect(calls[1]).toBe(DRIVE_UPLOAD);
-    expect(calls[2]).toContain("/api/documents/doc-1/files");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("/api/documents/doc-1/files/content");
+    expect(calls.some((u) => u.includes("googleapis.com"))).toBe(false);
   });
 
-  it("uploads a JPEG photo with image/jpeg content-type", async () => {
+  it("uploads a JPEG photo via the proxy", async () => {
     const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], "kids.jpg", {
       type: "image/jpeg",
     });
     await uploadDocumentFile("doc-photo", file);
-    const put = (fetch as ReturnType<typeof vi.fn>).mock.calls[1];
-    expect(String(put[0])).toContain("googleapis.com");
-    expect((put[1] as RequestInit).headers).toMatchObject({
-      "Content-Type": "image/jpeg",
-    });
+    const form = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as FormData;
+    const uploaded = form.get("file") as File;
+    expect(uploaded.name).toBe("kids.jpg");
+    expect(uploaded.type).toBe("image/jpeg");
   });
 
-  it("defaults empty file.type (common on some iOS photos) to octet-stream", async () => {
-    const file = new File([new Uint8Array([1, 2, 3])], "IMG_0001.HEIC", { type: "" });
+  it("synthesizes a filename when File.name is empty", async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "", { type: "image/heic" });
     await uploadDocumentFile("doc-heic", file);
-    const put = (fetch as ReturnType<typeof vi.fn>).mock.calls[1];
-    expect((put[1] as RequestInit).headers).toMatchObject({
-      "Content-Type": "application/octet-stream",
-    });
+    const form = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as FormData;
+    const uploaded = form.get("file") as File;
+    expect(uploaded.name).toMatch(/^upload-\d+\.heic$/);
   });
 
-  it("maps TypeError('Load failed') on Drive PUT to DRIVE_NETWORK_ERROR", async () => {
+  it("maps TypeError('Load failed') on the proxy POST to DRIVE_NETWORK_ERROR", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/files/upload-url")) {
-          return new Response(JSON.stringify({ uploadUrl: DRIVE_UPLOAD }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.includes("googleapis.com")) {
-          throw new TypeError("Load failed");
-        }
-        throw new Error(`unexpected ${url}`);
+      vi.fn(async () => {
+        throw new TypeError("Load failed");
       }),
     );
 
@@ -190,46 +183,19 @@ describe("uploadDocumentFile", () => {
     await expect(uploadDocumentFile("doc-1", file)).rejects.toThrow(DRIVE_NETWORK_ERROR);
   });
 
-  it("refuses to PUT to a non-Drive upload URL", async () => {
+  it("surfaces drive_reauth_required with a clear message", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/files/upload-url")) {
-          return new Response(
-            JSON.stringify({ uploadUrl: "https://evil.example/steal" }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        throw new Error(`should not fetch ${url}`);
-      }),
-    );
-
-    const file = new File(["x"], "shot.jpg", { type: "image/jpeg" });
-    await expect(uploadDocumentFile("doc-1", file)).rejects.toThrow(/not a Google Drive/i);
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
-  });
-
-  it("surfaces Drive HTTP failures with status", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/files/upload-url")) {
-          return new Response(JSON.stringify({ uploadUrl: DRIVE_UPLOAD }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.includes("googleapis.com")) {
-          return new Response("forbidden", { status: 403 });
-        }
-        throw new Error(`unexpected ${url}`);
+      vi.fn(async () => {
+        return new Response(JSON.stringify({ error: "drive_reauth_required" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
       }),
     );
     await expect(
       uploadDocumentFile("doc-1", new File(["x"], "a.pdf", { type: "application/pdf" })),
-    ).rejects.toThrow("Drive upload failed (403)");
+    ).rejects.toThrow(/sign in again/i);
   });
 });
 
@@ -263,20 +229,12 @@ describe("createAndUploadDocument", () => {
             { status: 201, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.includes("/files/upload-url")) {
-          return new Response(JSON.stringify({ uploadUrl: DRIVE_UPLOAD }), {
-            status: 200,
+        if (url.includes("/files/content") && init?.method === "POST") {
+          expect(init.body).toBeInstanceOf(FormData);
+          return new Response(JSON.stringify({ file: { id: "f9", version: 1 } }), {
+            status: 201,
             headers: { "Content-Type": "application/json" },
           });
-        }
-        if (url.includes("googleapis.com")) {
-          return new Response(JSON.stringify({ id: "drive-9" }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.includes("/files") && init?.method === "POST") {
-          return new Response(JSON.stringify({ ok: true }), { status: 201 });
         }
         return new Response(JSON.stringify({ error: "unexpected", url }), { status: 500 });
       }),
@@ -288,11 +246,14 @@ describe("createAndUploadDocument", () => {
     vi.restoreAllMocks();
   });
 
-  it("creates a document then uploads the file", async () => {
+  it("creates a document then uploads the file via proxy", async () => {
     const file = new File(["bytes"], "My_Passport.pdf", { type: "application/pdf" });
     const doc = await createAndUploadDocument("fam-1", file);
     expect(doc.id).toBe("doc-new");
     expect(doc.category).toBe("identity");
+    const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/files/content"))).toBe(true);
+    expect(urls.some((u) => u.includes("googleapis.com"))).toBe(false);
   });
 
   it("still uploads when category suggestion fails", async () => {
@@ -313,17 +274,10 @@ describe("createAndUploadDocument", () => {
             { status: 201, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.includes("/files/upload-url")) {
-          return new Response(JSON.stringify({ uploadUrl: DRIVE_UPLOAD }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
+        if (url.includes("/files/content")) {
+          return new Response(JSON.stringify({ file: { id: "f2", version: 1 } }), {
+            status: 201,
           });
-        }
-        if (url.includes("googleapis.com")) {
-          return new Response(JSON.stringify({ id: "drive-2" }), { status: 200 });
-        }
-        if (url.includes("/files") && init?.method === "POST") {
-          return new Response(JSON.stringify({ ok: true }), { status: 201 });
         }
         return new Response("nope", { status: 500 });
       }),
