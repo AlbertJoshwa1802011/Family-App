@@ -64,7 +64,10 @@ notification delivery), `release` (commit → PR → merge-deploys → remote mi
 
 4. **Scope Hono middleware to `/api/*` only** (`logger`, `secureHeaders`). They do not cover
    `ASSETS` responses. Static-asset security headers live in **`public/_headers`** (CSP,
-   X-Frame-Options, nosniff) — Hono can't set them.
+   X-Frame-Options, nosniff) — Hono can't set them. **CSP `connect-src` MUST allow
+   `https://www.googleapis.com` and `https://*.googleapis.com`** — document/photo upload
+   PUTs bytes straight to a Drive resumable URL in the browser; `connect-src 'self'` alone
+   blocks that and Safari shows TypeError `"Load failed"`. See `tests/csp-headers.test.ts`.
 
 5. **Never runtime-cache `/api/*` responses in the PWA.** They are auth-gated, per-family PII.
    Caching them in browser Cache Storage survives logout and leaks on shared devices.
@@ -219,6 +222,7 @@ by a forced `skipWaiting`. A "new version" toast handles updates.
 | Expiry badge off by one near midnight | Local-time date parse | Use `Date.UTC()` (see `src/lib/expiry.ts`) |
 | `typecheck` misses vite.config.ts | tsconfig.node not compiled | typecheck script includes `tsc -p tsconfig.node.json` |
 | Asset responses missing CSP | secureHeaders only covers `/api/*` | `public/_headers` |
+| Photo upload shows Safari **"Load failed"** | CSP `connect-src 'self'` blocks Drive PUT | Allow `https://www.googleapis.com` + `https://*.googleapis.com` in `public/_headers`; see `tests/csp-headers.test.ts` |
 | ESLint: "Cannot call impure function" | `Date.now()` in render | `useState(() => Date.now())` |
 | Migration apply fails: "no such column" | drizzle-kit table-recreation `INSERT...SELECT` lists new cols | Edit the just-generated migration's INSERT to copy only old columns; new ones take defaults. Validate with the python script. Only safe pre-production. |
 | `.partial()` throws on a refined Zod schema | `.refine()` returns ZodEffects, which has no `.partial()` | Call `.partial()` on the base ZodObject, then `.refine()` |
