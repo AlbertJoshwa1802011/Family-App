@@ -314,6 +314,9 @@ export const events = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Client-generated UUID for create retries (same pattern as expenses).
+    // NULL for system-created rows (e.g. document expiry markers).
+    clientRequestId: text("client_request_id"),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
     // Monotonic edit counter for optimistic concurrency. updatedAt cannot serve
@@ -328,6 +331,11 @@ export const events = sqliteTable(
   (t) => [
     index("idx_event_family_start").on(t.familyId, t.startAt),
     index("idx_event_family_status_start").on(t.familyId, t.status, t.startAt),
+    unique("uq_event_client_request").on(
+      t.familyId,
+      t.createdBy,
+      t.clientRequestId,
+    ),
   ],
 );
 

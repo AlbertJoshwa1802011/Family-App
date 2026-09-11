@@ -81,6 +81,8 @@ const createEventSchema = eventBaseSchema
     // Defaults ON — Family Vault pushes unless the creator opts out.
     syncGoogleCalendar: z.boolean().optional().default(true),
     syncAppleCalendar: z.boolean().optional().default(true),
+    // Optional UUID — retries with the same id return the existing row.
+    clientRequestId: z.string().uuid().optional(),
   })
   .refine((d) => !d.endAt || d.endAt >= d.startAt, {
     message: "endAt must be >= startAt",
@@ -263,24 +265,63 @@ eventRoutes.post("/", requireSession, zv(createEventSchema), async (c) => {
   const eventId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
-  await db.insert(schema.events).values({
-    id: eventId,
-    familyId: data.familyId,
-    title: data.title,
-    description: data.description,
-    startAt: data.startAt,
-    endAt: data.endAt,
-    allDay: data.allDay,
-    location: data.location,
-    travelBufferMins:
-      data.travelBufferMins === null || data.travelBufferMins === undefined
-        ? null
-        : data.travelBufferMins,
-    type: data.type,
-    status: "active",
-    createdBy: userId,
-    updatedAt: now,
-  });
+  const insertResult = await db
+    .insert(schema.events)
+    .values({
+      id: eventId,
+      familyId: data.familyId,
+      title: data.title,
+      description: data.description,
+      startAt: data.startAt,
+      endAt: data.endAt,
+      allDay: data.allDay,
+      location: data.location,
+      travelBufferMins:
+        data.travelBufferMins === null || data.travelBufferMins === undefined
+          ? null
+          : data.travelBufferMins,
+      type: data.type,
+      status: "active",
+      createdBy: userId,
+      clientRequestId: data.clientRequestId ?? null,
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .run();
+
+  // Same clientRequestId as a prior create → return that row (no side effects).
+  if ((insertResult.meta?.changes ?? 0) === 0 && data.clientRequestId) {
+    const existing = await db
+      .select()
+      .from(schema.events)
+      .where(
+        and(
+          eq(schema.events.familyId, data.familyId),
+          eq(schema.events.createdBy, userId),
+          eq(schema.events.clientRequestId, data.clientRequestId),
+        ),
+      )
+      .get();
+    if (existing) {
+      const conflicts = await findConflicts(
+        db,
+        data.familyId,
+        { startAt: existing.startAt, endAt: existing.endAt ?? undefined, allDay: existing.allDay },
+        data.attendeeMemberIds,
+        existing.id,
+      );
+      return c.json(
+        {
+          event: existing,
+          conflicts,
+          calendarSynced: await userHasGoogleCalendarCopy(db, existing.id, userId),
+          appleCalendar: data.syncAppleCalendar,
+        },
+        200,
+      );
+    }
+    return c.json({ error: "conflict" }, 409);
+  }
 
   // Add attendees. Dependents (no account) cannot answer for themselves, so
   // their guardian's act of scheduling counts as acceptance.
