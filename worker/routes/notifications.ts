@@ -6,6 +6,8 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { DEFAULT_WINDOWS, parseWindows } from "../lib/reminders";
+import { reminderEmailHtml, sendEmailDetailed, canSendEmail } from "../lib/email";
+import { absoluteAppUrl } from "../lib/publicUrl";
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -68,6 +70,65 @@ notificationRoutes.post("/read-all", requireSession, async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /notifications/test-email — send a one-off reminder to the caller's address.
+// MUST be registered before /:id/read so "test-email" isn't captured as an :id.
+notificationRoutes.post("/test-email", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  if (!(await canSendEmail(c.env, userId))) {
+    return c.json(
+      {
+        error: "email_not_configured",
+        message:
+          "Sign out and sign back in to allow Gmail send, or add a Resend API key.",
+      },
+      503,
+    );
+  }
+
+  const user = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (!user?.email) return c.json({ error: "not_found" }, 404);
+
+  const to = user.email.trim().toLowerCase();
+  const appUrl = absoluteAppUrl(c.env, c.req.url);
+
+  const result = await sendEmailDetailed(
+    c.env,
+    {
+      to,
+      subject: "Test reminder",
+      html: reminderEmailHtml({
+        heading: "Family Vault test reminder",
+        body: "This is a test. If you received it, reminder email delivery is working.",
+        ctaLabel: "Open Family Vault",
+        ctaUrl: appUrl,
+      }),
+      text: "Family Vault test reminder — delivery is working.",
+    },
+    { fromUserId: userId },
+  );
+
+  if (!result.ok) {
+    const needsConsent = result.error === "gmail_missing_scope" || result.error === "gmail_auth_failed";
+    return c.json(
+      {
+        error: needsConsent ? "gmail_missing_scope" : "email_send_failed",
+        message: needsConsent
+          ? "Google has not granted Gmail send yet. Sign out and sign back in, accept Gmail permission, then try again."
+          : "Could not send via Gmail or Resend. Sign out/in to grant Gmail send, or add a Resend API key with a verified domain.",
+      },
+      502,
+    );
+  }
+
+  return c.json({ ok: true, to, via: result.via, from: result.from });
+});
+
 // POST /notifications/:id/read — mark a single notification read.
 notificationRoutes.post("/:id/read", requireSession, async (c) => {
   const userId = c.get("userId")!;
@@ -111,6 +172,7 @@ notificationRoutes.get("/prefs", requireSession, async (c) => {
       emailEnabled: row?.emailEnabled ?? true,
       pushEnabled: row?.pushEnabled ?? false,
       windows: parseWindows(row?.windowsJson),
+      reminderEmail: null,
     },
   });
 });
