@@ -565,8 +565,13 @@ function ReminderSection({ initial, onSaved }: { initial: Prefs; onSaved: () => 
 
   const testEmail = useMutation({
     mutationFn: () =>
-      api<{ ok: true; to: string }>("/notifications/test-email", { method: "POST" }),
-    onSuccess: (res) => setTestMsg(`Sent to ${res.to}`),
+      api<{ ok: true; to: string; via?: string }>("/notifications/test-email", { method: "POST" }),
+    onSuccess: (res) =>
+      setTestMsg(
+        res.via === "gmail"
+          ? `Sent to ${res.to} from your Gmail`
+          : `Sent to ${res.to}`,
+      ),
     onError: (e: unknown) =>
       setTestMsg(e instanceof Error ? e.message : "Could not send test email."),
   });
@@ -584,6 +589,7 @@ function ReminderSection({ initial, onSaved }: { initial: Prefs; onSaved: () => 
           <h2 className="text-sm font-semibold text-fg">Reminder emails</h2>
           <p className="text-xs text-fg-muted">
             Sent on a daily schedule by the server — you don't need to open the app.
+            Test mail goes from your Gmail after you sign out and sign back in (allow Gmail send).
           </p>
         </div>
       </div>

@@ -349,7 +349,7 @@ deviceLockRoutes.post("/pin/setup", requireSession, zv(pinSchema), async (c) => 
         ctaUrl: appUrl || "/",
       }),
       text: "Your Family Vault PIN was updated. If this wasn't you, sign in with Google and reset it.",
-    });
+    }, { fromUserId: userId });
   }
   return c.json({ ok: true });
 });
@@ -407,13 +407,13 @@ deviceLockRoutes.post("/pin/reset/request", requireSession, async (c) => {
       ctaUrl: appUrl || "/",
     }),
     text: `Your Family Vault PIN reset code is ${code}. It expires in 10 minutes.`,
-  });
+  }, { fromUserId: userId });
   if (!result.ok) {
     return c.json(
       {
         error: "email_not_configured",
         message:
-          "We couldn't email a reset code to your Google login address. Reconnect Storage (Gmail send) or set RESEND_API_KEY, then try again.",
+          "We couldn't email a reset code. Sign out and sign back in to allow Gmail send, then try again.",
       },
       503,
     );

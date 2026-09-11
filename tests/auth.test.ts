@@ -76,6 +76,7 @@ describe("GET /api/auth/google/start (phone full-page navigation)", () => {
     expect([301, 302, 303, 307, 308]).toContain(res.status);
     const location = res.headers.get("location") ?? "";
     expect(location.startsWith("https://accounts.google.com/")).toBe(true);
+    expect(location).toContain("gmail.send");
     expect(location).toContain(
       encodeURIComponent(
         "https://fam.connect-cloud.workers.dev/api/auth/google/callback",

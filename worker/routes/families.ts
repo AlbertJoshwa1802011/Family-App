@@ -9,7 +9,7 @@ import { requireFamilyMember } from "../middleware/requireMember";
 import { insertAuditEvent } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rateLimit";
-import { sendEmail } from "../lib/email";
+import { sendEmailDetailed } from "../lib/email";
 import { inviteEmail } from "../lib/emailTemplates";
 import { normalizeEmail, upsertAccessGrant } from "../lib/appAccess";
 import {
@@ -537,23 +537,27 @@ familyRoutes.post(
       meta: { email, role, modules: parseModulesJson(modulesJson) },
     });
 
-    // Best-effort invite email (no-op without RESEND_API_KEY — the caller
-    // still gets the link to share manually).
+    // Best-effort invite email: inviter Gmail first, then platform Gmail, then Resend.
+    // Caller still gets the link to share manually if every transport fails.
     const [inviter, family] = await Promise.all([
       db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId)).get(),
       db.select({ name: schema.families.name }).from(schema.families).where(eq(schema.families.id, familyId)).get(),
     ]);
     const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
     const inviteUrl = `${appUrl}/invite/${token}`;
-    const emailSent = await sendEmail(c.env, {
-      to: email,
-      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
-      html: inviteEmail({
-        inviterName: inviter?.name ?? null,
-        familyName: family?.name ?? "your family",
-        inviteUrl,
-      }),
-    });
+    const result = await sendEmailDetailed(
+      c.env,
+      {
+        to: email,
+        subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
+        html: inviteEmail({
+          inviterName: inviter?.name ?? null,
+          familyName: family?.name ?? "your family",
+          inviteUrl,
+        }),
+      },
+      { fromUserId: userId },
+    );
 
     return c.json(
       {
@@ -563,7 +567,8 @@ familyRoutes.post(
           expiresAt: now + 7 * 24 * 3600,
           token,
           inviteUrl,
-          emailSent,
+          emailSent: result.ok,
+          emailVia: result.via === "none" ? null : result.via,
           modules: parseModulesJson(modulesJson),
         },
       },

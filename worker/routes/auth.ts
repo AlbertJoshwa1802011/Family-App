@@ -24,6 +24,7 @@ import {
 } from "../lib/appAccess";
 import { loginBounceHtml, requestOrigin, safeAppPath } from "../lib/publicUrl";
 import { parseModulesJson, FAMILY_MODULES } from "../lib/modules";
+import { GMAIL_SEND_SCOPE, storeGrantedScopes } from "../lib/googleAuth";
 
 export const authRoutes = new Hono<HonoEnv>();
 
@@ -93,8 +94,12 @@ async function beginGoogleOAuth(
       "https://www.googleapis.com/auth/drive.file",
       // Calendar: push Family Vault events into the user's primary calendar.
       "https://www.googleapis.com/auth/calendar.events",
+      // Gmail: send invites / reminders / test mail from the signed-in mailbox
+      // when Resend has no verified domain. Existing users must sign out/in once.
+      GMAIL_SEND_SCOPE,
     ].join(" "),
     access_type: "offline",
+    include_granted_scopes: "true",
     prompt: "consent",
     state,
     code_challenge: codeChallenge,
@@ -271,6 +276,7 @@ authRoutes.get("/google/callback", async (c) => {
     id_token: string;
     access_token: string;
     refresh_token?: string;
+    scope?: string;
   };
 
   // Verify the Google ID token with jose against Google's JWKS endpoint
@@ -329,9 +335,9 @@ authRoutes.get("/google/callback", async (c) => {
 
   await ensureBootstrapSuperAdmin(db, c.env, user.id, user.email);
 
-  // Cache refresh token in KV (Drive + Google Calendar push need it).
+  // Cache refresh token in KV (Drive + Calendar + Gmail send need it).
   // Drop any cached access token so the next API call picks up newly granted
-  // scopes (e.g. calendar.events after a re-consent).
+  // scopes (e.g. gmail.send / calendar.events after a re-consent).
   if (tokens.refresh_token) {
     await c.env.KV.put(`user:refresh_token:${user.id}`, tokens.refresh_token);
   }
@@ -342,6 +348,7 @@ authRoutes.get("/google/callback", async (c) => {
   } else {
     await c.env.KV.delete(`user:access_token:${user.id}`);
   }
+  if (tokens.scope) await storeGrantedScopes(c.env, user.id, tokens.scope);
 
   const sessionId = await createSession(db, user.id, c.req.header("user-agent"));
 

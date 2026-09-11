@@ -1,3 +1,27 @@
+export const PRODUCTION_APP_ORIGIN = "https://fam.connect-cloud.workers.dev";
+
+function isLocalHost(origin: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+/**
+ * Absolute origin for email CTAs. Never emit a relative href — Gmail treats
+ * those as gmail.com/… and the PWA service worker used to swallow /access/review.
+ */
+export function absoluteAppUrl(env: { APP_URL?: string }, requestUrl?: string): string {
+  const configured = (env.APP_URL ?? "").replace(/\/$/, "");
+  if (configured && !isLocalHost(configured)) return configured;
+  if (requestUrl) {
+    try {
+      const origin = new URL(requestUrl).origin;
+      if (origin && !isLocalHost(origin)) return origin;
+    } catch {
+      // ignore invalid request URLs
+    }
+  }
+  return configured || PRODUCTION_APP_ORIGIN;
+}
+
 /**
  * Public origin the browser used to hit this Worker.
  * Prefer the request URL over APP_URL so aliases (fam.connect-cloud.workers.dev)
