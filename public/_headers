@@ -10,3 +10,7 @@
   # Worker). `connect-src 'self'` alone blocks that PUT and Safari reports it as
   # the opaque TypeError "Load failed".
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://www.googleapis.com https://*.googleapis.com; manifest-src 'self'; worker-src 'self'
+
+# The iOS Money app polls this to offer updates; a cached copy would hide a new release.
+/ios-money/version.json
+  Cache-Control: no-cache
