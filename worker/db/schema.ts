@@ -1425,9 +1425,21 @@ export const churchSettlements = sqliteTable(
     dueMinor: integer("due_minor").notNull(),
     /** Amount actually paid now (e.g. ₹3000 → 300000). */
     paidMinor: integer("paid_minor").notNull(),
-    /** Carry forward: dueMinor − paidMinor (0 when fully settled). */
+    /**
+     * Legacy carry-forward snapshot (dueMinor − paidMinor). NOT used for
+     * "still to settle" any more — that is always live: collected − Σ paid.
+     */
     remainingMinor: integer("remaining_minor").notNull(),
+    /** Exact instant the money was handed over (unix seconds). */
     settledAt: integer("settled_at").notNull(),
+    /**
+     * Who received the money (a settlement destination, e.g. "Mom"). Null on
+     * rows recorded before recipients existed — the UI asks to assign them.
+     * App-level family check; no FK so the ALTER stays additive.
+     */
+    recipientId: text("recipient_id"),
+    /** When the recipient passed it on to church. Null = still with them. */
+    handedOverAt: integer("handed_over_at"),
     settledByUserId: text("settled_by_user_id")
       .notNull()
       .references(() => users.id),
@@ -1438,6 +1450,7 @@ export const churchSettlements = sqliteTable(
     // Multiple partial payments per fund/month are allowed (carry-forward).
     index("idx_church_settlements_family").on(t.familyId, t.settledAt),
     index("idx_church_settlements_fund").on(t.familyId, t.fundSlug, t.periodKey),
+    index("idx_church_settlements_recipient").on(t.familyId, t.recipientId),
   ],
 );
 

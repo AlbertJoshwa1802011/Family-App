@@ -372,7 +372,12 @@ while that member has sharing enabled. `Permissions-Policy` allows
 **Money settlements (done):** `/expenses` Money page has Settlements | Expenses.
 Settlements use `settlement_destinations` (Mom, Church, …) + `money_movements`
 (`received` / `settled`). Summary exposes available / settled / inHand; any
-family member can log entries (pastor included once invited). Daily cron
+family member can log entries (pastor included once invited).
+**Church funds** (Funds → Church): "with you" is ALWAYS live — collected on the
+contributions site − Σ paid (`worker/lib/churchLedger.ts`); never use the stored
+`remaining_minor` carry (it froze stale dues). Each settlement records a recipient
+(settlement destination, e.g. Mom), the exact `settled_at` instant, and
+`handed_over_at` when they passed it to church (`POST /church/handover`). Daily cron
 now also reminds open tasks at 7/2/1 days (email + in-app). Documents remain on
 the owner's Google Drive — not GCS.
 
