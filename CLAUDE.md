@@ -26,7 +26,7 @@ binding) and a Hono API under `/api/*`, plus a daily **Cron Trigger** for remind
 npm run dev            # vite dev w/ @cloudflare/vite-plugin (real workerd runtime + HMR)
 npm run typecheck      # tsc -b + worker tsconfig + node tsconfig — run before EVERY commit
 npm run lint           # eslint . — run before EVERY commit
-npm run test           # vitest run — 358 tests; must stay green
+npm run test           # vitest run — 1154 tests; must stay green
 npm run build          # tsc -b && vite build — produces dist/client (+ sw.js, _headers)
 npm run db:generate    # drizzle-kit generate — AFTER editing worker/db/schema.ts
 python3 scripts/validate_migrations.py   # AFTER db:generate — catches bad migrations
@@ -180,6 +180,19 @@ something to refract, so don't remove them.
   `parentTaskId`, max depth 5. Deleting a task explicitly deletes descendants (D1 cascades are
   advisory). List views: `todo | priority | due | recent | mine | completed`.
 
+### Notifications UI
+- Every notification `type` the worker writes MUST have an entry in
+  `NOTIFICATION_META` (`src/lib/notificationMeta.ts`: icon, label, category, tint).
+  `tests/ui-notifications.test.tsx` scans `worker/` for `type: "x", title:` writes
+  and fails on an unmapped type — add the meta entry with the new type.
+- One unread poll (`useUnreadNotifications`, key `["notifications","unread"]`) feeds
+  the bell, the bottom-nav badge and the arrival banner. Don't add a second key.
+- `NotificationToast` (mounted in `Layout`, so on every page) shows a glass banner for
+  unread ids that appear *after* the first poll — the first poll only seeds, so the
+  backlog never replays. It stays quiet on `/notifications`.
+- `/notifications` groups by local day (Today / Yesterday / This week / Earlier) and
+  filters All / Unread / Calendar / Tasks / Documents / Chat.
+
 ### `eventMonthKey()`
 Returns `"${year}-${month_index}"` with a **0-indexed** month (June → `"2026-5"`). Used only for
 grouping; the visible label uses `Intl.DateTimeFormat`. A test pins the format — don't switch to
@@ -246,7 +259,7 @@ Tests are **exhaustive and adversarial** by design — future agents should find
 things silently. We test the **contract**: response shapes, status codes, security headers on
 every endpoint, and Zod validation boundaries (null / wrong-type / out-of-range / format).
 `app.request(...)` calls the Hono app directly (no HTTP server). Keep new routes covered to the
-same depth. Current baseline: **774 tests across 36 files**, all green.
+same depth. Current baseline: **1154 tests across 64 files**, all green.
 Multi-user scheduling has its own cast fixture in `tests/helpers/family.ts` (owner,
 admin, plain member, dependent, invited-inactive, removed, outsider) — multi-user bugs
 live in the members people forget. Use it for anything touching shared family data.

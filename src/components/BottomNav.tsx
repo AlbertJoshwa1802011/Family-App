@@ -7,9 +7,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { cn } from "../lib/cn";
-import { api } from "../lib/api";
+import { useUnreadNotifications } from "../lib/useUnreadNotifications";
 import { useOptionalAuth } from "../context/AuthContext";
 import { hasModuleAccess, type FamilyModule } from "../lib/modules";
 
@@ -31,17 +30,6 @@ const ALL_ITEMS: NavItem[] = [
   { to: "/family", label: "Family", icon: Users },
 ];
 
-function useUnreadCount(): number {
-  const { data } = useQuery({
-    queryKey: ["notifications", "unread-count"],
-    queryFn: () =>
-      api<{ unreadCount: number }>("/notifications?unreadOnly=1"),
-    refetchInterval: 30_000,
-    retry: false,
-  });
-  return data?.unreadCount ?? 0;
-}
-
 function activeIndex(pathname: string, items: NavItem[]): number {
   return items.findIndex((item) =>
     item.end ? pathname === item.to : pathname.startsWith(item.to),
@@ -49,7 +37,7 @@ function activeIndex(pathname: string, items: NavItem[]): number {
 }
 
 export function BottomNav() {
-  const unread = useUnreadCount();
+  const { unreadCount: unread } = useUnreadNotifications();
   const { pathname } = useLocation();
   const auth = useOptionalAuth();
   const activeFamily = auth?.activeFamily ?? null;
