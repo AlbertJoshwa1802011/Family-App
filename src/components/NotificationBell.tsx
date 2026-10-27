@@ -1,19 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { useUnreadNotifications } from "../lib/useUnreadNotifications";
 
 /** Bell button (for an AppBar trailing slot) with an unread-count badge. */
 export function NotificationBell() {
-  const { data } = useQuery({
-    queryKey: ["notifications", "unread"],
-    queryFn: () =>
-      api<{ unreadCount: number }>("/notifications?unreadOnly=1"),
-    // Light polling so the badge stays roughly fresh without a socket.
-    refetchInterval: 60_000,
-  });
-
-  const unread = data?.unreadCount ?? 0;
+  const { unreadCount: unread } = useUnreadNotifications();
 
   return (
     <Link
