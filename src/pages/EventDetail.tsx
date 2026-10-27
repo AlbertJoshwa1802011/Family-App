@@ -322,7 +322,7 @@ export function EventDetailPage() {
         {/* Your invitation — shown only if you are actually on the guest list */}
         {me && ev.status === "active" && (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               Are you going?
             </h3>
             <Card className="p-3">
@@ -351,7 +351,7 @@ export function EventDetailPage() {
         {/* Attendees */}
         {attendees.length > 0 && (
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
               <Users className="size-3.5" />
               Attendees ({attendees.length})
               {summary && summary.accepted > 0 && (
@@ -384,7 +384,7 @@ export function EventDetailPage() {
         {/* Linked documents */}
         {documents.length > 0 && (
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
               <FileText className="size-3.5" />
               Documents
             </h3>
@@ -405,7 +405,7 @@ export function EventDetailPage() {
 
         {/* Meeting notes */}
         <section className="space-y-2">
-          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
             <NotebookPen className="size-3.5" />
             Meeting notes
           </h3>
@@ -439,7 +439,7 @@ export function EventDetailPage() {
 
         {/* Action items → tasks */}
         <section className="space-y-2">
-          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
             <CheckSquare className="size-3.5" />
             Action items
           </h3>
@@ -473,7 +473,7 @@ export function EventDetailPage() {
 
         {/* Links / YouTube */}
         <section className="space-y-2">
-          <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
             <Link2 className="size-3.5" />
             Links &amp; videos
           </h3>

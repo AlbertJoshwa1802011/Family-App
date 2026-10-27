@@ -89,7 +89,7 @@ function TypeSelector({
 }) {
   return (
     <Card className="p-4">
-      <p className="mb-3 text-xs font-semibold text-fg-muted uppercase tracking-wider">
+      <p className="mb-3 text-xs font-semibold text-fg-muted">
         Credential type
       </p>
       <div className="grid grid-cols-4 gap-2">
@@ -463,7 +463,7 @@ export function VaultItemForm() {
 
           {/* Visibility */}
           <Card className="p-4">
-            <p className="mb-3 text-xs font-semibold text-fg-muted uppercase tracking-wider">
+            <p className="mb-3 text-xs font-semibold text-fg-muted">
               Visibility
             </p>
             <div className="flex gap-3">

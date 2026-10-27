@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 @theme {
+  /* Type — Geist for reading, Bricolage Grotesque for the voice of the app
+     (titles, greetings, big numbers). Both self-hosted variable fonts. */
+  --font-sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Geist Variable", system-ui, sans-serif;
+
   /* Brand */
   --color-vault-50: #f0fdfa;
   --color-vault-300: #5eead4;
@@ -66,13 +71,14 @@
     #ffffff05 78%,
     #ffffff0f 100%
   );
+  /* Top-lit rim: bright along the top edge, near-invisible down the sides,
+     a faint return at the bottom. Reads as lit glass, not an outlined box. */
   --lq-rim: linear-gradient(
-    140deg,
-    #ffffff66 0%,
-    #ffffff1a 26%,
-    #ffffff00 52%,
-    #ffffff0d 78%,
-    #ffffff3d 100%
+    180deg,
+    #ffffff4d 0%,
+    #ffffff14 22%,
+    #ffffff08 60%,
+    #ffffff12 100%
   );
   --lq-sheen: radial-gradient(
     130% 80% at 50% -22%,
@@ -80,7 +86,7 @@
     #ffffff08 42%,
     transparent 68%
   );
-  --lq-shadow: 0 10px 34px -14px #000d, 0 2px 8px -4px #0009;
+  --lq-shadow: 0 1px 0 #ffffff0d inset, 0 12px 32px -16px #000e, 0 2px 6px -3px #0008;
   --lq-blur: 18px;
   --lq-bg: #0d1526a6;
   --lq-tint: #ffffff;
@@ -136,12 +142,11 @@
     --lq-shadow: 0 8px 40px -10px #000f, 0 1px 0 #ffffff14 inset;
     --lq-bg: #060a14e0;
     --lq-rim: linear-gradient(
-      140deg,
-      #ffffff59 0%,
-      #ffffff1a 30%,
-      #ffffff0a 58%,
-      #ffffff14 78%,
-      #ffffff40 100%
+      180deg,
+      #ffffff47 0%,
+      #ffffff14 35%,
+      #ffffff0a 70%,
+      #ffffff1a 100%
     );
   }
 
@@ -149,12 +154,11 @@
   .lq-raised {
     --lq-shadow: 0 14px 40px -12px #000f, 0 4px 12px -6px #000c;
     --lq-rim: linear-gradient(
-      140deg,
-      #ffffff8c 0%,
-      #ffffff33 24%,
-      #ffffff00 54%,
-      #ffffff1a 80%,
-      #ffffff59 100%
+      180deg,
+      #ffffff73 0%,
+      #ffffff1f 28%,
+      #ffffff0a 64%,
+      #ffffff1f 100%
     );
   }
 
@@ -180,26 +184,33 @@
      Coloured glass skins. Each only re-points the `.lq` variables, so the rim,
      sheen and blur recipe stays identical across every tone.
   --------------------------------------------------------------------------- */
+  /* Primary liquid: light teal at the lip deepening to jade, a hairline
+     highlight under the top edge and a coloured glow pooled beneath. */
   .lq-primary {
-    --lq-bg: #0d9488e0;
+    --lq-bg: #0d9488f0;
     --lq-fill: linear-gradient(
-      160deg,
-      #ffffff59 0%,
-      #ffffff1f 40%,
-      #00000014 72%,
-      #ffffff1a 100%
+      180deg,
+      #5eead4cc 0%,
+      #2dd4bf66 34%,
+      #0d948800 72%,
+      #0f766e80 100%
     );
-    --lq-shadow: 0 12px 32px -12px #14b8a6cc, 0 2px 10px -6px #000c;
+    --lq-rim: linear-gradient(180deg, #ffffffa6 0%, #ffffff33 30%, #ffffff0d 70%, #ffffff26 100%);
+    --lq-shadow: 0 1px 0 #ffffff59 inset, 0 -1px 0 #0000002e inset, 0 10px 26px -10px #14b8a6b3,
+      0 2px 6px -3px #000c;
     color: #fff;
   }
   @media (hover: hover) {
     .lq-primary.lq-press:hover {
-      --lq-bg: #14b8a6e6;
+      --lq-bg: #14b8a6f2;
+      --lq-shadow: 0 1px 0 #ffffff66 inset, 0 -1px 0 #0000002e inset, 0 14px 32px -10px #2dd4bfc2,
+        0 2px 6px -3px #000c;
     }
   }
 
   .lq-danger {
     --lq-bg: #7f1d1d5c;
+    --lq-rim: linear-gradient(180deg, #fca5a566 0%, #f8717126 30%, #f871710d 70%, #f871711f 100%);
     --lq-fill: linear-gradient(160deg, #f8717140 0%, #f871711a 48%, transparent 100%);
     --lq-shadow: 0 10px 28px -14px #f8717166, 0 2px 8px -4px #0009;
   }
@@ -220,13 +231,13 @@
   .lq-field {
     --lq-bg: #060b1699;
     --lq-fill: linear-gradient(160deg, #00000026 0%, #ffffff08 62%, #ffffff14 100%);
-    --lq-rim: linear-gradient(140deg, #ffffff2e 0%, #ffffff0d 40%, #ffffff1f 100%);
+    --lq-rim: linear-gradient(180deg, #0000004d 0%, #ffffff0a 45%, #ffffff24 100%);
     --lq-shadow: inset 0 1px 3px #0009, 0 1px 0 #ffffff0f;
     --lq-blur: 10px;
   }
   .lq-field:focus-within {
-    --lq-rim: linear-gradient(140deg, #2dd4bfb3 0%, #14b8a659 45%, #2dd4bf8c 100%);
-    --lq-shadow: inset 0 1px 3px #0009, 0 0 0 3px #14b8a629;
+    --lq-rim: linear-gradient(180deg, #5eead4cc 0%, #2dd4bf80 50%, #5eead4b3 100%);
+    --lq-shadow: inset 0 1px 3px #0009, 0 0 0 4px #14b8a62e;
   }
 
   /* Interactive bubbles: liquid press + hover lift */
@@ -237,7 +248,7 @@
       background-color 0.25s var(--ease-out);
   }
   .lq-press:active {
-    transform: scale(0.965);
+    transform: scale(0.97);
     --lq-shadow: 0 4px 14px -8px #000d;
   }
   @media (hover: hover) {
@@ -264,10 +275,36 @@ body {
   overscroll-behavior-y: contain;
   background-color: var(--color-ink-950);
   color: var(--color-fg);
-  font-family:
-    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* Headings speak in the display face. Optical size tracks the rendered size,
+   so a 13px section heading stays sturdy while a 32px greeting gets tight. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+  }
+  /* Dates, money and counts line up in columns */
+  time,
+  input[type="date"],
+  input[type="time"],
+  input[type="number"] {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background: #2dd4bf47;
+  }
 }
 
 /* ---------------------------------------------------------------------------

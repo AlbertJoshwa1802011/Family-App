@@ -228,7 +228,7 @@ export function ChurchSettlementsPanel({
       )}
 
       <section className="space-y-2">
-        <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+        <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
           Funds
         </h3>
         {isPlatformAdmin && (
@@ -593,7 +593,7 @@ function History({
   if (settlements.length === 0) return null;
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+      <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
         History
       </h3>
       <Card className="divide-y divide-line overflow-hidden">

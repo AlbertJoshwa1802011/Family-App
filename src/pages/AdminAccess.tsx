@@ -141,7 +141,7 @@ export function AdminAccess() {
         </Card>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Pending demo requests
           </h3>
           {requests.isLoading ? (
@@ -200,7 +200,7 @@ export function AdminAccess() {
         </section>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Invite to the app
           </h3>
           <Card className="p-4">
@@ -237,7 +237,7 @@ export function AdminAccess() {
         </section>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Access grants
           </h3>
           {grants.isLoading ? (

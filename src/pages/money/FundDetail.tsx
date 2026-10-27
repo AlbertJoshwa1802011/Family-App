@@ -251,7 +251,7 @@ export function FundDetail() {
       <AppBar title={fund.name} back />
       <Page className="space-y-4 pb-24 md:pb-10">
         <Card className="p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+          <p className="text-xs font-medium text-fg-subtle">
             Remaining
           </p>
           <p className="mt-1 text-3xl font-bold tabular-nums text-fg">

@@ -130,7 +130,7 @@ export function Wishlist() {
 
         {open.length > 0 && (
           <Card className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+            <p className="text-[11px] font-medium text-fg-subtle">
               Saving toward
             </p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-fg">

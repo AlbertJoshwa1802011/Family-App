@@ -241,7 +241,7 @@ export function HandSettlementsPanel({ familyId }: { familyId: string }) {
           <Card className="space-y-3 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+                <div className="text-[11px] font-semibold text-fg-subtle">
                   In hand
                 </div>
                 <div
@@ -267,7 +267,7 @@ export function HandSettlementsPanel({ familyId }: { familyId: string }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+                <div className="text-[11px] font-semibold text-fg-subtle">
                   Received
                 </div>
                 <div className="mt-0.5 text-base font-semibold tabular-nums text-fg">
@@ -278,7 +278,7 @@ export function HandSettlementsPanel({ familyId }: { familyId: string }) {
                 </div>
               </div>
               <div>
-                <div className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+                <div className="text-[11px] font-semibold text-fg-subtle">
                   Settled
                 </div>
                 <div className="mt-0.5 text-base font-semibold tabular-nums text-fg">

@@ -296,7 +296,7 @@ function RelatedDocuments({ docId }: { docId: string }) {
 
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+      <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
         Related documents
       </h3>
       <Card className="divide-y divide-white/5 p-1">
@@ -465,7 +465,7 @@ function Comments({ docId }: { docId: string }) {
 
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+      <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
         Notes & comments {comments.length > 0 && `(${comments.length})`}
       </h3>
       <Card className="divide-y divide-white/8 overflow-hidden">
@@ -546,7 +546,7 @@ function FileVersions({ docId }: { docId: string }) {
 
   return (
     <section className="space-y-2">
-      <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+      <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
         Files & versions
       </h3>
       <Card className="divide-y divide-white/8 overflow-hidden">

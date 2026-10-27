@@ -378,3 +378,26 @@ describe("source hygiene", () => {
     }
   });
 });
+
+describe("typography", () => {
+  const main = readFileSync("src/main.tsx", "utf8");
+
+  it("defines the body and display families as theme tokens", () => {
+    expect(css).toMatch(/--font-sans:\s*"Geist Variable"/);
+    expect(css).toMatch(/--font-display:\s*"Bricolage Grotesque Variable"/);
+    expect(ruleBody("body")).toContain("font-family: var(--font-sans)");
+  });
+
+  it("self-hosts the fonts so the CSP needs no font host", () => {
+    // `default-src 'self'` covers fonts; a Google Fonts <link> or @import would
+    // be blocked in production and silently fall back to system-ui.
+    expect(main).toContain('import "@fontsource-variable/geist"');
+    expect(main).toContain('import "@fontsource-variable/bricolage-grotesque"');
+    expect(css).not.toContain("fonts.googleapis.com");
+    expect(readFileSync("index.html", "utf8")).not.toContain("fonts.googleapis.com");
+  });
+
+  it("sets headings in the display face", () => {
+    expect(css).toMatch(/h1,\s*h2,\s*h3,\s*h4\s*\{\s*font-family:\s*var\(--font-display\)/);
+  });
+});

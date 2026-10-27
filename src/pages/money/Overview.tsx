@@ -56,7 +56,7 @@ function Figure({
     <Card className="p-4">
       <div className="flex items-center gap-1.5 text-fg-subtle">
         {Icon && <Icon className="size-3.5" aria-hidden="true" />}
-        <p className="text-[11px] font-medium uppercase tracking-wide">{label}</p>
+        <p className="text-[11px] font-medium">{label}</p>
       </div>
       <p
         className={cn(
@@ -448,7 +448,7 @@ export function MoneyOverview() {
                 />
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                    <p className="text-xs font-medium text-fg-subtle">
                       Left to spend
                     </p>
                     <p

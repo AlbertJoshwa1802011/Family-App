@@ -342,7 +342,7 @@ export function Tasks() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+          <span className="text-[11px] font-semibold text-fg-subtle">
             Sort
           </span>
           {SORT_CHIPS.map((chip) => (
@@ -423,7 +423,7 @@ export function Tasks() {
           />
         ) : layout === "board" ? (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               {VIEW_CHIPS.find((c) => c.id === view)?.label} ({openRootCount})
             </h3>
             <TaskBoard
@@ -438,7 +438,7 @@ export function Tasks() {
           </section>
         ) : (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               {VIEW_CHIPS.find((c) => c.id === view)?.label} ({openRootCount})
             </h3>
             <TaskTree

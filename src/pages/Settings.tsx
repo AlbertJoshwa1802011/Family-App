@@ -242,21 +242,21 @@ export function Settings() {
         </Button>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Reminders
           </h3>
           <ReminderPrefsCard />
         </section>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Calendar
           </h3>
           <CalendarFeedCard />
         </section>
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Notifications
           </h3>
           <Card className="divide-y divide-white/8 overflow-hidden">
@@ -271,7 +271,7 @@ export function Settings() {
 
         {user?.appRoles?.includes("super_admin") && (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               Platform
             </h3>
             <Card className="divide-y divide-white/8 overflow-hidden">
@@ -286,7 +286,7 @@ export function Settings() {
         )}
 
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             About
           </h3>
           <Card className="divide-y divide-white/8 overflow-hidden">

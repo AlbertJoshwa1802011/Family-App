@@ -451,7 +451,7 @@ export function Expenses() {
             <>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                  <p className="text-[11px] font-medium text-fg-subtle">
                     Expense
                   </p>
                   <p className="mt-1 text-lg font-bold tabular-nums text-fg">
@@ -459,7 +459,7 @@ export function Expenses() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                  <p className="text-[11px] font-medium text-fg-subtle">
                     Income
                   </p>
                   <p className="mt-1 text-lg font-bold tabular-nums text-success">
@@ -467,7 +467,7 @@ export function Expenses() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+                  <p className="text-[11px] font-medium text-fg-subtle">
                     Balance
                   </p>
                   <p

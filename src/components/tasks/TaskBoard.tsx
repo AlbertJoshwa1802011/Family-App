@@ -51,7 +51,7 @@ export function TaskBoard({
                 COLUMN_TINT[key],
               )}
             >
-              <h4 className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <h4 className="text-[13px] font-semibold text-fg-muted">
                 {priorityLabel(key)}
               </h4>
               <span className="text-xs text-fg-muted">{items.length}</span>

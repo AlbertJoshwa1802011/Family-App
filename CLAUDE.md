@@ -154,6 +154,13 @@ Rules that have already bitten us:
 6. Absolutely-positioned children of an `.lq` element must set an explicit `left`/`right` —
    the static position is not reliably 0 (the Settings switch knob overflowed its track).
 
+**Typography:** body is **Geist** (`--font-sans`), headings `h1–h4` + big numbers are
+**Bricolage Grotesque** (`--font-display`, `font-display` utility). Both are self-hosted
+via `@fontsource-variable/*` imports in `src/main.tsx` — never a Google Fonts link (CSP
+`default-src 'self'` blocks it). Section headings are sentence case — no `uppercase`
+tracked-out labels. Rims are **top-lit** (180deg gradient: bright top edge, faint sides),
+not outlines; primary buttons are a teal→jade liquid with an inset lip highlight.
+
 Shared field styling is `inputCls` from **`src/lib/fieldCls.ts`** (kept out of the component
 file so pages importing it don't cross a react-refresh boundary). `src/components/ui/`
 also has `Field`/`Input`/`Textarea`/`Select`, `Chip`, `SegmentedControl` and `Sheet`.

@@ -412,7 +412,7 @@ function NoteEditor({
             </div>
 
             <div>
-              <label className="mb-2 block text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <label className="mb-2 block text-xs font-semibold text-fg-subtle">
                 Date
               </label>
               <input
@@ -427,7 +427,7 @@ function NoteEditor({
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <p className="mb-2 text-xs font-semibold text-fg-subtle">
                 Folder
               </p>
               <div className="-mx-1 flex flex-wrap gap-2 px-1">

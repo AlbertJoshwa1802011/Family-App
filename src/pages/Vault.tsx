@@ -498,7 +498,7 @@ function UnlockedVault({
         <div className="space-y-4">
           {Object.entries(groups).map(([groupLabel, groupItems]) => (
             <div key={groupLabel}>
-              <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-fg-muted">
+              <h3 className="mb-2 px-1 text-[13px] font-semibold text-fg-muted">
                 {groupLabel}
               </h3>
               <Card className="divide-y divide-line overflow-hidden">

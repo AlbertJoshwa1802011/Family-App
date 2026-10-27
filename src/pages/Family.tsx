@@ -148,7 +148,7 @@ export function FamilyPage() {
         {/* Family switcher — shown only for multi-family users */}
         {families.length > 1 && (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               Your families
             </h3>
             <div className="flex flex-wrap gap-2">
@@ -211,7 +211,7 @@ export function FamilyPage() {
 
         {/* Members section */}
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+          <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
             Members
           </h3>
           {membersLoading ? (
@@ -299,7 +299,7 @@ export function FamilyPage() {
         {/* Activity feed */}
         {activities.length > 0 && (
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="flex items-center gap-1.5 px-1 text-[13px] font-semibold text-fg-muted">
               <Activity className="size-3.5" />
               Recent activity
             </h3>

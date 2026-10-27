@@ -7,6 +7,10 @@ import { AuthProvider } from "./context/AuthContext";
 import { AssistantUiProvider } from "./context/AssistantUiContext";
 import { setupPWA } from "./pwa";
 import App from "./App";
+// Self-hosted variable fonts — bundled as same-origin woff2 so the CSP
+// (`default-src 'self'`) needs no font host and the PWA precaches them.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/bricolage-grotesque";
 import "./index.css";
 
 setupPWA();

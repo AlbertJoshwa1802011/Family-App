@@ -260,7 +260,7 @@ export function TaskDetailPage() {
 
         <section className="space-y-2">
           <div className="flex items-center justify-between px-1">
-            <h3 className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="text-[13px] font-semibold text-fg-muted">
               Subtasks ({task.childCount})
             </h3>
           </div>

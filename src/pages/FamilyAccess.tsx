@@ -123,7 +123,7 @@ export function FamilyAccessPage() {
           </Card>
         ) : (
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+            <h3 className="px-1 text-[13px] font-semibold text-fg-muted">
               People
             </h3>
             <Card className="divide-y divide-white/8 overflow-hidden">

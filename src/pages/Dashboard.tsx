@@ -73,7 +73,7 @@ function SectionTitle({
   const Icon = action?.icon;
   return (
     <div className="flex items-center justify-between px-1">
-      <h3 className="text-[13px] font-semibold tracking-wide text-fg-muted uppercase">
+      <h3 className="text-base font-semibold text-fg">
         {children}
       </h3>
       {action && (
@@ -121,7 +121,7 @@ function StatCard({
         >
           <Icon className="size-5" aria-hidden="true" />
         </div>
-        <div className="relative mt-3 text-[28px] leading-none font-bold tabular-nums text-white">
+        <div className="relative mt-3 font-display text-[32px] leading-none font-bold tabular-nums text-white">
           {value}
         </div>
         <div className="relative mt-1.5 text-xs font-medium text-fg-muted">
@@ -283,7 +283,7 @@ export function Dashboard() {
       <Page className="space-y-7">
         <div className="bubble-in px-1 pt-1">
           <p className="text-sm font-medium text-fg-muted">Welcome back,</p>
-          <h2 className="mt-0.5 text-[28px] leading-tight font-bold tracking-tight text-white">
+          <h2 className="mt-0.5 text-[34px] leading-[1.05] font-bold tracking-[-0.03em] text-white">
             {firstName} 👋
           </h2>
         </div>
