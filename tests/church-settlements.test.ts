@@ -485,3 +485,253 @@ describe("POST /church/handover", () => {
     expect((await json(res)).error).toBe("validation_error");
   });
 });
+
+// ── Regression guards ────────────────────────────────────────────────────────
+// These pin the money invariants so a future refactor cannot quietly bring
+// back a stale "still to settle", lose a rupee between stages, or leak a
+// restricted fund.
+
+describe("guard: money is conserved across every stage", () => {
+  // Deterministic pseudo-random so a failure is reproducible.
+  function rng(seed: number) {
+    return () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+  }
+
+  it.each([1, 7, 42, 2026, 9999])(
+    "collected = with you + with recipients + given to church (seed %i)",
+    (seed) => {
+      const rand = rng(seed);
+      const funds = [
+        { slug: "a", name: "A", collectedMinor: 0 },
+        { slug: "b", name: "B", collectedMinor: 0 },
+      ];
+      const recipients = [
+        { id: "mom", name: "Mom", archivedAt: null },
+        { id: "dad", name: "Dad", archivedAt: null },
+      ];
+      const settlements: Parameters<typeof computeChurchLedger>[1] = [];
+      for (let step = 0; step < 60; step++) {
+        const f = funds[Math.floor(rand() * 2)];
+        const roll = rand();
+        if (roll < 0.45) {
+          f.collectedMinor += 100 * Math.ceil(rand() * 500); // website payment
+        } else if (roll < 0.85) {
+          const ledger = computeChurchLedger(funds, settlements, recipients);
+          const withYou = ledger.funds.get(f.slug)!.withYouMinor;
+          if (withYou > 0) {
+            settlements.push({
+              id: `s${step}`,
+              fundSlug: f.slug,
+              paidMinor: Math.max(1, Math.floor(withYou * rand())),
+              settledAt: step,
+              recipientId: rand() < 0.15 ? null : recipients[Math.floor(rand() * 2)].id,
+              handedOverAt: null,
+            });
+          }
+        } else {
+          const open = settlements.filter((s) => s.handedOverAt === null && s.recipientId);
+          if (open.length) open[Math.floor(rand() * open.length)].handedOverAt = step;
+        }
+
+        const l = computeChurchLedger(funds, settlements, recipients);
+        expect(l.totals.withYouMinor + l.totals.withRecipientsMinor + l.totals.givenToChurchMinor).toBe(
+          l.totals.collectedMinor,
+        );
+        expect(l.totals.settledMinor).toBe(l.totals.withRecipientsMinor + l.totals.givenToChurchMinor);
+        for (const p of l.funds.values()) {
+          expect(p.withYouMinor).toBeGreaterThanOrEqual(0);
+          expect(p.collectedMinor - p.settledMinor).toBe(p.withYouMinor - p.overSettledMinor);
+        }
+        for (const h of l.holders) {
+          expect(h.holdingMinor + h.handedOverMinor).toBe(h.receivedMinor);
+          expect(h.byFund.reduce((s, f) => s + f.holdingMinor, 0)).toBe(h.holdingMinor);
+        }
+      }
+    },
+  );
+});
+
+describe("guard: with-you is never a stored snapshot", () => {
+  it("ignores due/remaining columns entirely — only collected − Σ paid counts", async () => {
+    // Write absurd legacy snapshot values; none of them may leak into the figure.
+    for (const [id, paid, due, remaining] of [
+      ["x1", 50_000, 999_999, 777_777],
+      ["x2", 30_000, 1, 0],
+      ["x3", 20_000, 123_456, 654_321],
+    ] as const) {
+      t.sqlite
+        .prepare(
+          `INSERT INTO church_settlements (id, family_id, fund_slug, period_key, collected_minor, spent_minor,
+            due_minor, paid_minor, remaining_minor, settled_at, settled_by_user_id, recipient_id)
+           VALUES (?, ?, 'christmas-2k26', '2026-10', 1, 1, ?, ?, ?, 1790000000, ?, ?)`,
+        )
+        .run(id, familyId, due, paid, remaining, owner.userId, momId);
+    }
+    const s = await snapshot();
+    expect(fund(s, "christmas-2k26")).toMatchObject({ settledMinor: 100_000, withYouMinor: 150_000 });
+    expect(holder(s, momId)!.holdingMinor).toBe(100_000);
+  });
+
+  it("several partial payments add up exactly", async () => {
+    for (const paid of [70_000, 80_000, 100_000]) {
+      expect((await settle({ fundSlug: "christmas-2k26", paidMinor: paid, recipientId: momId })).status).toBe(201);
+    }
+    expect(fund(await snapshot(), "christmas-2k26").withYouMinor).toBe(0);
+  });
+
+  it("collected going down upstream (refund) shows as over-settled, not negative", async () => {
+    await settle({ fundSlug: "christmas-2k26", paidMinor: 250_000, recipientId: momId });
+    upstreamFunds[0].totalCollected = 2_000;
+    expect(fund(await snapshot(), "christmas-2k26")).toMatchObject({ withYouMinor: 0, overSettledMinor: 50_000 });
+  });
+});
+
+describe("guard: response contract the Funds page depends on", () => {
+  it("snapshot keeps every field the UI reads", async () => {
+    await settle({ fundSlug: "christmas-2k26", paidMinor: 1_000, recipientId: momId });
+    const s = (await snapshot()) as unknown as Record<string, unknown>;
+    expect(Object.keys(s)).toEqual(
+      expect.arrayContaining(["fetchedAt", "totals", "funds", "holders", "recipients", "settlements", "purchases"]),
+    );
+    const snap = s as unknown as Snapshot & { funds: Record<string, unknown>[]; settlements: Record<string, unknown>[] };
+    expect(Object.keys(snap.totals).sort()).toEqual(
+      ["collectedMinor", "givenToChurchMinor", "settledMinor", "withRecipientsMinor", "withYouMinor"],
+    );
+    for (const key of ["slug", "name", "collectedMinor", "purchasesMinor", "settledMinor", "withYouMinor", "overSettledMinor", "lastSettledAt"]) {
+      expect(snap.funds[0]).toHaveProperty(key);
+    }
+    for (const key of ["recipientId", "name", "receivedMinor", "handedOverMinor", "holdingMinor", "openCount", "byFund"]) {
+      expect(snap.holders[0]).toHaveProperty(key);
+    }
+    for (const key of ["id", "fundSlug", "fundName", "paidMinor", "settledAt", "recipientId", "recipientName", "handedOverAt", "settledByName", "note"]) {
+      expect(snap.settlements[0]).toHaveProperty(key);
+    }
+    // All money is integer paise — never floats.
+    for (const f of snap.funds) for (const k of ["collectedMinor", "withYouMinor", "settledMinor"]) {
+      expect(Number.isInteger(f[k])).toBe(true);
+    }
+  });
+
+  it("history is newest first, by exact time", async () => {
+    await settle({ fundSlug: "christmas-2k26", paidMinor: 1_000, recipientId: momId, settledAt: 1_793_000_000 });
+    await settle({ fundSlug: "christmas-2k26", paidMinor: 2_000, recipientId: momId, settledAt: 1_793_000_500 });
+    await settle({ fundSlug: "christmas-2k26", paidMinor: 3_000, recipientId: momId, settledAt: 1_792_999_000 });
+    const times = (await snapshot()).settlements.map((x) => x.settledAt);
+    expect(times).toEqual([1_793_000_500, 1_793_000_000, 1_792_999_000]);
+  });
+
+  it("migration 0020 columns exist and are nullable", () => {
+    const cols = t.sqlite.prepare("PRAGMA table_info(church_settlements)").all() as {
+      name: string;
+      notnull: number;
+    }[];
+    const byName = new Map(cols.map((c) => [c.name, c]));
+    expect(byName.get("recipient_id")?.notnull).toBe(0);
+    expect(byName.get("handed_over_at")?.notnull).toBe(0);
+  });
+});
+
+describe("guard: failure modes never record money", () => {
+  it("contributions site down → settle 502 and nothing is written", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
+    const res = await settle({ fundSlug: "christmas-2k26", paidMinor: 1_000, recipientId: momId });
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    const n = t.sqlite.prepare("SELECT count(*) AS n FROM church_settlements").get() as { n: number };
+    expect(n.n).toBe(0);
+  });
+
+  it("unknown fund → 404 and nothing is written", async () => {
+    const res = await settle({ fundSlug: "nope", paidMinor: 1_000, recipientId: momId });
+    expect(res.status).toBe(404);
+    const n = t.sqlite.prepare("SELECT count(*) AS n FROM church_settlements").get() as { n: number };
+    expect(n.n).toBe(0);
+  });
+
+  it("not configured → 503", async () => {
+    t.env.CONTRIBUTIONS_API_URL = undefined;
+    t.env.CONTRIBUTIONS_API_TOKEN = undefined;
+    const res = await settle({ fundSlug: "christmas-2k26", paidMinor: 1_000, recipientId: momId });
+    expect(res.status).toBe(503);
+  });
+
+  it.each([
+    ["POST", "/api/church/settle"],
+    ["POST", "/api/church/handover"],
+    ["PATCH", "/api/church/settlements/x"],
+    ["DELETE", "/api/church/settlements/x"],
+  ])("CSRF: %s %s from a foreign Origin is rejected", async (method, path) => {
+    const res = await app.request(
+      path,
+      {
+        method,
+        headers: { Cookie: owner.cookie, "Content-Type": "application/json", Origin: "https://evil.example" },
+        body: method === "DELETE" ? undefined : JSON.stringify({ familyId }),
+      },
+      t.env,
+    );
+    expect(res.status).toBe(403);
+    expect((await json(res)).error).toBe("csrf_rejected");
+  });
+
+  it.each([
+    ["POST", "/api/church/settle"],
+    ["POST", "/api/church/handover"],
+    ["PATCH", "/api/church/settlements/x"],
+  ])("requires a session: %s %s", async (method, path) => {
+    const res = await req(method, path, "", { familyId });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("guard: restricted funds stay hidden everywhere", () => {
+  it("a fund restricted only by its NAME is hidden from members", async () => {
+    upstreamFunds.push({ slug: "pot-42", name: "Tech Upgrade", totalCollected: 900, spentOnProducts: 0 });
+    const s = await snapshot(member.cookie);
+    expect(s.funds.map((f) => f.slug)).not.toContain("pot-42");
+    expect(s.totals.collectedMinor).toBe(250_000);
+  });
+
+  it("a member cannot edit or delete a restricted-fund settlement", async () => {
+    const res = await settle({ fundSlug: "tech-contributions", paidMinor: 1_000, recipientId: momId });
+    const id = (await json<{ settlement: { id: string } }>(res)).settlement.id;
+    expect((await req("PATCH", `/api/church/settlements/${id}`, member.cookie, { paidMinor: 1 })).status).toBe(404);
+    expect((await req("DELETE", `/api/church/settlements/${id}`, member.cookie)).status).toBe(404);
+  });
+});
+
+describe("guard: audit trail", () => {
+  it("settle, edit, handover and delete each leave an audit entry", async () => {
+    const res = await settle({ fundSlug: "christmas-2k26", paidMinor: 1_000, recipientId: momId });
+    const id = (await json<{ settlement: { id: string } }>(res)).settlement.id;
+    await req("PATCH", `/api/church/settlements/${id}`, owner.cookie, { note: "x" });
+    await req("POST", "/api/church/handover", owner.cookie, { familyId, recipientId: momId });
+    await req("DELETE", `/api/church/settlements/${id}`, owner.cookie);
+    const actions = (
+      t.sqlite.prepare("SELECT action FROM audit_log WHERE action LIKE 'church.%' ORDER BY rowid").all() as {
+        action: string;
+      }[]
+    ).map((r) => r.action);
+    expect(actions).toEqual([
+      "church.settled",
+      "church.settlement_updated",
+      "church.handed_over",
+      "church.settlement_deleted",
+    ]);
+  });
+
+  it("a legacy row cannot be marked handed over until it has a recipient", async () => {
+    t.sqlite
+      .prepare(
+        `INSERT INTO church_settlements (id, family_id, fund_slug, period_key, collected_minor, spent_minor,
+          due_minor, paid_minor, remaining_minor, settled_at, settled_by_user_id)
+         VALUES ('legacy', ?, 'christmas-2k26', '2026-10', 1, 0, 1, 1, 0, 1790000000, ?)`,
+      )
+      .run(familyId, owner.userId);
+    const res = await req("PATCH", "/api/church/settlements/legacy", owner.cookie, { handedOver: true });
+    expect(res.status).toBe(400);
+    expect((await json(res)).error).toBe("recipient_required");
+  });
+});
