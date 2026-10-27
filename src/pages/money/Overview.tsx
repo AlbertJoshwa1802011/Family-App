@@ -60,7 +60,7 @@ function Figure({
       </div>
       <p
         className={cn(
-          "mt-1 text-xl font-bold tabular-nums",
+          "mt-1 font-display text-xl font-bold tabular-nums",
           tone === "positive" && "text-success",
           tone === "negative" && "text-danger",
           tone === "muted" && "text-fg-muted",
@@ -314,7 +314,7 @@ function PrimaryCtas({
         <button
           type="button"
           onClick={() => navigate("/money/expenses/new")}
-          className="liquid-bubble flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]"
+          className="lq lq-press flex min-h-[72px] flex-col items-start justify-center gap-1 rounded-bubble px-4 py-4 text-left"
         >
           <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
             <Plus className="size-5" aria-hidden="true" />
@@ -327,7 +327,7 @@ function PrimaryCtas({
           onClick={() =>
             window.dispatchEvent(new CustomEvent("family-vault:open-assistant"))
           }
-          className="liquid-bubble flex min-h-[72px] flex-col items-start justify-center gap-1 px-4 py-4 text-left transition-transform active:scale-[0.98]"
+          className="lq lq-press flex min-h-[72px] flex-col items-start justify-center gap-1 rounded-bubble px-4 py-4 text-left"
         >
           <span className="flex size-10 items-center justify-center rounded-2xl bg-vault-500/20 text-vault-300">
             <Sparkles className="size-5" aria-hidden="true" />
@@ -340,7 +340,7 @@ function PrimaryCtas({
       {thisWeekMinor !== null && (
         <Link
           to="/money/expenses"
-          className="liquid-bubble flex min-h-11 items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/10"
+          className="lq lq-press flex min-h-11 items-center justify-between gap-3 rounded-bubble px-4 py-3"
         >
           <span className="text-sm text-fg-muted">This week</span>
           <span className="text-sm font-semibold tabular-nums text-fg">
@@ -453,7 +453,7 @@ export function MoneyOverview() {
                     </p>
                     <p
                       className={cn(
-                        "mt-1 text-3xl font-bold tabular-nums lg:text-4xl",
+                        "mt-1 font-display text-3xl font-bold tabular-nums lg:text-4xl",
                         plan.remainingMinor < 0 ? "text-danger" : "text-fg",
                       )}
                     >
@@ -468,7 +468,7 @@ export function MoneyOverview() {
                 </div>
 
                 {plan.dailyAllowanceMinor !== null && plan.daysLeft > 0 && (
-                  <div className="liquid-field mt-4 rounded-2xl px-3 py-2.5">
+                  <div className="lq lq-field mt-4 rounded-2xl px-3 py-2.5">
                     <p className="text-xs text-fg-muted">
                       You can spend{" "}
                       <span className="font-semibold text-vault-300">

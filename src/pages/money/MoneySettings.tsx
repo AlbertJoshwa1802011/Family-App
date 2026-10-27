@@ -233,10 +233,10 @@ function CurrencySection({
             }}
             aria-pressed={value === c}
             className={cn(
-              "min-h-11 min-w-[4.5rem] rounded-xl border px-3 py-2 text-sm font-semibold transition-colors",
+              "lq lq-flat lq-press min-h-11 min-w-[4.5rem] rounded-xl px-3 py-2 text-sm font-semibold",
               value === c
-                ? "border-vault-500/50 bg-vault-500/15 text-vault-300"
-                : "border-white/10 text-fg-muted hover:bg-white/5",
+                ? "lq-primary text-white"
+                : "text-fg-muted hover:text-fg",
             )}
           >
             {c}
@@ -465,10 +465,10 @@ function PlanSection({
             onClick={() => { setKind(opt.value); setSaved(false); }}
             aria-pressed={kind === opt.value}
             className={cn(
-              "rounded-xl border px-2 py-2 text-xs font-medium transition-colors",
+              "lq lq-flat lq-press rounded-xl px-2 py-2 text-xs font-medium",
               kind === opt.value
-                ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                : "border-white/10 text-fg-muted hover:bg-white/5",
+                ? "lq-primary text-white"
+                : "text-fg-muted hover:text-fg",
             )}
           >
             {opt.label}

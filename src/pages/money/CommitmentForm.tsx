@@ -172,10 +172,10 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                   onClick={() => setKind(k.value)}
                   aria-pressed={kind === k.value}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    "lq lq-flat lq-press rounded-full px-3 py-1.5 text-xs font-medium",
                     kind === k.value
-                      ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                      : "border-white/10 text-fg-muted hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg",
                   )}
                 >
                   {k.label}
@@ -210,10 +210,10 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                   onClick={() => setAmountKind("fixed")}
                   aria-pressed={amountKind === "fixed"}
                   className={cn(
-                    "rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
+                    "lq lq-flat lq-press rounded-xl px-3 py-2 text-xs font-medium",
                     amountKind === "fixed"
-                      ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-white/10 text-fg-muted hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg",
                   )}
                 >
                   Fixed amount
@@ -223,10 +223,10 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                   onClick={() => setAmountKind("percent_of_income")}
                   aria-pressed={amountKind === "percent_of_income"}
                   className={cn(
-                    "rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
+                    "lq lq-flat lq-press rounded-xl px-3 py-2 text-xs font-medium",
                     amountKind === "percent_of_income"
-                      ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-white/10 text-fg-muted hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg",
                   )}
                 >
                   % of income
@@ -370,10 +370,10 @@ function Fields({ id, existing }: { id?: string; existing: Commitment | null }) 
                   onClick={() => setVisibility(key)}
                   aria-pressed={visibility === key}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-xl border p-3 transition-colors",
+                    "lq lq-flat lq-press flex items-center gap-1.5 rounded-xl p-3",
                     visibility === key
-                      ? "border-vault-500/40 bg-vault-500/10 text-vault-300"
-                      : "border-white/10 text-fg hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "text-fg",
                   )}
                 >
                   <Icon className="size-4" aria-hidden="true" />

@@ -240,7 +240,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClear}
-      className="liquid-pill-track inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs text-fg"
+      className="lq lq-flat lq-press inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs text-fg"
     >
       {label}
       <X className="size-3" aria-hidden="true" />
@@ -502,7 +502,7 @@ export function Expenses() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search merchant or note…"
-            className="lq-field liquid-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
+            className="lq lq-field w-full rounded-2xl py-2.5 pl-10 pr-4 text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
             aria-label="Search expenses"
           />
         </div>

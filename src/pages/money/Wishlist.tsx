@@ -133,7 +133,7 @@ export function Wishlist() {
             <p className="text-[11px] font-medium text-fg-subtle">
               Saving toward
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-fg">
+            <p className="mt-1 font-display text-2xl font-bold tabular-nums text-fg">
               {formatMoney(listQ.data?.totalWantedMinor ?? 0, currency)}
             </p>
             <p className="mt-0.5 text-xs text-fg-subtle">
@@ -301,10 +301,10 @@ export function Wishlist() {
                   onClick={() => setPriority(p)}
                   aria-pressed={priority === p}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    "lq lq-flat lq-press rounded-full px-3 py-1.5 text-xs font-medium",
                     priority === p
-                      ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                      : "border-white/10 text-fg-muted hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg",
                   )}
                 >
                   {PRIORITY_LABEL[p]}

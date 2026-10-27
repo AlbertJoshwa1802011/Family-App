@@ -32,14 +32,9 @@ function SelectChip({
       aria-pressed={selected}
       onClick={onClick}
       className={cn(
-        "liquid-pill-track inline-flex min-h-8 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap",
-        selected ? "text-white" : "text-fg-muted",
+        "lq lq-flat lq-press inline-flex min-h-8 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap",
+        selected ? "text-white [--lq-bg:#059669e6]" : "text-fg-muted hover:text-fg",
       )}
-      style={
-        selected
-          ? { background: "color-mix(in oklab, var(--color-success, #34d399) 75%, transparent)" }
-          : undefined
-      }
     >
       {children}
     </button>
@@ -245,7 +240,7 @@ export function HandSettlementsPanel({ familyId }: { familyId: string }) {
                   In hand
                 </div>
                 <div
-                  className={`mt-1 text-3xl font-bold tabular-nums ${
+                  className={`mt-1 font-display text-3xl font-bold tabular-nums ${
                     (summaryQ.data?.inHandCents ?? 0) < 0
                       ? "text-danger"
                       : "text-fg"

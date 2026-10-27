@@ -142,7 +142,7 @@ export function ExpenseDetail() {
       <AppBar title="Expense" back />
       <Page className="space-y-4 pb-24 md:pb-10">
         <Card className="p-5">
-          <p className="text-3xl font-bold tabular-nums text-fg">
+          <p className="font-display text-3xl font-bold tabular-nums text-fg">
             {displayAmount(e)}
           </p>
           {e.childCount > 0 && e.amountMinor > 0 && e.amountMinor !== e.childrenTotalMinor && (
@@ -156,7 +156,7 @@ export function ExpenseDetail() {
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {e.category && (
-              <span className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-xs text-fg-muted">
+              <span className="lq lq-flat flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-fg-muted">
                 <span
                   aria-hidden="true"
                   className="size-2 rounded-full"

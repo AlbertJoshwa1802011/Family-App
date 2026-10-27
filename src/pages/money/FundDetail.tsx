@@ -254,7 +254,7 @@ export function FundDetail() {
           <p className="text-xs font-medium text-fg-subtle">
             Remaining
           </p>
-          <p className="mt-1 text-3xl font-bold tabular-nums text-fg">
+          <p className="mt-1 font-display text-3xl font-bold tabular-nums text-fg">
             {formatMoney(b.remainingMinor, fund.currency)}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">

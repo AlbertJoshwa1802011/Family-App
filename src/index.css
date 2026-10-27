@@ -365,6 +365,24 @@ body::after {
   animation: bubble-in 0.5s var(--ease-spring) both;
 }
 
+/* Sheet / modal entrances referenced by Modal and the money assistant */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Slow specular sweep across a highlighted bubble */
 @keyframes lq-sweep {
   0% {

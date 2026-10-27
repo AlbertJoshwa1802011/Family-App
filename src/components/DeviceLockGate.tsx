@@ -263,7 +263,7 @@ export function DeviceLockGate({
       <Page className="space-y-4" aria-label={`${section} lock`}>
         <Card className="space-y-4 p-5">
           <div className="flex items-center gap-3">
-            <span className="liquid-bubble liquid-raised flex size-12 items-center justify-center rounded-2xl text-vault-300 [--lq-bg:#14b8a626]">
+            <span className="lq lq-raised flex size-12 items-center justify-center rounded-2xl text-vault-300 [--lq-bg:#14b8a626]">
               <Lock className="size-6" />
             </span>
             <div>

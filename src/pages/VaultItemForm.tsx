@@ -35,6 +35,7 @@ import { useAuth } from "../context/AuthContext";
 import { useVault } from "../context/VaultContext";
 import type { VaultItemType } from "./Vault";
 import { cn } from "../lib/cn";
+import { inputCls } from "../lib/fieldCls";
 
 // ---------------------------------------------------------------------------
 // Type definitions
@@ -99,10 +100,10 @@ function TypeSelector({
             type="button"
             onClick={() => onChange(v)}
             className={cn(
-              "flex flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-center transition-all",
+              "lq lq-flat lq-press flex flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-center",
               value === v
-                ? "bg-vault-600 text-white"
-                : "bg-white/5 text-fg-muted hover:bg-white/10 hover:text-fg",
+                ? "lq-primary text-white"
+                : "text-fg-muted hover:text-fg",
             )}
           >
             <Icon className="size-5" />
@@ -144,7 +145,7 @@ function SecretField({
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             rows={4}
-            className="lq-field w-full resize-none rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-danger/40 focus:border-danger focus:outline-none font-mono"
+            className={cn(inputCls, "resize-none font-mono")}
           />
         ) : (
           <input
@@ -153,7 +154,7 @@ function SecretField({
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             autoComplete="new-password"
-            className="w-full rounded-xl bg-ink-950 px-3.5 py-3 pr-10 text-sm text-fg placeholder:text-fg-subtle border border-danger/40 focus:border-danger focus:outline-none font-mono"
+            className={cn(inputCls, "pr-10 font-mono")}
           />
         )}
         {!isTextArea && (
@@ -198,7 +199,7 @@ function MetaField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl bg-ink-950 px-3.5 py-3 text-sm text-fg placeholder:text-fg-subtle border border-white/10 focus:border-vault-400/40 focus:outline-none"
+        className={inputCls}
       />
     </div>
   );
@@ -473,10 +474,10 @@ export function VaultItemForm() {
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, visibility: v }))}
                   className={cn(
-                    "flex-1 rounded-xl px-4 py-2.5 text-sm font-medium transition-all",
+                    "lq lq-flat lq-press flex-1 rounded-xl px-4 py-2.5 text-sm font-medium",
                     form.visibility === v
-                      ? "bg-vault-600 text-white"
-                      : "bg-white/5 text-fg-muted hover:bg-white/10",
+                      ? "lq-primary text-white"
+                      : "text-fg-muted hover:text-fg",
                   )}
                 >
                   {v === "family" ? "👨‍👩‍👧 Family" : "🔒 Private"}

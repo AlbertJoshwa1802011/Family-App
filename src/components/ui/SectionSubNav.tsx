@@ -63,7 +63,7 @@ export function SectionSubNav({
   return (
     <nav aria-label={ariaLabel} className="-mx-4 mb-2 px-4">
       <div
-        className="liquid-pill-track relative mx-auto w-full rounded-full p-0.5"
+        className="lq lq-field relative mx-auto w-full rounded-full p-0.5"
         style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (

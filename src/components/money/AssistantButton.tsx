@@ -25,7 +25,7 @@ export function AssistantButton() {
       onClick={() => window.dispatchEvent(new CustomEvent("family-vault:open-assistant"))}
       aria-label="Ask the money assistant"
       className={cn(
-        "liquid-press flex size-11 shrink-0 items-center justify-center rounded-full",
+        "lq-press flex size-11 shrink-0 items-center justify-center rounded-full",
         "text-vault-300 hover:bg-vault-400/15 hover:text-vault-200",
       )}
     >

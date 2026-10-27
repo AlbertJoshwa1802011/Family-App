@@ -31,7 +31,7 @@ export function SpendCalendar({
         {WEEKDAYS.map((d, i) => (
           <div
             key={`${d}-${i}`}
-            className="text-center text-[10px] font-medium uppercase tracking-wide text-fg-subtle"
+            className="text-center text-[10px] font-medium text-fg-subtle"
           >
             {d}
           </div>

@@ -164,7 +164,7 @@ export function Commitments() {
                 <p className="text-[11px] font-medium text-fg-subtle">
                   Fixed every month
                 </p>
-                <p className="mt-1 text-2xl font-bold tabular-nums text-fg">
+                <p className="mt-1 font-display text-2xl font-bold tabular-nums text-fg">
                   {formatMoney(monthlyTotal, currency)}
                 </p>
                 <p className="mt-0.5 text-xs text-fg-subtle">

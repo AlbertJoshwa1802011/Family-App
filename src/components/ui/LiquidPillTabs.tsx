@@ -34,7 +34,7 @@ export function LiquidPillTabs<T extends string>({
       className="-mx-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div
-        className="liquid-pill-track relative w-full rounded-full p-0.5"
+        className="lq lq-field relative w-full rounded-full p-0.5"
         style={accentColor ? { borderColor: `${accentColor}66` } : undefined}
       >
         {activeIndex >= 0 && (

@@ -489,7 +489,7 @@ function StatChip({ label, value }: { label: string; value: string }) {
   return (
     <Card className="space-y-1 p-4">
       <p className="text-xs text-fg-subtle">{label}</p>
-      <p className="text-xl font-semibold tabular-nums text-fg">{value}</p>
+      <p className="font-display text-xl font-semibold tabular-nums text-fg">{value}</p>
     </Card>
   );
 }

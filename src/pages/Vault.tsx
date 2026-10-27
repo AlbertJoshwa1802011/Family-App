@@ -225,7 +225,7 @@ function VaultSetupWizard({ familyId }: { familyId: string }) {
   if (step === "intro") {
     return (
       <div className="flex flex-col items-center py-12 text-center gap-6">
-        <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
+        <div className="lq lq-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
           <Shield className="size-10 text-vault-400" />
         </div>
         <div className="space-y-2 max-w-sm">
@@ -342,7 +342,7 @@ function VaultUnlockForm({ familyId }: { familyId: string }) {
 
   return (
     <div className="flex flex-col items-center py-12 gap-6">
-      <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
+      <div className="lq lq-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#14b8a626]">
         <Lock className="size-10 text-vault-400" />
       </div>
       <div className="text-center max-w-xs">
@@ -371,7 +371,7 @@ function VaultUnlockForm({ familyId }: { familyId: string }) {
 function VaultNoAccess() {
   return (
     <div className="flex flex-col items-center py-12 text-center gap-6">
-      <div className="liquid-bubble liquid-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#f59e0b26]">
+      <div className="lq lq-raised flex size-20 items-center justify-center rounded-3xl [--lq-bg:#f59e0b26]">
         <Lock className="size-10 text-warning" />
       </div>
       <div className="space-y-2 max-w-sm">
@@ -446,7 +446,7 @@ function UnlockedVault({
   return (
     <div className="space-y-5">
       {/* Status bar */}
-      <div className="liquid-bubble flex items-center gap-2 rounded-2xl px-4 py-2.5 [--lq-bg:#14b8a61a]">
+      <div className="lq flex items-center gap-2 rounded-2xl px-4 py-2.5 [--lq-bg:#14b8a61a]">
         <ShieldCheck className="size-4 shrink-0 text-vault-400" />
         <span className="flex-1 text-sm font-medium text-vault-300">
           Vault unlocked — {items.length} credential{items.length !== 1 ? "s" : ""}

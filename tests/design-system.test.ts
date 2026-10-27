@@ -401,3 +401,41 @@ describe("typography", () => {
     expect(css).toMatch(/h1,\s*h2,\s*h3,\s*h4\s*\{\s*font-family:\s*var\(--font-display\)/);
   });
 });
+
+describe("no orphaned class names", () => {
+  /** Source with comments removed, so prose about a class name never counts as usage. */
+  const code = (f: string) =>
+    readFileSync(f, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "");
+
+  it("never uses the retired liquid-* class names (they have no CSS — elements render bare)", () => {
+    // The Money Manager restore brought back `liquid-bubble`, `liquid-field`,
+    // `liquid-pill-track`… from an old branch. None exist in src/index.css, so
+    // the Modal panel, sub-nav tracks and money cards rendered with no glass.
+    const offenders = sourceFiles().filter((f) =>
+      /(?<![\w.-])liquid-(bubble|field|glass|pill-track|press|raised)\b/.test(code(f)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("defines every keyframe an arbitrary animate-[name_…] utility references", () => {
+    const names = new Set(
+      sourceFiles().flatMap((f) =>
+        [...code(f).matchAll(/animate-\[([A-Za-z][A-Za-z0-9-]*)_/g)].map((m) => m[1]),
+      ),
+    );
+    for (const name of names) expect(css).toContain(`@keyframes ${name}`);
+  });
+
+  it("never applies .lq-field without the .lq base (the modifier alone paints nothing)", () => {
+    const offenders: string[] = [];
+    for (const f of sourceFiles()) {
+      for (const m of code(f).matchAll(/"([^"\n]*\blq-field\b[^"\n]*)"/g)) {
+        if (!/(?<![\w-])lq(?![\w-])/.test(m[1])) offenders.push(`${f}: ${m[1].slice(0, 60)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

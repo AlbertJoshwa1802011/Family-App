@@ -312,7 +312,7 @@ function HolderCard({ holder, onHandover }: { holder: Holder; onHandover: () => 
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-xs text-fg-subtle">{holder.name} is holding</p>
-          <p className="text-2xl font-semibold tabular-nums text-sky-300">{inr(holder.holdingMinor)}</p>
+          <p className="font-display text-2xl font-semibold tabular-nums text-sky-300">{inr(holder.holdingMinor)}</p>
         </div>
         <div className="shrink-0 text-right text-[11px] text-fg-subtle">
           <p>Received {inr(holder.receivedMinor)}</p>
@@ -354,7 +354,7 @@ function FundCard({ fund }: { fund: ChurchFund }) {
         <span className="text-xs text-fg-muted">With you now</span>
         <span
           className={cn(
-            "text-xl font-semibold tabular-nums",
+            "font-display text-xl font-semibold tabular-nums",
             fund.withYouMinor > 0 ? "text-amber-200" : "text-emerald-300",
           )}
         >

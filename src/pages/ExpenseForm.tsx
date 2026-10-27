@@ -405,7 +405,7 @@ function ExpenseFormFields({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="mt-1 w-full bg-transparent text-3xl font-bold tabular-nums text-fg placeholder:text-fg-subtle focus:outline-none"
+              className="mt-1 w-full bg-transparent font-display text-3xl font-bold tabular-nums text-fg placeholder:text-fg-subtle focus:outline-none"
             />
             <p className="mt-1 text-xs text-fg-subtle">
               {currency}
@@ -451,10 +451,10 @@ function ExpenseFormFields({
                     type="button"
                     onClick={() => setCategoryId(null)}
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                      "lq lq-flat lq-press rounded-full px-3 py-1.5 text-xs font-medium",
                       categoryId === null
-                        ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                        : "border-white/10 text-fg-muted hover:bg-white/5",
+                        ? "lq-primary text-white"
+                        : "text-fg-muted hover:text-fg",
                     )}
                   >
                     None
@@ -465,19 +465,18 @@ function ExpenseFormFields({
                       type="button"
                       onClick={() => setCategoryId(cat.id)}
                       className={cn(
-                        "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                        "lq lq-flat lq-press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium",
                         isRootSelected(cat.id)
                           ? "text-white"
-                          : "border-white/10 text-fg-muted hover:bg-white/5",
+                          : cn("text-fg-muted hover:text-fg", cat.color && "lq-tint"),
                       )}
+                      // The category's own colour drives the glass: solid
+                      // liquid when picked, a faint tint at rest.
                       style={
                         isRootSelected(cat.id)
-                          ? {
-                              backgroundColor: cat.color ?? "#6366f1",
-                              borderColor: cat.color ?? "#6366f1",
-                            }
+                          ? ({ "--lq-bg": cat.color ?? "#6366f1" } as React.CSSProperties)
                           : cat.color
-                            ? { borderColor: `${cat.color}66` }
+                            ? ({ "--lq-tint": cat.color } as React.CSSProperties)
                             : undefined
                       }
                     >
@@ -498,10 +497,10 @@ function ExpenseFormFields({
                           type="button"
                           onClick={() => setCategoryId(cat.id)}
                           className={cn(
-                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            "lq lq-flat lq-press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium",
                             categoryId === cat.id
-                              ? "border-vault-500/40 bg-vault-500/15 text-vault-300"
-                              : "border-white/10 text-fg-muted hover:bg-white/5",
+                              ? "lq-primary text-white"
+                              : "text-fg-muted hover:text-fg",
                           )}
                         >
                           <span aria-hidden="true" className="text-sm leading-none">
@@ -545,10 +544,8 @@ function ExpenseFormFields({
                             aria-pressed={newCategoryEmoji === em}
                             onClick={() => setNewCategoryEmoji(em)}
                             className={cn(
-                              "flex size-9 items-center justify-center rounded-lg border text-base",
-                              newCategoryEmoji === em
-                                ? "border-vault-500/40 bg-vault-500/15"
-                                : "border-white/10 hover:bg-white/5",
+                              "lq lq-flat lq-press flex size-9 items-center justify-center rounded-xl text-base",
+                              newCategoryEmoji === em && "lq-primary",
                             )}
                           >
                             {em}
@@ -745,10 +742,10 @@ function ExpenseFormFields({
                   onClick={() => setVisibility(key)}
                   aria-pressed={visibility === key}
                   className={cn(
-                    "rounded-xl border p-3 text-left transition-colors",
+                    "lq lq-flat lq-press rounded-xl p-3 text-left",
                     visibility === key
-                      ? "border-vault-500/40 bg-vault-500/10"
-                      : "border-white/10 hover:bg-white/5",
+                      ? "lq-primary text-white"
+                      : "hover:text-fg",
                   )}
                 >
                   <span className="flex items-center gap-1.5">
