@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { AssistantSheet } from "./AssistantSheet";
+import { NotificationToast } from "./NotificationToast";
 import { useOptionalAuth } from "../context/AuthContext";
 import { hasModuleAccess } from "../lib/modules";
 
@@ -19,6 +20,7 @@ export function Layout() {
         <Outlet />
       </main>
       <BottomNav />
+      <NotificationToast />
       {showAssistant && <AssistantSheet />}
     </>
   );
