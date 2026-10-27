@@ -203,7 +203,7 @@ export function Notifications() {
         ) : (
           groups.map(({ group, items }) => (
             <section key={group} aria-label={group} className="bubble-in space-y-2">
-              <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-subtle uppercase">
+              <h2 className="px-1 text-[13px] font-semibold text-fg-muted">
                 {group}
               </h2>
               <Card className="divide-y divide-white/8 overflow-hidden">

@@ -438,4 +438,11 @@ describe("no orphaned class names", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it("keeps section headings in sentence case (no tracked-out all-caps labels)", () => {
+    const offenders = sourceFiles().filter((f) =>
+      /<h[1-6]\b[^>]*className="[^"]*\buppercase\b/.test(code(f)),
+    );
+    expect(offenders).toEqual([]);
+  });
 });
