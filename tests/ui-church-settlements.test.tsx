@@ -49,14 +49,14 @@ function snapshot() {
   };
 }
 
-function stubApi() {
+function stubApi(snap: ReturnType<typeof snapshot> = snapshot()) {
   const calls: { url: string; init?: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, init });
       if (url.includes("/church/snapshot")) {
-        return new Response(JSON.stringify(snapshot()), { status: 200, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify(snap), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return new Response(JSON.stringify({ settlement: {} }), { status: 201, headers: { "Content-Type": "application/json" } });
     }),
@@ -104,5 +104,58 @@ describe("ChurchSettlementsPanel", () => {
     const body = JSON.parse(String(calls.find((c) => c.url.includes("/church/settle"))!.init!.body));
     expect(body).toMatchObject({ familyId: "fam", fundSlug: "tech-contributions", paidMinor: 100_000, recipientId: "mom" });
     expect(body.dueMinor).toBeUndefined();
+  });
+
+  it("prompts to assign legacy entries that have no recipient", async () => {
+    const snap = snapshot();
+    snap.holders.push({
+      recipientId: null as unknown as string,
+      name: "Recipient not set",
+      receivedMinor: 100_000,
+      handedOverMinor: 0,
+      holdingMinor: 100_000,
+      openCount: 1,
+      lastSettledAt: SETTLED_AT,
+      byFund: [],
+    });
+    snap.settlements.push({ ...snap.settlements[0], id: "old", recipientId: null as unknown as string, recipientName: null as unknown as string });
+    stubApi(snap);
+    renderUi(<ChurchSettlementsPanel familyId="fam" isPlatformAdmin={false} />, { withProviders: true });
+    expect(await screen.findByText(`${fmt(100_000)} settled without a name`)).toBeTruthy();
+    expect(screen.getByText(/who\? \(tap to set\)/)).toBeTruthy();
+  });
+
+  it("warns when the website shows less collected than you settled", async () => {
+    const snap = snapshot();
+    snap.funds[0] = { ...snap.funds[0], withYouMinor: 0, overSettledMinor: 20_000 };
+    stubApi(snap);
+    renderUi(<ChurchSettlementsPanel familyId="fam" isPlatformAdmin={false} />, { withProviders: true });
+    expect(await screen.findByText(new RegExp(`settled ${fmt(20_000).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} more`))).toBeTruthy();
+  });
+
+  it("“Mom gave it to church” posts a handover for Mom", async () => {
+    const calls = stubApi();
+    renderUi(<ChurchSettlementsPanel familyId="fam" isPlatformAdmin={false} />, { withProviders: true });
+    fireEvent.click(await screen.findByRole("button", { name: /Mom gave it to church/ }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`Confirm .* given to church`) }));
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/church/handover"))).toBe(true));
+    const body = JSON.parse(String(calls.find((c) => c.url.includes("/church/handover"))!.init!.body));
+    expect(body).toMatchObject({ familyId: "fam", recipientId: "mom" });
+  });
+
+  it("refreshes live totals on a timer (website payments can land any time)", async () => {
+    const calls = stubApi();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderUi(<ChurchSettlementsPanel familyId="fam" isPlatformAdmin={false} />, { withProviders: true });
+      await screen.findByText("Mom is holding");
+      const before = calls.filter((c) => c.url.includes("/church/snapshot")).length;
+      await vi.advanceTimersByTimeAsync(61_000);
+      await waitFor(() =>
+        expect(calls.filter((c) => c.url.includes("/church/snapshot")).length).toBeGreaterThan(before),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
