@@ -6,6 +6,12 @@ import type { HonoEnv } from "../types";
 import { getDb, schema } from "../db/client";
 import { requireSession } from "../middleware/requireSession";
 import { DEFAULT_WINDOWS, parseWindows } from "../lib/reminders";
+import {
+  canSendEmail,
+  reminderEmailHtml,
+  sendEmailDetailed,
+} from "../lib/email";
+
 
 export const notificationRoutes = new Hono<HonoEnv>();
 
@@ -69,6 +75,76 @@ notificationRoutes.post("/read-all", requireSession, async (c) => {
 });
 
 // POST /notifications/:id/read — mark a single notification read.
+
+// POST /notifications/test-email — send a short test reminder to the signed-in user.
+// Registered before /:id/read so "test-email" is not captured as an id.
+notificationRoutes.post("/test-email", requireSession, async (c) => {
+  const userId = c.get("userId")!;
+  const db = getDb(c.env);
+
+  if (!(await canSendEmail(c.env, userId))) {
+    return c.json(
+      {
+        error: "email_not_configured",
+        message:
+          "Connect Gmail in Settings (gmail.send) or set RESEND_API_KEY.",
+      },
+      503,
+    );
+  }
+
+  const user = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+  if (!user?.email) return c.json({ error: "not_found" }, 404);
+
+  // Optional override: only self or the family admin test inbox.
+  let to = user.email.trim().toLowerCase();
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const requested =
+      typeof body?.to === "string" ? body.to.trim().toLowerCase() : "";
+    const allowed = new Set([to, "albertjoshrock101@gmail.com"]);
+    if (requested && allowed.has(requested)) to = requested;
+  } catch {
+    // no body — use login email
+  }
+
+  const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+  const result = await sendEmailDetailed(
+    c.env,
+    {
+      to,
+      subject: "Family Vault test email",
+      html: reminderEmailHtml({
+        heading: "Family Vault test email",
+        body: "This is a test. If you received it, email delivery from your account is working.",
+        ctaLabel: "Open Family Vault",
+        ctaUrl: appUrl,
+      }),
+      text: "Family Vault test email — delivery is working.",
+    },
+    { fromUserId: userId },
+  );
+
+  if (!result.ok) {
+    const error = result.error ?? "email_send_failed";
+    const message =
+      error === "gmail_api_disabled"
+        ? "Enable Gmail API on the Google Cloud project, then Connect Gmail in Settings again. Or set RESEND_API_KEY with a verified domain."
+        : error === "resend_testing_recipients"
+          ? "Resend is in testing mode and can only email the Resend account owner. Connect Gmail in Settings so mail sends from your Google account."
+          : error === "gmail_auth_failed"
+            ? "Gmail rejected the send. Tap Connect Gmail in Settings and approve gmail.send."
+            : "Could not send via Gmail or Resend. Connect Gmail in Settings or set RESEND_API_KEY.";
+    return c.json({ error, message }, error === "email_not_configured" ? 503 : 502);
+  }
+
+  return c.json({ ok: true, to, via: result.via, from: result.from });
+});
+
 notificationRoutes.post("/:id/read", requireSession, async (c) => {
   const userId = c.get("userId")!;
   const { id } = c.req.param();

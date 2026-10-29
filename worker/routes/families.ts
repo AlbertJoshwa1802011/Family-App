@@ -545,15 +545,19 @@ familyRoutes.post(
     ]);
     const appUrl = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
     const inviteUrl = `${appUrl}/invite/${token}`;
-    const emailSent = await sendEmail(c.env, {
-      to: email,
-      subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
-      html: inviteEmail({
-        inviterName: inviter?.name ?? null,
-        familyName: family?.name ?? "your family",
-        inviteUrl,
-      }),
-    });
+    const emailSent = await sendEmail(
+      c.env,
+      {
+        to: email,
+        subject: `You're invited to ${family?.name ?? "a family"} on Family Vault`,
+        html: inviteEmail({
+          inviterName: inviter?.name ?? null,
+          familyName: family?.name ?? "your family",
+          inviteUrl,
+        }),
+      },
+      { fromUserId: userId },
+    );
 
     return c.json(
       {
