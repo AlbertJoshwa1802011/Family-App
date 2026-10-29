@@ -109,7 +109,7 @@ async function applyReview(
         name: row.name,
         loginUrl: `${env.APP_URL}/login`,
       }),
-    });
+    }, { fromUserId: opts.reviewerUserId ?? undefined });
 
     return { ok: true, status: "approved", email: row.email, name: row.name };
   }
@@ -127,7 +127,7 @@ async function applyReview(
     to: row.email,
     subject: "Update on your Family Vault demo request",
     html: accessRejectedEmail({ name: row.name }),
-  });
+  }, { fromUserId: opts.reviewerUserId ?? undefined });
 
   return { ok: true, status: "rejected", email: row.email, name: row.name };
 }
@@ -371,7 +371,7 @@ accessRoutes.post("/admin/grants", requireSession, zv(grantSchema), async (c) =>
       name: null,
       loginUrl: `${c.env.APP_URL}/login`,
     }),
-  });
+  }, { fromUserId: c.get("userId") });
 
   return c.json({ ok: true, grant: { id, email, status: "approved" } }, 201);
 });

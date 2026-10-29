@@ -19,6 +19,8 @@ export interface Env {
   GOOGLE_OWNER_REFRESH_TOKEN?: string;
   /** Resend API key for transactional email. */
   RESEND_API_KEY?: string;
+  /** Optional verified Resend from-address. Defaults to reminders@familyvault.app. */
+  EMAIL_FROM?: string;
   /** Claude API key for AI document categorization + assistant fallback (optional). */
   ANTHROPIC_API_KEY?: string;
   /** Gemini API key for the in-app family assistant (preferred when set). */

@@ -396,7 +396,7 @@ function InviteCard({
         <p className="text-xs text-fg-muted">
           {emailSent
             ? "They can join from the email link (same Google account). You can also share the link below."
-            : "Email couldn’t be sent from this server — share this link. It only works for that Google account and expires in 7 days."}
+            : "Email couldn’t be sent — share this link instead. After you sign out and sign back in (allow Gmail send), new invites will go from your Gmail. The link only works for that Google account and expires in 7 days."}
         </p>
         <div className="flex items-center gap-2">
           <code className="lq lq-field min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-xs text-fg-muted">

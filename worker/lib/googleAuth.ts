@@ -1,14 +1,58 @@
 /**
- * Shared Google OAuth token refresh for Drive + Calendar.
+ * Shared Google OAuth token refresh for Drive + Calendar + Gmail send.
  *
  * Refresh tokens live in KV at `user:refresh_token:{userId}` (written on login).
  * Access tokens are cached at `user:access_token:{userId}` with a 5-minute
- * early-expiry buffer.
+ * early-expiry buffer. Granted scopes are stored at `user:google_scopes:{userId}`.
  */
 
 import type { Env } from "../types";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
+export function scopesKey(userId: string): string {
+  return `user:google_scopes:${userId}`;
+}
+
+export async function storeGrantedScopes(
+  env: Env,
+  userId: string,
+  scopeString: string | undefined,
+): Promise<void> {
+  if (!scopeString) return;
+  const scopes = scopeString.split(/\s+/).filter(Boolean);
+  if (scopes.length === 0) return;
+  const existingRaw = await env.KV.get(scopesKey(userId));
+  let existing: string[] = [];
+  if (existingRaw) {
+    try {
+      existing = JSON.parse(existingRaw) as string[];
+    } catch {
+      existing = existingRaw.split(/\s+/).filter(Boolean);
+    }
+  }
+  await env.KV.put(scopesKey(userId), JSON.stringify([...new Set([...existing, ...scopes])]));
+}
+
+export async function userHasScope(
+  env: Env,
+  userId: string,
+  scope: string,
+): Promise<boolean> {
+  const raw = await env.KV.get(scopesKey(userId));
+  if (!raw) return false;
+  try {
+    const scopes = JSON.parse(raw) as string[];
+    return (
+      scopes.includes(scope) ||
+      scopes.includes(scope.replace("https://www.googleapis.com/auth/", ""))
+    );
+  } catch {
+    return raw.includes(scope) || raw.includes("gmail.send");
+  }
+}
 
 export class GoogleAuthError extends Error {
   constructor(
@@ -34,7 +78,7 @@ export async function clearGoogleAccessTokenCache(
 /**
  * Returns a valid Google access token for the user, refreshing if needed.
  * The token carries whatever scopes were granted at last consent (Drive +
- * Calendar after the calendar.events scope was added).
+ * Calendar + Gmail send after those scopes were added).
  */
 export async function getGoogleAccessToken(
   env: Env,
@@ -72,10 +116,13 @@ export async function getGoogleAccessToken(
     throw new GoogleAuthError(`Token refresh failed: ${body}`, 502);
   }
 
-  const { access_token, expires_in } = (await res.json()) as {
+  const { access_token, expires_in, scope } = (await res.json()) as {
     access_token: string;
     expires_in: number;
+    scope?: string;
   };
+
+  if (scope) await storeGrantedScopes(env, userId, scope);
 
   await env.KV.put(cacheKey, access_token, {
     expirationTtl: Math.max(expires_in - 300, 60),

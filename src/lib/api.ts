@@ -26,6 +26,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   invite_already_used: "This invite has already been used.",
   invite_email_mismatch:
     "This invite was sent to a different email. Sign in with the invited Google account.",
+  email_not_configured:
+    "Mail isn't connected yet. Sign out, sign back in, and allow Gmail send.",
+  email_send_failed:
+    "That email didn't send. Sign out and sign back in so Google can allow sending mail.",
+  gmail_missing_scope:
+    "Google hasn't allowed sending mail yet. Sign out, sign back in, and accept Gmail permission.",
   module_disabled:
     "That area isn't available for your account in this family.",
   access_denied:

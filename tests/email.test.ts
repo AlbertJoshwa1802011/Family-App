@@ -10,8 +10,11 @@ import {
   isEmailConfigured,
   reminderEmailHtml,
   sendEmail,
+  sendEmailDetailed,
 } from "../worker/lib/email";
 import type { Env } from "../worker/types";
+import { createTestEnv, seedUser } from "./helpers/testEnv";
+import { GMAIL_SEND_SCOPE } from "../worker/lib/googleAuth";
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -90,6 +93,65 @@ describe("sendEmail", () => {
       html: "<p>x</p>",
     });
     expect(ok).toBe(false);
+  });
+
+  it("keeps ICS attachments on the Resend payload", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ id: "e1" }), { status: 200 }));
+    const ok = await sendEmail(makeEnv({ RESEND_API_KEY: "re_test" }), {
+      to: "a@b.com",
+      subject: "Dinner",
+      html: "<p>x</p>",
+      attachments: [
+        { filename: "event.ics", content: "QUJD", contentType: "text/calendar" },
+      ],
+    });
+    expect(ok).toBe(true);
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.attachments[0].filename).toBe("event.ics");
+    expect(body.attachments[0].content).toBe("QUJD");
+  });
+});
+
+describe("sendEmail Gmail", () => {
+  it("sends via Gmail for fromUserId before Resend", async () => {
+    const t = createTestEnv({
+      GOOGLE_CLIENT_ID: "cid",
+      GOOGLE_CLIENT_SECRET: "sec",
+      RESEND_API_KEY: "re_test",
+    });
+    const user = seedUser(t.sqlite, { email: "me@example.com", name: "Me" });
+    await t.env.KV.put(`user:refresh_token:${user.id}`, "rt");
+    await t.env.KV.put(
+      `user:google_scopes:${user.id}`,
+      JSON.stringify([GMAIL_SEND_SCOPE]),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com/token")) {
+        return new Response(
+          JSON.stringify({ access_token: "tok", expires_in: 3600 }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("gmail.googleapis.com")) {
+        return new Response(JSON.stringify({ id: "m1" }), { status: 200 });
+      }
+      return new Response("resend should not run", { status: 500 });
+    });
+
+    const result = await sendEmailDetailed(
+      t.env,
+      { to: "guest@example.com", subject: "Invite", html: "<p>hi</p>" },
+      { fromUserId: user.id },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.via).toBe("gmail");
+    expect(result.from).toContain("me@example.com");
+    const urls = fetchSpy.mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.includes("gmail.googleapis.com"))).toBe(true);
+    expect(urls.some((u) => u.includes("resend.com"))).toBe(false);
   });
 });
 
